@@ -220,11 +220,11 @@ function stageDocumentNote(stage: Stage, kind: ArtifactKind): string {
   return `## Stage document\n\nYou are the stage ${stage} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_write when you create it.`;
 }
 
-/** Drafting stages whose document is one artifact the specialist writes.
- *  Stage 4's design stays the HTML reply, stage 5 writes a package per
- *  audience that its pages read from the reply, and stages 8 and 9 keep
- *  their own tools. */
-const ARTIFACT_DRAFTING_STAGES: ReadonlySet<Stage> = new Set<Stage>([1, 2, 3, 6, 7]);
+/** Stages whose output is one artifact the specialist writes, so its reply
+ *  is only conversation. Stage 5 writes a package per audience that its
+ *  pages still read from the reply, and stages 8 and 9 report through their
+ *  own tools. */
+const ARTIFACT_DRAFTING_STAGES: ReadonlySet<Stage> = new Set<Stage>([1, 2, 3, 4, 6, 7]);
 
 export function stageUsesArtifactTools(stage: Stage): boolean {
   return ARTIFACT_DRAFTING_STAGES.has(stage);
