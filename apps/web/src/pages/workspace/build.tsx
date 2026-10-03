@@ -342,9 +342,9 @@ export function BuildPanel({
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
       if (!address || !attempt.outcome) return;
-      // The target probed is the one stage 7 froze; the fields say how to start it.
+      // The target probed is the one stage 7 froze, started as the attempt's run.json declares unless the fields say otherwise; its tests run either way.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
-      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets], target: freeze?.target?.trim() || "web" });
       // Stage 7's forecast, for the supervisor's "Cost against forecast": the
       // frozen estimate's own section, or nothing, said as nothing.
       const estimate = frozenNode(detail.nodes, freeze, "cost_approval");
@@ -544,7 +544,7 @@ export function BuildPanel({
                   <div className="build-record">
                     <Input
                       aria-label="Start command"
-                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
+                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional; replaces run.json's)`}
                       value={startCommand}
                       onChange={(event) => setStartCommand(event.target.value)}
                     />
