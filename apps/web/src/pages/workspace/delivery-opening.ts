@@ -51,9 +51,10 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   if (!verification || verification.checkedBy !== "tool") {
     return ["Verification recorded with the archive: none. Nothing about this archive was checked by a tool; treat every check as not run."];
   }
+  const verified = verification.items.filter((item) => item.status === "verified").length;
   const lines = [
-    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${
-      verification.report.complete ? "every required item verified" : `required items not verified: ${verification.report.failed.join(", ")}`
+    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
+      verification.report.complete ? "no required item failed" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];
   for (const item of verification.items) {
