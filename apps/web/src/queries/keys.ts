@@ -55,6 +55,10 @@ export const keys = {
   },
   providers: ["providers"] as const,
   resolvedCatalog: ["resolvedCatalog"] as const,
+  /** A document's sha256, computed in the browser. */
+  contentDigest: {
+    of: (content: string) => ["contentDigest", content] as const,
+  },
   artifact: {
     all: ["artifact"] as const,
     of: (tenantId: string, id: string) => ["artifact", tenantId, id] as const,

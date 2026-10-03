@@ -10,7 +10,10 @@
  * to it read-only — only the current stage's draft lineage can be submitted.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { api, STAGE_DRAFT_KIND, type ArtifactNode } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
+import { digestOf } from "../../stage-approval.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { documentName, stageName } from "../../components.jsx";
 
@@ -68,18 +71,11 @@ export function useProjectArtifacts(
 ): ProjectArtifacts {
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   const draftBody = draftMessage?.body ?? null;
-  const [draftDigest, setDraftDigest] = useState<{ body: string; sha256: string } | null>(null);
-  useEffect(() => {
-    if (draftBody === null) return;
-    let cancelled = false;
-    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(draftBody)).then((buffer) => {
-      const sha256 = [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (!cancelled) setDraftDigest({ body: draftBody, sha256 });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [draftBody]);
+  const { data: draftDigest } = useQuery({
+    queryKey: keys.contentDigest.of(draftBody ?? ""),
+    queryFn: draftBody === null ? skipToken : () => digestOf(draftBody),
+    staleTime: Infinity,
+  });
   // The specialist's latest unpersisted reply stands in as the next version
   // of its stage's draft lineage — nothing writes an artifact for a stage's
   // draft before it is approved.
@@ -94,7 +90,7 @@ export function useProjectArtifacts(
     // Opening the reply's review saves it as a version just after it lands;
     // once saved, the reply is that version, not one past it. Matched on the
     // content's digest: the hub's timestamps do not all share one clock.
-    if (head?.contentSha256 && draftDigest?.body === draftMessage.body && head.contentSha256 === draftDigest.sha256) return null;
+    if (head?.contentSha256 && head.contentSha256 === draftDigest) return null;
     return {
       id: `reply:${draftMessage.id}`,
       kind: draftKind,
