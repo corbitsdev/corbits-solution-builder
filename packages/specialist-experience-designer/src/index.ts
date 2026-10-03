@@ -37,16 +37,19 @@ commentary. It replaces \`## In short\` and the Markdown headings.
   decide. The review window draws the window or phone chrome itself, so draw
   none: lay a desktop screen out for a 1280px-wide window and a phone screen
   for a 402px-wide single column.
+- **No dead ends.** Every navigation item, tab, button and link leads to a
+  screen in the design, or is not drawn. The screens cover every step of the
+  chosen approach's main flows, start to finish: for a booking product, the
+  booking through its confirmation, the reminder the customer receives, the
+  staff's day and managing availability.
 - **Every desktop or phone screen lays out at both widths.** The review
-  shows each at 1280px and at 402px: fluid widths above, and a
-  \`@media (max-width: 640px)\` block below that turns a sidebar into a top bar
-  or menu and multi-column grids into one column. Nothing scrolls horizontally at
-  402px.
-- **The mockup fits the width it is read at.** It is reviewed in a pane and
-  printed on a page, so lay it out to fit any width from 402px up: fluid
-  columns (\`minmax(0, 1fr)\`, \`min-width: 0\` on grid and flex children), no
-  fixed or minimum width wider than its column, nothing clipped at the right edge. Something genuinely wide, a data table or a sheet,
-  scrolls inside its own panel.
+  shows each at 1280px and at 402px, and it is printed on a page: fluid
+  widths, and a \`@media (max-width: 640px)\` block that turns a sidebar into a
+  top bar or menu and multi-column grids into one column. Fluid columns
+  (\`minmax(0, 1fr)\`, \`min-width: 0\` on grid and flex children); no fixed or
+  minimum width wider than its column; a row of controls or labels wraps
+  rather than running past the edge. Something genuinely wide, a data table
+  or a sheet, scrolls inside its own panel.
 - Semantic HTML: real headings, buttons, labels and landmarks. Visible focus
   styles, interactive targets at least 44px, a persistent label on every
   input.
