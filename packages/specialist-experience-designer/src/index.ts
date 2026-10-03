@@ -44,7 +44,9 @@ this should know where everything is before they notice the style.
   with plausible values, units and times, and enough rows to show a busy
   day. Never lorem ipsum, "John Doe", "Item 1" or grey placeholder boxes.
   The primary screen shows one state worth seeing (a failure, stale data, an
-  overdue item), not only the happy path.
+  overdue item), not only the happy path. Dates fall within days of today's
+  date, which the opening gives, written as the product's locale writes them
+  for a person ("Thu, Oct 8"), never a bare numeric date.
 - **Copy names the action.** "Approve invoice", "Assign driver"; never
   "Submit", "Click here" or "Learn more". An error says what went wrong and
   what to do next; an empty state says why it is empty and offers the next
@@ -56,6 +58,7 @@ this should know where everything is before they notice the style.
 
 Before you finish, check every screen against this floor:
 
+- Read at 402px, nothing is clipped at the right edge or scrolls sideways.
 - Text contrast at least 4.5:1, large text, icons and control edges at least
   3:1, including secondary and disabled text someone still has to read.
 - Depth only where it clarifies a layer such as a menu or a dialog: a small
@@ -128,16 +131,19 @@ commentary. It replaces \`## In short\` and the Markdown headings.
   decide. The review window draws the window or phone chrome itself, so draw
   none: lay a desktop screen out for a 1280px-wide window and a phone screen
   for a 402px-wide single column.
+- **No dead ends.** Every navigation item, tab, button and link leads to a
+  screen in the design, or is not drawn. The screens cover every step of the
+  chosen approach's main flows, start to finish: for a booking product, the
+  booking through its confirmation, the reminder the customer receives, the
+  staff's day and managing availability.
 - **Every desktop or phone screen lays out at both widths.** The review
-  shows each at 1280px and at 402px: fluid widths above, and a
-  \`@media (max-width: 640px)\` block below that turns a sidebar into a top bar
-  or menu and multi-column grids into one column. Nothing scrolls horizontally at
-  402px.
-- **The mockup fits the width it is read at.** It is reviewed in a pane and
-  printed on a page, so lay it out to fit any width from 402px up: fluid
-  columns (\`minmax(0, 1fr)\`, \`min-width: 0\` on grid and flex children), no
-  fixed or minimum width wider than its column, nothing clipped at the right edge. Something genuinely wide, a data table or a sheet,
-  scrolls inside its own panel.
+  shows each at 1280px and at 402px, and it is printed on a page: fluid
+  widths, and a \`@media (max-width: 640px)\` block that turns a sidebar into a
+  top bar or menu and multi-column grids into one column. Fluid columns
+  (\`minmax(0, 1fr)\`, \`min-width: 0\` on grid and flex children); no fixed or
+  minimum width wider than its column; a row of controls or labels wraps
+  rather than running past the edge. Something genuinely wide, a data table
+  or a sheet, scrolls inside its own panel.
 - Semantic HTML: real headings, buttons, labels and landmarks. Visible focus
   styles, interactive targets at least 44px, a persistent label on every
   input.

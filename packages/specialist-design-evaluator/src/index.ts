@@ -17,6 +17,7 @@ export const designEvaluator = role({
     checks: `- A screen, flow or step the chosen approach or brief needs that has no
   screen, or a screen that shows a capability the constraints rule out (data
   kept where it may not be kept, a feature not yet verified shown as working).
+- A navigation item, tab, button or link with no screen in the design behind it.
 - An empty, loading, error or disabled state missing, or drawn as a labelled
   card rather than in its screen's real frame.
 - A verification criterion that cannot be measured, or that names a
