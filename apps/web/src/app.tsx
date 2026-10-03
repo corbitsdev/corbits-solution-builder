@@ -395,7 +395,9 @@ export function AppBar({
             <span className="step-name">
               {viewedStage !== null && viewedStage !== detail.stage
                 ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
-                : stageName(detail.stage)}
+                : detail.done
+                  ? "Delivered"
+                  : stageName(detail.stage)}
             </span>
           </>
         ) : null}
