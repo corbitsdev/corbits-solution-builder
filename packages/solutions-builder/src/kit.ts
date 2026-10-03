@@ -478,7 +478,13 @@ number presented as firm is how a project loses its budget approver's trust.
 ${AGENT_ECONOMICS}
 
 Write for the audience you are addressing. A security reviewer and a department
-head do not need the same one-pager.`,
+head do not need the same one-pager.
+
+The package is read by the person it names, so it speaks to them as "you"
+throughout. Under "Decision request" state the decision or action asked of
+them, addressed to them: what you are asking them to decide or do, by when,
+and what follows from each answer. Never write about them to someone else
+("Ask Joe to support…"); the slide built from it is on Joe's screen.`,
   }),
   role({
     id: "requirements-author",
