@@ -366,7 +366,6 @@ export function SpecialistTurn({
   onOpenVersion,
   onAnswer,
   onDraft,
-  hideOptions,
 }: {
   text: string;
   note: TurnNote | null;
@@ -382,9 +381,6 @@ export function SpecialistTurn({
    *  message box should hold, so the person sees them gather and can add
    *  to them (#142). Absent, a partial set is sent as it stands. */
   onDraft?: ((draft: string) => void) | undefined;
-  /** True for a question's options when a dedicated control elsewhere asks
-   *  the same thing: the question stays, its chips do not. */
-  hideOptions?: (options: readonly string[]) => boolean;
 }) {
   // Every question the turn asks is set apart with its own options -- a
   // turn that lists two under "What I need from you" has asked two, and
@@ -431,7 +427,7 @@ export function SpecialistTurn({
         return (
           <div key={index} className="turn-ask">
             <p className="turn-question">{segment.question}</p>
-            {segment.options.length > 0 && !hideOptions?.(segment.options) ? (
+            {segment.options.length > 0 ? (
               <div className="turn-options" role="group" aria-label="Likely answers">
                 {segment.options.map((option) => (
                   <button
