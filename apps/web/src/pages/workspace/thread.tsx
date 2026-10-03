@@ -164,6 +164,7 @@ export function StageConversation({
   draftRefs = EMPTY_REFS,
   onOpenVersion,
   onAnswer,
+  empty,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -200,6 +201,8 @@ export function StageConversation({
   onOpenVersion?: ((nodeId: string) => void) | undefined;
   /** Sends a tapped answer to the latest turn's question, as typing it would. */
   onAnswer?: ((answer: string) => void) | undefined;
+  /** What the column says before the thread has a turn; by default, that the specialist is getting ready. */
+  empty?: string;
 }) {
   const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const opening = pending && lastAgentId === undefined;
@@ -244,7 +247,7 @@ export function StageConversation({
     <div className="stage-conversation">
       {uiMessages.length === 0 ? (
         <div className={CONV_SCROLL_CLASS}>
-          <p className="inline-note">No messages yet.</p>
+          <p className="inline-note">{empty ?? `The ${who.toLowerCase()} is getting ready…`}</p>
         </div>
       ) : (
         <div

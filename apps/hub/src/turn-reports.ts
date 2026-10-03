@@ -18,6 +18,7 @@ import { open, stat } from "node:fs/promises";
 /** The shape a turn report is read as; anything else is shown as unreadable. */
 type TurnReport = {
   turnIndex?: number;
+  assistantTurn?: { content?: { type?: string; text?: unknown }[] };
   durationMs?: number;
   toolCalls?: { id?: string; name?: string; arguments?: unknown }[];
   toolResults?: { callId?: string; content?: unknown; isError?: boolean }[];
@@ -61,7 +62,15 @@ function firstLine(content: unknown): string {
   return text.split("\n").find((line) => line.trim().length > 0) ?? "";
 }
 
-export type TurnTally = { turns: number; toolCalls: number };
+/** What the worker said in a turn, in its own words: the turn's text blocks. */
+function saidIn(record: unknown): string {
+  const content = (record as TurnReport).assistantTurn?.content;
+  if (!Array.isArray(content)) return "";
+  return content.map((block) => (block?.type === "text" && typeof block.text === "string" ? block.text : "")).join("");
+}
+
+/** `texts` is each turn's own text, in order, as the worker reported it. */
+export type TurnTally = { turns: number; toolCalls: number; texts: string[] };
 
 /**
  * Follows a JSON-lines log as it grows, saying each complete record as it
@@ -76,7 +85,7 @@ export function followTurnLog(
 ): { stop: () => Promise<TurnTally> } {
   let offset = 0;
   let partial = "";
-  const tally: TurnTally = { turns: 0, toolCalls: 0 };
+  const tally: TurnTally = { turns: 0, toolCalls: 0, texts: [] };
   let reading: Promise<void> = Promise.resolve();
 
   const readNew = async () => {
@@ -110,6 +119,7 @@ export function followTurnLog(
       tally.turns += 1;
       const calls = (record as TurnReport).toolCalls;
       tally.toolCalls += Array.isArray(calls) ? calls.length : 0;
+      tally.texts.push(saidIn(record));
       onTurn(describeTurn(record));
     }
   };
