@@ -42,6 +42,11 @@ function splitIdsBlock(text: string): { readonly ids: string; readonly rest: str
   return { ids: lines.slice(0, end).join("\n").trim(), rest: lines.slice(end).join("\n").trim() };
 }
 
+/** A stage's opening: the record the app sends the specialist when the stage starts, never something the person said. */
+export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject !== undefined && OPENING_SUBJECT.test(message.subject);
+}
+
 /**
  * The fold for a person-authored message the app composed, or null for a
  * message the person wrote. Only `author === "me"` is ever inspected, so
