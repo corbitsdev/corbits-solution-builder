@@ -46,7 +46,8 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { repairedStackDraft } from "./stack-repair.ts";
+import { newestSavedPlanId, repairedStackDraft } from "./stack-repair.ts";
+import { parseStackRecord } from "@solutions-builder/app/stack";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
@@ -119,6 +120,8 @@ type WorkArtifact =
   | {
       readonly state: "ready";
       readonly artifact: { readonly id: string; readonly version: number; readonly content: string; readonly updatedAt: string };
+      /** Stage 6's newest saved plan, read when the artifact has no Stack block to carry one forward (#437). */
+      readonly savedPlan: string | null;
     }
   | { readonly state: "unreadable"; readonly message: string };
 
@@ -306,6 +309,7 @@ export function StageWorkspace({
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
   const [work, setWork] = useState<WorkArtifact | null>(null);
+  const savedPlanId = useMemo(() => (stage === 6 ? newestSavedPlanId(detail.nodes) : null), [stage, detail.nodes]);
   const [workTick, setWorkTick] = useState(0);
   useEffect(() => {
     if (!usesArtifact || !awaitingReply) return;
@@ -318,18 +322,28 @@ export function StageWorkspace({
       return;
     }
     let cancelled = false;
-    api.stageWorkArtifact(tenantId, workKind).then(
-      (artifact) => {
-        if (!cancelled) setWork(artifact ? { state: "ready", artifact } : { state: "none" });
-      },
-      (cause: unknown) => {
+    const load = async () => {
+      try {
+        const artifact = await api.stageWorkArtifact(tenantId, workKind);
+        if (!artifact) {
+          if (!cancelled) setWork({ state: "none" });
+          return;
+        }
+        // Read once the reply has landed, not on every poll while it is pending.
+        const savedPlan =
+          savedPlanId && !awaitingReply && !parseStackRecord(artifact.content)
+            ? (await api.artifactContent(tenantId, savedPlanId)).content
+            : null;
+        if (!cancelled) setWork({ state: "ready", artifact, savedPlan });
+      } catch (cause) {
         if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
-      },
-    );
+      }
+    };
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [usesArtifact, workKind, tenantId, foldedMessages, workTick]);
+  }, [usesArtifact, workKind, tenantId, savedPlanId, awaitingReply, foldedMessages, workTick]);
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
@@ -342,8 +356,14 @@ export function StageWorkspace({
     if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
   }, [workUnreadable]);
   const draftMessage = useMemo(
-    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
-    [stage, foldedMessages, workDraft],
+    () =>
+      repairedStackDraft(
+        stage,
+        foldedMessages,
+        repairedChoiceDraft(stage, foldedMessages, workDraft),
+        work?.state === "ready" ? work.savedPlan : null,
+      ),
+    [stage, foldedMessages, workDraft, work],
   );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
