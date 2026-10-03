@@ -84,7 +84,7 @@ async function loadHome() {
   const [decisions, projects, tenantId] = await Promise.all([
     api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
     api.projects().catch(emptyUntilInstalled({ projects: [] })),
-    api.workspaceTenantId().catch(() => null),
+    api.workspaceTenantId(),
   ]);
   return { status, providers, decisions: decisions.decisions, projects: projects.projects, tenantId };
 }
@@ -505,7 +505,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [skippedSetup, setSkippedSetup] = useState(false);
   // Signup/login first: the workspace tenant is created as that session.
-  const [auth, setAuth] = useState<HubAuthState>("unknown");
+  const [sessionAuth, setAuth] = useState<HubAuthState>("unknown");
+  // A home read refused for the session outranks the session read: the cookie stopped holding.
+  const auth = signedOut(home.error) ? "signed-out" : sessionAuth;
+  // Signed in again, the refused home read is re-read so its error stops speaking for the session.
+  const onSignedIn = () => {
+    setAuth("signed-in");
+    void refresh();
+  };
   // Set only for an embedded (local desktop) hub whose owner could not be
   // minted automatically — a keychain the host cannot read, or a hub that
   // refused the minted account. `null` until a mint attempt fails.
@@ -515,10 +522,6 @@ export function App() {
   // missing, it is installed before any screen that depends on it renders;
   // existing, it gets only what is safe to repeat (`api.upgradeWorkspace`).
   const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
-
-  useEffect(() => {
-    if (signedOut(home.error)) setAuth("signed-out");
-  }, [home.error]);
 
   // Runs once the host has answered and a hub session exists. Deliberately
   // not keyed on `installed`: the effect sets that state itself, and
@@ -536,7 +539,7 @@ export function App() {
         if (!state.installed) {
           setInstalled("installing");
           await api.install();
-          await refresh();
+          void refresh();
         } else {
           await api.upgradeWorkspace();
         }
@@ -573,6 +576,7 @@ export function App() {
         const session = await getHubSession();
         if (session) {
           setAuth("signed-in");
+          void refresh();
           return;
         }
         setMintError("The hub accepted the workspace owner but did not sign them in.");
@@ -585,7 +589,7 @@ export function App() {
         setMintError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       }
     }
-  }, []);
+  }, [refresh]);
   useEffect(() => {
     if (status?.hub.mode !== "embedded" || auth !== "signed-out" || mintAttempted.current) return;
     mintAttempted.current = true;
@@ -683,7 +687,7 @@ export function App() {
       if (mintError) {
         return (
           <Auth
-            onSignedIn={() => setAuth("signed-in")}
+            onSignedIn={onSignedIn}
             mintFailure={{
               reason: mintError,
               onRetry: () => {
@@ -704,7 +708,7 @@ export function App() {
     }
     // Remote: a hosted hub is never a single-user desktop, so this is the
     // real account flow — sign up or sign in against it.
-    return <Auth onSignedIn={() => setAuth("signed-in")} />;
+    return <Auth onSignedIn={onSignedIn} />;
   }
   if (screen === "install") {
     return (
