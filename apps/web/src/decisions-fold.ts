@@ -23,6 +23,7 @@
  * stage must not read as a decision due.
  */
 import type { Transport } from "@intx/hub-client";
+import { stageName } from "./components.jsx";
 import {
   listProjectRecords,
   listSpecialistDeployments,
@@ -49,7 +50,7 @@ function toDecision(approval: PendingApproval, projectId: string, stage: number)
     projectId,
     runId: approval.runId,
     stage,
-    title: isDelivery ? "Delivery awaits a decision" : `Stage ${stage} specialist asks to run a tool`,
+    title: isDelivery ? "Delivery awaits a decision" : `The ${stageName(stage)} specialist asks to run a tool`,
     consequence: isDelivery
       ? (CONSEQUENCE[stage] ?? "A human decision is required to continue.")
       : `Runs \`${approval.toolDefinition?.name ?? "a tool"}\`: ${toolCommand(approval)}`,
@@ -94,7 +95,7 @@ export function stageApprovalDecision(
     projectId,
     runId,
     stage,
-    title: `Stage ${stage} is waiting on a decision`,
+    title: `${stageName(stage)} is waiting on a decision`,
     consequence: CONSEQUENCE[stage] ?? "A human decision is required to continue.",
     blockers: null,
     requiredAuthority: requiredAuthorityFor(stage),
