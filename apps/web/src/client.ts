@@ -6,6 +6,7 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
+import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
@@ -418,7 +419,7 @@ export type ProjectSummary = {
   title: string;
   /** First non-empty line of the stored opening problem, or null when none was written. */
   description: string | null;
-  /** Always null off `listProjectSummaries` -- `project-list.ts`'s `displayStage` reads the project workflow's own stage per card, or null when it could not be read. */
+  /** Always null off `listProjectSummaries` -- each project card reads the project workflow's own stage. */
   stage: number | null;
   archivedAt: string | null;
   /** A stock hub approval (stage 9's delivery) is pending on this project. */
@@ -1176,7 +1177,7 @@ export const api = {
     request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
   /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
   packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[] }) =>
-    request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
+    request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string; fileCount: number } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
       `/projects/${projectId}/build/attempts/${String(attempt)}/package`,
       { method: "POST", body: JSON.stringify(body) },
     ),
@@ -1941,7 +1942,7 @@ export const api = {
       if (!kind) {
         throw new ApiFailure({
           code: "validation_failed",
-          message: `Stage ${stage} has no draft document to approve.`,
+          message: `${stageName(stage)} has no draft document to approve.`,
           correlationId: "-",
           retryable: false,
         });
@@ -1951,7 +1952,7 @@ export const api = {
         kind,
         content,
         sourceVersionIds,
-        title: `Stage ${stage} draft`,
+        title: `${stageName(stage)} draft`,
         // Stamped with the stage's own specialist so `reviewableArtifact`
         // recognises the write as the draft's persisted form: found on
         // the next load instead of persisted again, and superseded only
@@ -2255,7 +2256,7 @@ export const api = {
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
       return deployment;
     });
     call.catch(() => ensureStageAgentCalls.delete(key));
@@ -2287,9 +2288,11 @@ export const api = {
         specialistHubOrigin(),
         offeringId,
         false,
+        undefined,
+        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
       activeModelCacheClear();
       return deployment;
     });
@@ -2330,7 +2333,7 @@ export const api = {
         await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure("the stage 1 brief evaluator", placement);
+      if (placement.outcome !== "placed") throw placementFailure("the Problem discovery brief evaluator", placement);
       return deployment;
     });
     call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
@@ -2769,12 +2772,12 @@ export const api = {
 export function ensureProgressLabel(progress: EnsureProgress): string {
   switch (progress.phase) {
     case "waiting":
-      return "Waiting for the hub to place the project's workflow";
+      return "Setting up the project";
     case "deploying":
-      return "Deploying the project's workflow";
+      return "Setting up the project";
     case "replaying":
       return progress.total > 0
-        ? `Replaying decision ${String(Math.min(progress.done + 1, progress.total))} of ${String(progress.total)} onto the project's workflow`
-        : "Starting the project's workflow";
+        ? `Restoring the project's decisions, ${String(Math.min(progress.done + 1, progress.total))} of ${String(progress.total)}`
+        : "Setting up the project";
   }
 }

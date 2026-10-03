@@ -183,6 +183,9 @@ export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DE
     });
 }
 
+/** The closing slide's title (#599): the deck is on its reader's screen, so the slide names their decision, not a request about them. */
+export const DECISION_SLIDE_TITLE = "Decisions to Make";
+
 /** The decision request's lines, bullets and paragraphs alike, as plain text. */
 export function decisionLinesIn(markdown: string): string[] {
   const section = sectionIn(markdown, "decision request");
@@ -331,7 +334,7 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
     itemSlide(entry.title, entry.bullets, entry.notes, deck.images?.get(String(index)), index + 2);
   });
   if (deck.decision.length > 0) {
-    itemSlide("Decision request", deck.decision, null, undefined, deck.slides.length + 2);
+    itemSlide(DECISION_SLIDE_TITLE, deck.decision, null, undefined, deck.slides.length + 2);
   }
 
   const out = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;

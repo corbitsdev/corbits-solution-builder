@@ -16,7 +16,7 @@
  */
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { lookOf, roleLabel, type Deck, type DeckLook } from "@solutions-builder/app/deck";
+import { lookOf, roleLabel, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
 export type PreviewSlide =
@@ -45,7 +45,7 @@ export function previewSlides(deck: Deck): PreviewSlide[] {
     slides.push({ kind: "item", title: entry.title, lines: entry.bullets, page: index + 2, ...picture(String(index)) });
   });
   if (deck.decision.length > 0) {
-    slides.push({ kind: "item", title: "Decision request", lines: deck.decision, page: deck.slides.length + 2 });
+    slides.push({ kind: "item", title: DECISION_SLIDE_TITLE, lines: deck.decision, page: deck.slides.length + 2 });
   }
   return slides;
 }

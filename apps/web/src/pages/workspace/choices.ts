@@ -141,7 +141,10 @@ export function segmentsIn(text: string): TurnSegment[] {
     let qEnd = start;
     while (qEnd > cursor && blank(qEnd - 1)) qEnd--;
     let qStart = qEnd;
-    while (qStart > cursor && !blank(qStart - 1) && itemOf(lines[qStart - 1]!) === null) qStart--;
+    // A heading stuck to the question ("## What I need from you" with no
+    // blank line) stays prose; it is not part of what was asked.
+    const heading = (line: string) => /^\s{0,3}#{1,6}\s/.test(line);
+    while (qStart > cursor && !blank(qStart - 1) && itemOf(lines[qStart - 1]!) === null && !heading(lines[qStart - 1]!)) qStart--;
     const above = lines.slice(qStart, qEnd).join("\n").trim();
     if (above.includes("?")) {
       flushText(qStart);
