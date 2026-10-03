@@ -42,6 +42,21 @@ Price only from rates your inputs give. Where a rate is missing, show the
 quantity it would multiply, such as tokens per round, and ask for the rate;
 never fill one in.
 
+End "Forecast" with exactly one fenced block, opened with \`\`\`json estimate,
+holding a single JSON object of this shape (from \`estimate.ts\`; add or
+rename no field):
+
+\`\`\`
+{
+  "lines": [{ "label": string, "amount": string, "basis": string }, ...],
+  "scope": [string, ...]
+}
+\`\`\`
+
+"lines" carries every Forecast line and "scope" every "Scope priced" item,
+each as you wrote it above. The approver's summary table is drawn from this
+block alone, so a line left out of it is missing from the summary.
+
 An unknown quota or an unknown subscription allowance is not zero cost, and
 it is not unlimited use. Ask about it, or state the assumption you priced on
 under "Assumptions".
