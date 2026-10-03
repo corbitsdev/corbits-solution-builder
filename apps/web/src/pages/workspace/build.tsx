@@ -359,6 +359,7 @@ export function BuildPanel({
           <StageConversation
             stage={8}
             messages={messages}
+            draftPane={false}
             value={composer}
             onValueChange={setComposer}
             onSend={() => {

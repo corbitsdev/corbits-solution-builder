@@ -794,7 +794,7 @@ export function StageWorkspace({
       }}
       working={sending}
       disabled={!agentAddress}
-      draftPane={stage !== 5}
+      draftPane={DOCUMENT_STAGES.has(stage) || stage === 4}
       withdrawnIds={withdrawnIds}
       pending={busy}
       onStop={() => void stopTurn()}

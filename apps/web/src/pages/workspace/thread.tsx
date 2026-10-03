@@ -189,9 +189,9 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
-  /** Whether a reply's draft has a pane that shows it. Stage 5's pane holds
-   *  only the packages its requests write, so a draft-shaped reply there is
-   *  shown whole, never pointed at. */
+  /** Whether a reply's draft has a pane that shows it. Stage 5's packages,
+   *  stage 8's build and stage 9's delivery are not the reply's draft, so a
+   *  draft-shaped reply there is shown whole, never pointed at. */
   draftPane?: boolean;
 }) {
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
