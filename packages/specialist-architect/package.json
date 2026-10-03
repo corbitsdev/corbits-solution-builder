@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-architect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Build plan authors: the requirements author and the architect, with the stack rubric the architect plans against.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}
