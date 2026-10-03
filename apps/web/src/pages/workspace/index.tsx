@@ -579,14 +579,13 @@ export function StageWorkspace({
   const promote = async () => {
     if (!artifacts.activeContent || !superseded) return;
     setPromoting(true);
-    setError(null);
     try {
       const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
       await api.persistStageDraft(detail.project.id, stage, artifacts.activeContent, materials);
       await refreshWorkflow();
       artifacts.select(null);
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setPromoting(false);
     }
