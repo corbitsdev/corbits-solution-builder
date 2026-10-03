@@ -14,7 +14,9 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { hashTree, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { hashFiles, shippedFiles, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
 export type { ManifestFileEntry, TargetProbe } from "./verify.js";
 
@@ -105,13 +107,15 @@ export function parseTargetProbe(raw: unknown): TargetProbe | null {
   return { target, command, port, routes, ...(path === undefined ? {} : { path }) };
 }
 
-/** Runs `tar` over the directory and resolves with the gzip bytes. Shells
- *  out rather than reimplementing tar: every place this runs — a POSIX
- *  container image, or the host on macOS or Linux — has `tar` on PATH. */
-export function tarDirectory(cwd: string, exclude: readonly string[]): Promise<Buffer> {
+/** Runs `tar` over the directory's shipped files (`shippedFiles`) and
+ *  resolves with the gzip bytes. Shells out rather than reimplementing tar:
+ *  every place this runs — a POSIX container image, or the host on macOS or
+ *  Linux — has `tar` and `git` on PATH. */
+export async function tarDirectory(cwd: string, exclude: readonly string[]): Promise<Buffer> {
+  const files = await shippedFiles(cwd, new Set(exclude));
   return new Promise((res, reject) => {
-    const args = ["-czf", "-", ...exclude.map((entry) => `--exclude=${entry}`), "."];
-    const child = spawn("tar", args, { cwd });
+    const child = spawn("tar", ["-czf", "-", "--null", "-T", "-"], { cwd });
+    child.stdin.end(files.map((path) => `${path}\0`).join(""));
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -129,7 +133,7 @@ export function tarDirectory(cwd: string, exclude: readonly string[]): Promise<B
 
 /** Builds the delivery manifest by hashing every file the archive packed —
  *  read straight off disk, not the tar's own listing (which has no hashes),
- *  skipping the same directories `tarDirectory` excludes so the list
+ *  from the same `shippedFiles` list `tarDirectory` packs so the list
  *  matches what the archive contains. The file list is capped
  *  (`MANIFEST_FILE_CAP`); `fileCount` always reports the real total. */
 export async function buildManifest(
@@ -138,7 +142,7 @@ export async function buildManifest(
   exclude: readonly string[],
   archive: { fileName: string; sizeBytes: number; sha256: string },
 ): Promise<DeliveryManifestContent> {
-  const hashed = await hashTree(targetDir, new Set(exclude));
+  const hashed = await hashFiles(targetDir, await shippedFiles(targetDir, new Set(exclude)));
   const files = hashed.slice(0, MANIFEST_FILE_CAP);
   return {
     stage: 8,
@@ -180,6 +184,20 @@ export async function verifyAndRecord(
   };
 }
 
+/** The three heaviest top-level paths among the shipped files, sized. */
+async function largestTopLevel(dir: string, exclude: readonly string[]): Promise<string> {
+  const sizes = new Map<string, number>();
+  for (const path of await shippedFiles(dir, new Set(exclude))) {
+    const top = path.split("/")[0] ?? path;
+    sizes.set(top, (sizes.get(top) ?? 0) + (await stat(join(dir, path))).size);
+  }
+  return [...sizes]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([path, size]) => `${path} (${(size / 1024 / 1024).toFixed(1)} MB)`)
+    .join(", ");
+}
+
 /** Pulls the attempt number out of a `dir` like "attempts/3" for the
  *  artifact's `variant`/title; "1" when `dir` names no attempt (e.g. "."). */
 export function attemptVariant(dir: string): string {
@@ -216,8 +234,8 @@ export async function packageAttempt(input: {
   }
   if (bytes.byteLength > maxBytes) {
     throw new Error(
-      `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit — ` +
-        `exclude node_modules/build output and retry.`,
+      `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit. ` +
+        `Largest: ${await largestTopLevel(input.dir, exclude)}. Retry the attempt so the worker adds its build output to .gitignore.`,
     );
   }
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
