@@ -105,6 +105,7 @@ const QUALITY_BAR = [
   `- Run the tests yourself and end your final message with the exact command and its real output. Never claim a pass you did not see.`,
   `- The interface uses the design's components, states and copy, including its empty, loading and error states.`,
   `- A README says what it is, how to install, run and test it, and anything left unbuilt.`,
+  `- A .gitignore names the toolchain's build output, caches and installed dependencies: what it ignores is left out of the delivered archive.`,
 ].join("\n");
 
 /**
