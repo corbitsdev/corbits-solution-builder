@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiFailure,
+  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type Provider,
@@ -59,7 +60,9 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { isStageOpening } from "./composed-mail.ts";
+import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
@@ -91,7 +94,7 @@ function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, Arti
   return byReviewer;
 }
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
-import { agentFor } from "@solutions-builder/app/kit";
+import { agentFor, evaluatorFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
@@ -303,6 +306,9 @@ export function StageWorkspace({
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
   const [work, setWork] = useState<WorkArtifact | null>(null);
+  // The thread `work` was read for: until it is the current one, a reply that
+  // just landed may sit beside the document as it was before that reply.
+  const [workReadFor, setWorkReadFor] = useState<readonly ChatMessage[] | null>(null);
   const [workTick, setWorkTick] = useState(0);
   useEffect(() => {
     if (!usesArtifact || !awaitingReply) return;
@@ -315,9 +321,12 @@ export function StageWorkspace({
       return;
     }
     let cancelled = false;
+    const readFor = foldedMessages;
     api.stageWorkArtifact(tenantId, workKind).then(
       (artifact) => {
-        if (!cancelled) setWork(artifact ? { state: "ready", artifact } : { state: "none" });
+        if (cancelled) return;
+        setWork(artifact ? { state: "ready", artifact } : { state: "none" });
+        setWorkReadFor(readFor);
       },
       (cause: unknown) => {
         if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
@@ -341,9 +350,12 @@ export function StageWorkspace({
     [stage, foldedMessages, workDraft],
   );
 
-  // Stage 1's brief evaluator reads each new draft; the Product guide answers
-  // when asked, on any stage. Both are advisory and never touch the gate.
-  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
+  // A stage's evaluator reads each new draft against the record the stage
+  // opened on; the Product guide answers when asked, on any stage. Both are
+  // advisory and never touch the gate.
+  const stageRecord = foldedMessages.find(isStageOpening)?.body ?? null;
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage as Stage, draftMessage?.body ?? null, stageRecord);
+  const evaluated = evaluatorFor(stage as Stage) !== null;
   const guideContext = {
     projectTitle: detail.project.title,
     stage,
@@ -655,6 +667,37 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  // With a Markdown draft on the table, a turn carries it and the
+  // instruction to revise it, as alpha main's rounds did (#431); a design
+  // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
+  // A document kept in an artifact is named, not pasted: the specialist
+  // already holds it, or reads it once.
+  const revisionMail = (turn: string): string => {
+    const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
+    return work?.state === "ready"
+      ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
+      : revising
+        ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
+        : turn;
+  };
+
+  // The evaluator's notes on a draft go to the specialist as one revision
+  // before the person reviews it, folded in the chat as an event line.
+  const notesError = useEvaluatorRevision({
+    stage,
+    evaluator,
+    draft: !usesArtifact || workReadFor === foldedMessages ? (draftMessage?.body ?? null) : null,
+    messages: foldedMessages,
+    underReview: workflowView?.reviews[stage as Stage]?.status === "open",
+    send: async (ask, subject) => {
+      if (!agentAddress) throw new Error("The specialist is not reachable yet.");
+      // Another tab may already have sent these notes.
+      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      await api.sendStageMail(tenantId, agentAddress, { body: revisionMail(ask), subject });
+      await loadThread();
+    },
+  });
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -670,19 +713,7 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      // A document kept in an artifact is named, not pasted: the specialist
-      // already holds it, or reads it once.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
-      const turn = withAttachedDocuments(body, stageDocuments);
-      const mail =
-        work?.state === "ready"
-          ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
-          : revising
-            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
-            : turn;
+      const mail = revisionMail(withAttachedDocuments(body, stageDocuments));
       await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
@@ -876,6 +907,17 @@ export function StageWorkspace({
       onSendHold={() => openSendBack(composer)}
       popover={sendBackPopover}
       events={events}
+      // The design pane has no approval bar of its own to carry the
+      // evaluator's stance, so stage 4 shows it above the composer.
+      rows={
+        stage === 4 && evaluator.status !== "idle" ? (
+          <div className="stage-action composer-approve">
+            <span className="composer-approve-lead">
+              <EvaluatorStance evaluator={evaluator} notesError={notesError} />
+            </span>
+          </div>
+        ) : null
+      }
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => {
@@ -1209,11 +1251,11 @@ export function StageWorkspace({
                 : null
             }
             evaluation={
-              stage === 1 && evaluator.status === "verdict"
+              evaluated && evaluator.status === "verdict"
                 ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
                 : null
             }
-            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+            advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
             onRevise={(message, quotes) => {

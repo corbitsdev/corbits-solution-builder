@@ -62,6 +62,14 @@ export const keys = {
   designerSettings: ["designerSettings"] as const,
   deckDesigns: ["deckDesigns"] as const,
   googleDrive: ["googleDrive"] as const,
+  evaluation: {
+    all: ["evaluation"] as const,
+    of: (projectId: string, tag: string) => ["evaluation", projectId, tag] as const,
+  },
+  evaluatorNotes: {
+    all: ["evaluatorNotes"] as const,
+    of: (subject: string) => ["evaluatorNotes", subject] as const,
+  },
   stakeholders: {
     all: ["stakeholders"] as const,
     of: (projectId: string) => ["stakeholders", projectId] as const,

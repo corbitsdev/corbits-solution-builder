@@ -55,7 +55,7 @@ describe("evaluatorStateOf", () => {
   test("quotes what the evaluator said when it is not a verdict", () => {
     expect(evaluatorStateOf(reply("This agent encountered a temporary error communicating with the inference provider"))).toEqual({
       status: "unavailable",
-      reason: "The brief evaluator could not judge this draft: This agent encountered a temporary error communicating with the inference provider",
+      reason: "The evaluator could not judge this draft: This agent encountered a temporary error communicating with the inference provider",
     });
   });
 });
@@ -101,9 +101,9 @@ describe("EvaluatorStance", () => {
   });
 
   test("says why when it is unavailable, never silently", () => {
-    const html = render({ status: "unavailable", reason: "The brief evaluator has not answered yet." });
+    const html = render({ status: "unavailable", reason: "The evaluator has not answered yet." });
     expect(html).toContain("Evaluator unavailable");
-    expect(html).toContain("The brief evaluator has not answered yet.");
+    expect(html).toContain("The evaluator has not answered yet.");
   });
 });
 
@@ -249,6 +249,6 @@ describe("the workspace", () => {
     expect(index).toContain("<GuideDock");
     expect(index).toContain("onExplain={() => void guide.explain()}");
     expect(index).toContain("useStageEvaluator(");
-    expect(index).toContain("<EvaluatorStance evaluator={evaluator} />");
+    expect(index).toContain("<EvaluatorStance evaluator={evaluator} notesError={notesError} />");
   });
 });
