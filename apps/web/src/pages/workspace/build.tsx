@@ -112,7 +112,7 @@ function evMark(tone: keyof typeof EV_TONE): string {
   return "";
 }
 
-/** Each turn as the worker reported it: what it said, and one line per tool call naming the tool and the path it gave. */
+/** Each turn as the worker reported it: what it said, and one plain line per tool call. */
 function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
   return (
     <div aria-live="polite">
@@ -126,8 +126,13 @@ function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
             {turn.said ? <Markdown source={turn.said} /> : null}
             {turn.tools.map((tool, call) => (
               <p key={call} className="inline-note">
-                <code>{tool.name}</code>
-                {tool.path ? ` ${tool.path}` : ""}
+                {tool.action}
+                {tool.path ? (
+                  <>
+                    {" "}
+                    <code>{tool.path}</code>
+                  </>
+                ) : null}
                 {tool.failed ? " — failed" : ""}
               </p>
             ))}

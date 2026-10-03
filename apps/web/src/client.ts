@@ -259,10 +259,10 @@ export type BuildAttempt = {
   workspace: string;
 };
 
-/** One turn the worker reported through its hook (`summarizeTurn`): its text, and each tool call by name and the path it named, relative to the attempt's directory. */
+/** One turn the worker reported through its hook (`summarizeTurn`): its text, and each tool call as a plain action and the path it named, relative to the attempt's directory. */
 export type BuildTurn = {
   said: string;
-  tools: { name: string; path: string | null; failed: boolean }[];
+  tools: { action: string; path: string | null; failed: boolean }[];
 };
 
 /** The frozen material the host assembles the worker's prompt from. */

@@ -69,15 +69,34 @@ function saidIn(record: unknown): string {
   return content.map((block) => (block?.type === "text" && typeof block.text === "string" ? block.text : "")).join("");
 }
 
-/** One turn as the live pane says it: the worker's text, and each tool call by name and, where it named one, its `path`. */
+/** One turn as the live pane says it: the worker's text, and each tool call as a plain action and, inside the attempt, the path it named. */
 export type TurnSummary = {
   readonly said: string;
-  readonly tools: readonly { readonly name: string; readonly path: string | null; readonly failed: boolean }[];
+  readonly tools: readonly { readonly action: string; readonly path: string | null; readonly failed: boolean }[];
 };
 
-/** A turn report summarised, with each of `roots` (the attempt's directory) taken off the paths that start with it. */
+/** Each known tool said as [with a path, without one]; any other is "Used a tool", never its raw name. */
+const TOOL_ACTIONS: Record<string, readonly [string, string]> = {
+  read: ["Read", "Read a file"],
+  write: ["Wrote", "Wrote a file"],
+  edit: ["Edited", "Edited a file"],
+  glob: ["Searched for files in", "Searched for files"],
+  grep: ["Searched", "Searched files"],
+  bash: ["Ran a command in", "Ran a command"],
+  tool_search: ["Looked up a tool", "Looked up a tool"],
+};
+
+/**
+ * A turn report summarised. A tool's `path` is kept only under one of `roots`
+ * (the attempt's directory), relative to it; any other (the home directory,
+ * a `tool-output://` reference) is dropped.
+ */
 export function summarizeTurn(record: unknown, roots: readonly string[]): TurnSummary {
   const relative = (text: string) => roots.reduce((out, root) => out.replaceAll(`${root}/`, ""), text);
+  const inAttempt = (path: string) => {
+    const root = roots.find((candidate) => path.startsWith(`${candidate}/`));
+    return root === undefined ? null : path.slice(root.length + 1);
+  };
   const report = (record ?? {}) as TurnReport;
   const failed = new Set(
     (Array.isArray(report.toolResults) ? report.toolResults : []).filter((result) => result.isError === true).map((result) => result.callId),
@@ -85,10 +104,12 @@ export function summarizeTurn(record: unknown, roots: readonly string[]): TurnSu
   return {
     said: relative(saidIn(record)).trim(),
     tools: (Array.isArray(report.toolCalls) ? report.toolCalls : []).map((call) => {
-      const path = (call.arguments as { path?: unknown } | null | undefined)?.path;
+      const named = (call.arguments as { path?: unknown } | null | undefined)?.path;
+      const path = typeof named === "string" ? inAttempt(named) : null;
+      const [withPath, withoutPath] = TOOL_ACTIONS[call.name ?? ""] ?? ["Used a tool on", "Used a tool"];
       return {
-        name: call.name ?? "(unnamed tool)",
-        path: typeof path === "string" ? relative(path) : null,
+        action: path ? withPath : withoutPath,
+        path,
         failed: call.id !== undefined && failed.has(call.id),
       };
     }),
