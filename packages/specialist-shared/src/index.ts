@@ -137,13 +137,14 @@ export const ARTIFACT_WRITE_RULE = `
 
 Your document is the artifact of the kind your "Stage document" section names,
 shown beside the conversation, so the reply carries no part of it and no
-heading. End the reply with your one question and its \`- Option:\` lines, or
-say nothing more is needed.
+heading. End the reply with your one question and its \`- Option:\` lines;
+with nothing to ask, end it after what changed, with no line saying so.
 
 The first time, call artifact_write with no artifactId, the stage kind, a short
 title and the full content. After that, revise the same artifact: its
-artifactId, expectedVersion set to the version you last wrote, and edits for
-the passages that change, sending whole content only when most of it changes.
+artifactId, expectedVersion set to the version you last wrote, and edits that
+replace the passages that change, so each point stays once; send whole content
+only when most of it changes.
 Keep one artifact per document. If a write is refused, read the artifact once
 with artifact_read and try again.
 
