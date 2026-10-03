@@ -126,6 +126,7 @@ export function ApproveRow({
   evaluator = null,
   waiting = null,
   note = null,
+  vote = null,
   label,
   busy = false,
   onApprove,
@@ -136,6 +137,8 @@ export function ApproveRow({
   waiting?: ReactNode;
   /** Status beside the stance that does not hold the button. */
   note?: ReactNode;
+  /** A decision the person can record here that approving waits on. */
+  vote?: ReactNode;
   /** The button's words, where the stage names its own. */
   label?: string;
   busy?: boolean;
@@ -148,6 +151,7 @@ export function ApproveRow({
       <span className="composer-approve-lead">
         {evaluator ? <EvaluatorStance evaluator={evaluator} /> : null}
         {waiting ?? note ? <span className="composer-approve-waiting">{waiting ?? note}</span> : null}
+        {vote}
       </span>
       <span data-tour="submit" data-ready={approved ? "true" : undefined} className={approved ? "is-ready approve" : "approve"}>
         {ready ? <span>Happy with this?</span> : null}
