@@ -49,7 +49,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag, taggedSubject } from "./composed-mail.ts";
+import { artifactTag, isEvaluatorNotes, taggedSubject } from "./composed-mail.ts";
 import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft, stackCarriedFromEarlierVersion } from "./stack-repair.ts";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
@@ -242,7 +242,11 @@ export function StageWorkspace({
   const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  const lastFromPerson = foldedMessages.findLast((message) => message.author === "me");
+  const ask = lastFromPerson && isEvaluatorNotes(lastFromPerson)
+    ? "review"
+    : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  useBusyWhile(busy, specialistActivity(stage, ask));
 
   const openingDispatch = useOpeningDispatch({
     detail,
