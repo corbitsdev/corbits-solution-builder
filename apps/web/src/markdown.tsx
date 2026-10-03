@@ -22,7 +22,7 @@ import { DEL, END, INS } from "./revisions.js";
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = [];
   // One pass, longest markers first, so `**` never matches as two `*`.
-  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(([^)\s]+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
+  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
   const state = { open: null as string | null };
   let last = 0;
   let match: RegExpExecArray | null;
@@ -35,10 +35,10 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     if (token.startsWith("`")) {
       out.push(<code key={key}>{token.slice(1, -1).replace(MARKS, "")}</code>);
     } else if (match[2] !== undefined && match[3] !== undefined) {
-      // Only a web address is a link; a bare id or a relative path is shown as its words.
-      const label = marked(match[2], key, state);
+      // A model wrote this href: only http(s) may navigate; anything else shows as its words.
+      const label = inline(match[2], key);
       const href = match[3].replace(MARKS, "");
-      if (/^https?:\/\//.test(href)) {
+      if (href.startsWith("https://") || href.startsWith("http://")) {
         out.push(
           <a key={key} href={href} target="_blank" rel="noopener noreferrer">
             {label}
