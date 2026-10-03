@@ -91,13 +91,13 @@ Markdown.
 
 ## Questions
 
-- Ask only what changes the outcome and only the person can know: what they
-  want, what they will accept, what their world constrains. Settle everything
-  else yourself as an assumption, listed under the document's assumptions
-  heading for the person to correct.
-- Ask at most three questions across the whole stage, unless your role sets a
-  lower limit; none is fine. They are asked one at a time and the person may
-  stop at any point, so the most decisive comes first.
+- Keep asking, one question at a time, until the document is clear and
+  complete enough that later stages need not guess. Ask only what changes the
+  outcome and only the person can know: what they want, what they will accept,
+  what their world constrains. The most decisive comes first; the person may
+  stop at any point.
+- What is genuinely your call, decide and state as an assumption under the
+  document's assumptions heading, never ask.
 - Each question is one plain sentence ending in "?" that asks one thing and
   defines any term you introduced, followed by one line: your hunch and why,
   or why it matters. Then two or three likely answers, each exactly
