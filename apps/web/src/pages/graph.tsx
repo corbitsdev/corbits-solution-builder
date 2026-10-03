@@ -7,9 +7,10 @@
  */
 import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
+import { AddMaterial, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
@@ -375,6 +376,22 @@ function ArtifactReader({
   );
 }
 
+/** Saves an artifact's bytes under a file name; a failure is a toast. */
+function useFileDownload(tenantId: string, node: ArtifactNode, fileName: string) {
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, fileName);
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, download };
+}
+
 /**
  * A file the person handed over, shown as what it is: an image as the image,
  * text as text, anything else by name, type and size. Never rendered as
@@ -382,7 +399,7 @@ function ArtifactReader({
  */
 /** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
 function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const { busy, download } = useFileDownload(tenantId, node, `${node.title}.pptx`);
   const size = formatSize(node.sizeBytes);
   return (
     <div className="deck-file">
@@ -393,33 +410,28 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
       <div className="button-row">
         <Button
           variant="primary"
-          loading={state.busy}
-          onClick={() => {
-            setState({ busy: true, error: null });
-            api
-              .artifactContent(tenantId, node.id)
-              .then((result) => {
-                downloadArtifact(result.content, `${node.title}.pptx`);
-                setState({ busy: false, error: null });
-              })
-              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
-          }}
+          loading={busy}
+          onClick={() => void download()}
         >
           Download slides (.pptx)
         </Button>
       </div>
-      {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
 }
 
+// The archive's title is its file name, extension included.
+export async function downloadBuild(tenantId: string, node: ArtifactNode): Promise<void> {
+  const result = await api.artifactContent(tenantId, node.id);
+  downloadArtifact(result.content, node.title);
+}
+
 /**
  * The completed build, as the person accepted it: one archive of the
- * attempt's workspace, named after the project. Saved, not shown — a
- * source tree is not a document.
+ * attempt's workspace. Saved, not shown — a source tree is not a document.
  */
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const { busy, download } = useFileDownload(tenantId, node, node.title);
   const size = formatSize(node.sizeBytes);
   return (
     <div className="deck-file">
@@ -431,22 +443,12 @@ export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: st
       <div className="button-row">
         <Button
           variant="primary"
-          loading={state.busy}
-          onClick={() => {
-            setState({ busy: true, error: null });
-            api
-              .artifactContent(tenantId, node.id)
-              .then((result) => {
-                downloadArtifact(result.content, `${node.title}.tar.gz`);
-                setState({ busy: false, error: null });
-              })
-              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
-          }}
+          loading={busy}
+          onClick={() => void download()}
         >
           Download the build (.tar.gz)
         </Button>
       </div>
-      {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
 }

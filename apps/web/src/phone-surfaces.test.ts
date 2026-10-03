@@ -71,7 +71,7 @@ describe("how the review pane frames a design", () => {
   test("the page draws one iPhone per phone, listens for anchors in every frame, and offers the frame choice", () => {
     const frames = read("./design-frames.tsx");
     expect(frames).toContain('<div className="phone-rack" aria-label="Phone screens">');
-    expect(frames).toContain("<IPhoneFrame key={`${frameKey}:${phone.id}`} title={phone.title}>");
+    expect(frames).toContain("<PhoneScreen key={`${frameKey}:${phone.id}`} screen={phone}");
     expect(frames).toContain('ref={(element) => registerFrame?.("main", element)}');
     expect(frames).toContain('<select aria-label="Frame"');
     const page = read("./pages/design.tsx");

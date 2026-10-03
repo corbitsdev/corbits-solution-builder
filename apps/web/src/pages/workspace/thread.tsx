@@ -5,7 +5,7 @@ import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
 import { composedMailFold, type ComposedFold } from "./composed-mail.ts";
-import { splitRevision } from "@solutions-builder/app/stage-prompt";
+import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -14,6 +14,8 @@ import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
+import { WaitingTips } from "./waiting-tips.tsx";
+import { BusyLine } from "../../zen-garden.tsx";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
  *  as a system boundary line (`stage-events.ts`'s `switchEvents`) — dropped
@@ -56,7 +58,7 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
  * scripts and no same-origin since a generated design is untrusted.
  * Everything else is Markdown as before.
  */
-function MessageBody({ text }: { text: string }) {
+export function MessageBody({ text }: { text: string }) {
   if (isHtmlDocument(text)) {
     return (
       <details className="bubble-fold">
@@ -80,16 +82,21 @@ function MessageBody({ text }: { text: string }) {
       </>
     );
   }
-  // A revision turn carries the version it revises (#431); the chat shows
-  // the person's words and keeps the version behind a fold.
-  const revision = splitRevision(text);
-  if (revision) {
+  // A model hand-off quotes the earlier turns, revision markers included,
+  // so it is named for what it is before anything reads it for the person's
+  // words.
+  if (isHandoffBody(text)) return <Markdown source={HANDOFF_BUBBLE_TEXT} />;
+  // A message the app composed around the person's words (the version it
+  // revises, an attached document, a choice reminder) shows only those
+  // words; what the app added stays behind a fold.
+  const composed = personWordsIn(text);
+  if (composed) {
     return (
       <>
-        <Markdown source={revision.ask} />
+        <Markdown source={composed.words} />
         <details className="bubble-fold">
-          <summary>The version this revises</summary>
-          <Markdown source={revision.document} />
+          <summary>{composed.added.startsWith(REVISION_LEAD) ? "The version this revises" : "What the app sent with this"}</summary>
+          <Markdown source={composed.added} />
         </details>
       </>
     );
@@ -130,9 +137,11 @@ function messageText(message: UiChatMessage): string {
 
 /**
  * The stage's conversation with its specialist: a mail thread rendered as
- * chat. The composer is always visible — sending is always possible, whether
- * or not a draft exists yet, since the specialist is a mail agent that just
- * answers whatever it is sent.
+ * chat. The composer shows whenever sending is possible, whether or not a
+ * draft exists yet, since the specialist is a mail agent that just answers
+ * whatever it is sent. Until the stage's first reply, while that first turn
+ * is in flight, there is nothing to answer yet: the column shows the turn,
+ * a status line and a rotating tip, and the composer arrives with the reply.
  *
  * A turn the person stopped before it was answered stays in the transcript,
  * dimmed, with no reply of its own. A turn still awaiting its reply shows
@@ -194,6 +203,7 @@ export function StageConversation({
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
+  const opening = pending && !messages.some((message) => message.author === "agent");
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -286,9 +296,18 @@ export function StageConversation({
               </div>
             );
           })}
+          {opening ? (
+            <>
+              {rows}
+              <BusyLine />
+              <WaitingTips />
+            </>
+          ) : null}
         </div>
       )}
+      {opening ? null : (
       <div className="composer" data-working={working || pending ? "" : undefined}>
+        <BusyLine />
         {rows}
         <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
         {(mic) => (
@@ -311,6 +330,7 @@ export function StageConversation({
         </Dictated>
         {popover}
       </div>
+      )}
     </div>
   );
 }
@@ -372,6 +392,7 @@ export function SpecialistTurn({
   draft = null,
   onOpenVersion,
   onAnswer,
+  busy = false,
   onDraft,
 }: {
   text: string;
@@ -381,9 +402,14 @@ export function SpecialistTurn({
    *  headings stay in the document pane. */
   draft?: DraftRef | null;
   onOpenVersion: (nodeId: string) => void;
-  /** Set while the turn can be answered: sent once every question the turn
-   *  asks has a tapped answer. A lone question sends on its tap. */
+  /** Set while the turn can be answered -- the latest turn, nothing said
+   *  since: sent once every question the turn asks has a tapped answer. A
+   *  lone question sends on its tap. Absent, the questions show without
+   *  their options: an answered turn offers nothing to tap. */
   onAnswer?: ((answer: string) => void) | undefined;
+  /** Set while the page is working on something else, such as an approval:
+   *  the latest turn's options stay on screen but cannot be tapped. */
+  busy?: boolean;
   /** The answers so far, while some question is still unanswered: what the
    *  message box should hold, so the person sees them gather and can add
    *  to them (#142). Absent, a partial set is sent as it stands. */
@@ -397,7 +423,7 @@ export function SpecialistTurn({
   const question = questions.length > 0;
   // What has been tapped for each question, by its place among the turn's
   // questions. Local to the turn: once answered, the turn is no longer the
-  // one being answered and its chips go quiet.
+  // one being answered and its chips go.
   const [chosen, setChosen] = useState<ReadonlyMap<number, string>>(() => new Map());
   const choose = (questionIndex: number, option: string) => {
     const next = new Map(chosen);
@@ -434,14 +460,14 @@ export function SpecialistTurn({
         return (
           <div key={index} className="turn-ask">
             <p className="turn-question">{segment.question}</p>
-            {segment.options.length > 0 ? (
+            {segment.options.length > 0 && onAnswer ? (
               <div className="turn-options" role="group" aria-label="Likely answers">
                 {segment.options.map((option) => (
                   <button
                     key={option}
                     type="button"
                     className="turn-option"
-                    disabled={!onAnswer}
+                    disabled={busy}
                     aria-pressed={picked === option}
                     onClick={() => choose(at, option)}
                   >

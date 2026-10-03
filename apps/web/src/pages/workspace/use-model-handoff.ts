@@ -178,7 +178,7 @@ function transcriptBlock(all: readonly ChatMessage[]): string {
  *  what it is sent, so a recap that asked nothing was answered with a whole
  *  new draft at every redeploy. */
 export const HANDOFF_CLOSE =
-  "Nothing is asked of you now. Reply with one sentence saying you have the thread and the current draft, then wait for the person's next message. Do not rewrite or resend the draft until they ask for a change.";
+  'If the person\'s last message above has not been answered, answer it now, exactly as you would have. Otherwise reply with one sentence saying you have picked up the conversation, and if your last message asked the person something they have not answered yet, ask it again, word for word, with its "- Option:" lines, so it is still in front of them. Do not rewrite or resend the draft until they ask for a change.';
 
 export function composeModelHandoff(args: {
   readonly id: string;

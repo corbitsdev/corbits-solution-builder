@@ -10,6 +10,7 @@ import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
@@ -57,6 +58,7 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readDesignerSettings,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
@@ -137,7 +139,7 @@ import {
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries, OPENING_VARIANT } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
-import { loadProjectView, toArtifactNode } from "./project-view.ts";
+import { artifactNodesOf, loadProjectView } from "./project-view.ts";
 import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import { deckDesigns as loadDeckDesigns, guidanceFor, saveDeckDesignPreference } from "./deck-design-settings.ts";
@@ -464,7 +466,12 @@ export type ArtifactNode = {
   variant: string | null;
   stage: number;
   title: string;
+  /** The artifact's own version, which a review or approval names. A saved
+   *  draft is a new artifact, so this is 1 wherever it sits in its lineage. */
   version: number;
+  /** Where the node sits in its lineage, counting from 1: what a person is
+   *  shown as its version. */
+  position: number;
   artifactId: string;
   contentHash: string;
   /** Unknown unless the version is a package upload record; never a misleading 0. */
@@ -1157,6 +1164,20 @@ async function localizedRole(transport: ReturnType<typeof createHubTransport>, w
   const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
   if (!settings) return role;
   return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
+}
+
+/**
+ * A stage's role as its specialist is deployed: localized, and for the
+ * experience designer, with the workspace's designer settings (surface,
+ * design language) read at deploy time the same way. A changed setting makes
+ * the rendered entry differ from the deployed one, so the next
+ * `ensureSpecialistDeployment` redeploys it.
+ */
+async function stageRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<AgentRole> {
+  const role = await localizedRole(transport, workspaceTenantId, agentFor(stage));
+  if (stage !== 4) return role;
+  const settings = await readDesignerSettings(transport, workspaceTenantId);
+  return { ...role, system: `${role.system}\n\n${designerGuidance(settings)}` };
 }
 
 export const api = {
@@ -2104,7 +2125,7 @@ export const api = {
   artifactGraph: (projectId: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const graph = await artifactGraphFor(transport, projectId);
-      return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
+      return { nodes: artifactNodesOf(graph.nodes), edges: graph.edges };
     }),
 
   sendStageMail: async (
@@ -2231,7 +2252,7 @@ export const api = {
         // the build panel, not uploaded from a sidecar.
         false,
         undefined,
-        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
@@ -2267,7 +2288,7 @@ export const api = {
         offeringId,
         false,
         undefined,
-        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);

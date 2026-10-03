@@ -8,7 +8,7 @@
 import { keys } from "./queries/keys.ts";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from "react";
 import {
   api,
   ApiFailure,
@@ -24,7 +24,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, stageName } from "./components.jsx";
+import { Banner, Button, Mark, notify, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { exportProjectBundle, ProjectMenu } from "./pages/project-menu.jsx";
@@ -54,8 +54,26 @@ type View = "projects" | "project" | "settings";
 
 const VIEWS: View[] = ["projects", "project", "settings"];
 
+/** The open project lives in the hash, so a reload keeps it and Back returns to the list. */
+function projectInUrl(): string | null {
+  const [, projectId] = /^#\/project\/(.+)$/.exec(window.location.hash) ?? [];
+  return projectId ? decodeURIComponent(projectId) : null;
+}
+
+function writeProjectUrl(projectId: string | null): void {
+  const hash = projectId ? `#/project/${encodeURIComponent(projectId)}` : "";
+  if (window.location.hash === hash) return;
+  window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
+}
+
+function subscribeToHistory(onChange: () => void): () => void {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
 /** Deep link, so a screen can be opened directly: `/?view=settings`. */
 function initialView(): View {
+  if (projectInUrl()) return "project";
   const requested = new URLSearchParams(window.location.search).get("view");
   return VIEWS.includes(requested as View) ? (requested as View) : "projects";
 }
@@ -256,7 +274,7 @@ export function AppBar({
    *  four omitted where the chrome renders without a live project. */
   onProjectChanged?: () => void;
   onProjectDeleted?: () => void;
-  onNotice?: (message: string) => void;
+  onNotice?: (message: string, complete?: boolean) => void;
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
@@ -289,7 +307,7 @@ export function AppBar({
                 align="start"
                 trigger={
                   <button type="button" className="wordmark wordmark-menu" aria-label={`Options for ${detail.project.title}`}>
-                    {detail.project.title}
+                    <span className="wordmark-text">{detail.project.title}</span>
                     <ChevronDown aria-hidden="true" />
                   </button>
                 }
@@ -423,9 +441,13 @@ export function AppBar({
 
 export function App() {
   const { resolvedMode } = useTheme();
-  const [view, setShownView] = useState<View>(initialView);
+  const [shownView, setShownView] = useState<View>(initialView);
+  // The hash decides whether a project is open, so Back leaves it and Forward returns.
+  const urlProject = useSyncExternalStore(subscribeToHistory, projectInUrl);
+  const view: View = urlProject ? "project" : shownView === "project" ? "projects" : shownView;
   const setView = (next: View) => {
     setError(null);
+    writeProjectUrl(next === "project" ? selected : null);
     setShownView(next);
   };
   // Where Settings was opened from, so its back control and the gear's
@@ -466,7 +488,8 @@ export function App() {
   const [oauthCandidates, setOauthCandidates] = useState<
     { providerId: string; label: string; redirectUri: string }[]
   >([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [chosen, setSelected] = useState<string | null>(projectInUrl);
+  const selected = urlProject ?? chosen;
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   // A project failing to load is never the same as no project being open
   // (CL-8874): swallowing the failure and leaving `detail` null made a
@@ -687,8 +710,9 @@ export function App() {
   }, []);
 
   const openProject = (projectId: string) => {
+    writeProjectUrl(projectId);
     setSelected(projectId);
-    setView("project");
+    setShownView("project");
   };
 
   /** The same export the projects list's menu item makes. */
@@ -698,7 +722,7 @@ export function App() {
     try {
       await exportProjectBundle(detail.project);
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setExporting(false);
     }
@@ -806,15 +830,14 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={(message) => toast.success(message)}
-        onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
+        onNotice={notify}
+        onError={(cause) => toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
           setFocusArtifact({ stage, at: Date.now() });
         }}
       />
 
-      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -854,7 +877,7 @@ export function App() {
             </>
           ) : detailError ? (
             <ProjectLoadFailure detail={detailError} onRetry={retryDetail} onBackToProjects={() => navigate("projects")} />
-          ) : (
+          ) : selected ? null : (
             <Banner title="No project open" />
           )
         ) : null}
@@ -873,6 +896,8 @@ export function App() {
 
       <ZenGarden />
     </div>
+    {/* Outside the .app grid: its section would otherwise take the canvas's row. */}
+    <Toaster theme={resolvedMode} richColors closeButton />
     {printing ? <PrintView target={printing} /> : null}
     </>
   );

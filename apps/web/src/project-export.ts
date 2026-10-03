@@ -21,9 +21,11 @@ export const BUNDLE_VERSION = 3 as const;
 export const JSON_BUNDLE_VERSION = 2 as const;
 export const ARCHIVE_STATE_FILE = "project.json";
 
+/** A node as recorded; its lineage position is derived when a project is read. */
+export type ExportedNode = Omit<ArtifactNode, "position">;
 /** One of an artifact's own versions, 1 to `node.version`. */
 export type ExportedVersion = { version: number; content: string };
-export type ExportedArtifact = { node: ArtifactNode; versions: ExportedVersion[] };
+export type ExportedArtifact = { node: ExportedNode; versions: ExportedVersion[] };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 /** What the import replays approvals from. */
 export type ExportedWorkflow = Pick<
@@ -63,7 +65,7 @@ export type BundleDeps = {
 /** Only the fields a document node is documented to carry -- an explicit
  *  whitelist, not a spread, so an unexpected field on the read (a stray
  *  credential, say) can never ride along into the bundle. */
-function pickNode(node: ArtifactNode): ArtifactNode {
+function pickNode(node: ArtifactNode): ExportedNode {
   return {
     id: node.id,
     kind: node.kind,
@@ -149,11 +151,11 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
   };
 }
 
-function isBuildArchive(node: ArtifactNode): boolean {
+function isBuildArchive(node: ExportedNode): boolean {
   return node.kind === "build_evidence" && node.mediaType === "application/gzip";
 }
 
-function isBuildManifest(node: ArtifactNode): boolean {
+function isBuildManifest(node: ExportedNode): boolean {
   return node.kind === "delivery_manifest" && node.stage === 8;
 }
 
@@ -237,7 +239,7 @@ function parseArtifact(value: unknown, index: number): ExportedArtifact {
     }
     return { version: entry.version, content: entry.content };
   });
-  return { node: node as unknown as ArtifactNode, versions };
+  return { node: node as unknown as ExportedNode, versions };
 }
 
 /** Validates an unknown value as a `ProjectBundle`, throwing a clear error

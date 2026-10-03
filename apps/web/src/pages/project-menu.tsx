@@ -68,7 +68,7 @@ export function plural(count: number, noun: string): string {
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */
-export function downloadDocuments(project: MenuProject): Promise<string> {
+export function downloadDocuments(project: MenuProject): Promise<{ message: string; complete: boolean }> {
   return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob });
 }
 
@@ -91,7 +91,7 @@ export function ProjectMenu({
   align?: "start" | "end";
   onChanged: () => void;
   onError: (cause: unknown) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, complete?: boolean) => void;
   /** The project is gone; a host showing it should leave. */
   onDeleted?: () => void;
   onMenuOpenChange?: (open: boolean) => void;
@@ -162,7 +162,8 @@ export function ProjectMenu({
           <MenuItem
             onSelect={() =>
               void act(async () => {
-                onNotice(await downloadDocuments(project));
+                const { message, complete } = await downloadDocuments(project);
+                onNotice(message, complete);
               })
             }
           >
@@ -355,9 +356,8 @@ export function ProjectInfoDialog({
     if (ok) onClose();
   };
 
-  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
-  // is assembled in the browser and saved as a download, reported in main's
-  // diction through main's notice line; failures ride main's error Banner.
+  // The bundle is assembled in the browser and saved as a download (CL-8756);
+  // its result and any failure are toasts.
   const exportProject = async () => {
     if (exporting) return;
     setExporting(true);
