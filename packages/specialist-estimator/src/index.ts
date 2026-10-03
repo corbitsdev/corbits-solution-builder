@@ -34,17 +34,21 @@ Produce a cost approval with exactly these headings, after "In short":
 ## Tolerance and material-change policy
 ## What I need from you
 
-Under "Forecast", break the figure down by line so a budget approver can argue
-with a line rather than with a total: inference by stage and by the build's
-rounds, providers, running cost. State the currency. Give the time the same
-way, as the coding agent's wall-clock plus the gates, never as human effort.
-Price only from rates your inputs give. Where a rate is missing, show the
-quantity it would multiply, such as tokens per round, and ask for the rate;
-never fill one in.
+Under "Scope priced", one bullet per priced piece of work.
+
+Under "Forecast", lead with the total and the line that dominates it, then
+one bullet per line so a budget approver can argue with a line rather than
+with a total, each in the form "- **<line>:** <amount> — <basis>": inference
+for the build and for the remaining stages, providers, running cost. State
+the currency. Give the time the same way, as the coding agent's wall-clock
+plus the gates, never as human effort. Price only from rates your inputs
+give. Where a rate is missing, give the quantity it multiplies, estimated
+from the inputs with its basis when they do not state it, and ask for the
+rate; never fill one in.
 
 An unknown quota or an unknown subscription allowance is not zero cost, and
 it is not unlimited use. Ask about it, or state the assumption you priced on
-under "Assumptions".
+under "Assumptions", once.
 
 ${interview(`Is inference for this build paid per token, or covered by a subscription
 with a monthly allowance? It changes the forecast from a cost into a share of
