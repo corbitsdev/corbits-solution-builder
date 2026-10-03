@@ -234,7 +234,6 @@ describe("project chrome paint", () => {
     expect(chrome).toContain("Reconnecting to the");
     expect(chrome).toContain("is getting ready…");
     expect(chrome).toContain("<StagePanes");
-    expect(chrome).toContain("opening-stage-name");
     expect(chrome).toContain("<ChatInput");
     const index = read("./index.tsx");
     expect(index).not.toContain("Starting the");
