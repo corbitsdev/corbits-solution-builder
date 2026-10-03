@@ -12,6 +12,7 @@ import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { documentName, stageName } from "../../components.jsx";
 import { handoffMarkerOf } from "./use-model-handoff.ts";
+import { OPENING_VARIANT } from "../../project-list.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -41,7 +42,8 @@ export function stageEvents(
   const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
 
   for (const node of nodes) {
-    if (node.stage !== stage || node.kind !== "source_material") continue;
+    // The opening statement is the person's first message, already shown as theirs.
+    if (node.stage !== stage || node.kind !== "source_material" || node.variant === OPENING_VARIANT) continue;
     out.push({
       id: `ev:node:${node.id}`,
       at: node.createdAt,
