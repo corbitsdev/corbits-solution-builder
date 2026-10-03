@@ -116,7 +116,10 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
  *  read, or it exists and could not be read, which is shown, not hidden. */
 type WorkArtifact =
   | { readonly state: "none" }
-  | { readonly state: "ready"; readonly artifact: { readonly id: string; readonly version: number; readonly content: string } }
+  | {
+      readonly state: "ready";
+      readonly artifact: { readonly id: string; readonly version: number; readonly content: string; readonly updatedAt: string };
+    }
   | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
@@ -330,7 +333,9 @@ export function StageWorkspace({
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
-    return { ...latestSpecialistMessage, body: work.artifact.content };
+    // Dated by its last write, not by the reply it follows: a write made
+    // while the next reply is pending is newer than any saved version.
+    return { ...latestSpecialistMessage, body: work.artifact.content, at: work.artifact.updatedAt };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
   const workUnreadable = work?.state === "unreadable" ? work.message : null;
   useEffect(() => {
