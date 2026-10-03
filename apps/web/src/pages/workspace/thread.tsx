@@ -154,7 +154,7 @@ export function StageConversation({
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
-  /** The project is finished: nothing said to the specialist can act, so there is no composer. */
+  /** The project is finished: nothing said to the specialist can act. */
   ended?: boolean;
   placeholder?: string;
   /** Ids of person turns Stop withdrew, rendered dimmed with no reply. */
@@ -285,29 +285,29 @@ export function StageConversation({
         </div>
       )}
       {ended ? null : (
-      <div className="composer" data-working={working || pending ? "" : undefined}>
-        {rows}
-        <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
-        {(mic) => (
-        <ChatInput
-          className={COMPOSER_BOX_CLASS}
-          value={value}
-          onValueChange={onValueChange}
-          onSend={onSend}
-          working={working || pending}
-          {...(pending && onStop ? { onStop } : {})}
-          {...(onSendHold ? { onSendHold } : {})}
-          {...(onAttach ? { onAttach } : {})}
-          attachIcon={<Plus className="size-4" aria-hidden="true" />}
-          sendIcon={<Send className="size-4" aria-hidden="true" />}
-          leadingTools={mic}
-          disabled={disabled}
-          placeholder={placeholder}
-        />
-        )}
-        </Dictated>
-        {popover}
-      </div>
+        <div className="composer" data-working={working || pending ? "" : undefined}>
+          {rows}
+          <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
+          {(mic) => (
+          <ChatInput
+            className={COMPOSER_BOX_CLASS}
+            value={value}
+            onValueChange={onValueChange}
+            onSend={onSend}
+            working={working || pending}
+            {...(pending && onStop ? { onStop } : {})}
+            {...(onSendHold ? { onSendHold } : {})}
+            {...(onAttach ? { onAttach } : {})}
+            attachIcon={<Plus className="size-4" aria-hidden="true" />}
+            sendIcon={<Send className="size-4" aria-hidden="true" />}
+            leadingTools={mic}
+            disabled={disabled}
+            placeholder={placeholder}
+          />
+          )}
+          </Dictated>
+          {popover}
+        </div>
       )}
     </div>
   );
