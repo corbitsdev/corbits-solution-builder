@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-design-evaluator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The stage 4 HTML design evaluator: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

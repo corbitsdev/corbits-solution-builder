@@ -16,6 +16,11 @@ import { PANEL_ROLES } from "@solutions-builder/specialist-plan-review";
 import { architect, requirementsAuthor } from "@solutions-builder/specialist-architect";
 import { brainstormer } from "@solutions-builder/specialist-brainstormer";
 import { briefEvaluator } from "@solutions-builder/specialist-brief-evaluator";
+import { approachEvaluator } from "@solutions-builder/specialist-approach-evaluator";
+import { constraintsEvaluator } from "@solutions-builder/specialist-constraints-evaluator";
+import { designEvaluator } from "@solutions-builder/specialist-design-evaluator";
+import { estimateEvaluator } from "@solutions-builder/specialist-estimate-evaluator";
+import { planEvaluator } from "@solutions-builder/specialist-plan-evaluator";
 import { namer } from "@solutions-builder/specialist-companions";
 import { productGuide } from "@solutions-builder/specialist-product-guide";
 import { constraintsMapper } from "@solutions-builder/specialist-constraints-mapper";
@@ -62,6 +67,11 @@ export const AGENT_KIT: readonly AgentRole[] = [
   productGuide,
   namer,
   briefEvaluator,
+  constraintsEvaluator,
+  approachEvaluator,
+  designEvaluator,
+  planEvaluator,
+  estimateEvaluator,
 ].map(kind);
 
 export function agentFor(stage: Stage): AgentRole {
@@ -94,6 +104,26 @@ export function panelPrincipals(): AgentRole[] {
 /** A seeded role by id, for the roles that are not bound to a stage. */
 export function agentById(id: string): AgentRole | undefined {
   return AGENT_KIT.find((entry) => entry.id === id);
+}
+
+/** The advisory evaluator that reads a stage's drafts, by stage. Stage 6's
+ *  reads the Architect's plan, the stage's own draft. */
+const EVALUATOR_BY_STAGE: Partial<Record<Stage, string>> = {
+  1: "brief-evaluator",
+  2: "constraints-evaluator",
+  3: "approach-evaluator",
+  4: "design-evaluator",
+  6: "plan-evaluator",
+  7: "estimate-evaluator",
+};
+
+/** The stage's draft evaluator, or null for a stage no evaluator reads. */
+export function evaluatorFor(stage: Stage): AgentRole | null {
+  const id = EVALUATOR_BY_STAGE[stage];
+  if (!id) return null;
+  const found = agentById(id);
+  if (!found) throw new Error(`Evaluator ${id} for stage ${stage} is missing from the kit.`);
+  return found;
 }
 
 // ---------------------------------------------------------------------------

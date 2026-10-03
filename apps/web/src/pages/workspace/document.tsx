@@ -88,7 +88,7 @@ export function StageDocument({
    *  counts it among the questions already answered this stage; `total` is
    *  set only when the specialist's own text states how many there are. */
   openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
-  /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
+  /** The stage evaluator's verdict, advisory only. Null on a stage no evaluator reads. */
   evaluation?: Evaluation | null;
   /** Advice shown in the approval bar beside the approve control, such as
    *  the brief evaluator's stance (#157). It never enables or blocks
@@ -506,7 +506,10 @@ export function StageDocument({
           ) : null}
           {canSubmit && choosing ? (
             <div className="stage-action composer-approve composer-choose">
-              <span>Which approach?</span>
+              <span className="composer-approve-lead">
+                <span>Which approach?</span>
+                {advisory}
+              </span>
               {approaches.map((section) => {
                 const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
                 const name = approachName(section.heading) ?? `Approach ${letter}`;

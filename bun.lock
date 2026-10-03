@@ -162,15 +162,20 @@
       "name": "@solutions-builder/app",
       "version": "0.1.0",
       "dependencies": {
+        "@solutions-builder/specialist-approach-evaluator": "workspace:*",
         "@solutions-builder/specialist-architect": "workspace:*",
         "@solutions-builder/specialist-brainstormer": "workspace:*",
         "@solutions-builder/specialist-brief-evaluator": "workspace:*",
         "@solutions-builder/specialist-build-supervisor": "workspace:*",
         "@solutions-builder/specialist-companions": "workspace:*",
+        "@solutions-builder/specialist-constraints-evaluator": "workspace:*",
         "@solutions-builder/specialist-constraints-mapper": "workspace:*",
         "@solutions-builder/specialist-delivery-verifier": "workspace:*",
+        "@solutions-builder/specialist-design-evaluator": "workspace:*",
+        "@solutions-builder/specialist-estimate-evaluator": "workspace:*",
         "@solutions-builder/specialist-estimator": "workspace:*",
         "@solutions-builder/specialist-experience-designer": "workspace:*",
+        "@solutions-builder/specialist-plan-evaluator": "workspace:*",
         "@solutions-builder/specialist-plan-review": "workspace:*",
         "@solutions-builder/specialist-presentation-creator": "workspace:*",
         "@solutions-builder/specialist-product-guide": "workspace:*",
@@ -178,6 +183,13 @@
         "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
         "arktype": "catalog:",
+      },
+    },
+    "packages/specialist-approach-evaluator": {
+      "name": "@solutions-builder/specialist-approach-evaluator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
     "packages/specialist-architect": {
@@ -215,6 +227,13 @@
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
+    "packages/specialist-constraints-evaluator": {
+      "name": "@solutions-builder/specialist-constraints-evaluator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
     "packages/specialist-constraints-mapper": {
       "name": "@solutions-builder/specialist-constraints-mapper",
       "version": "0.1.0",
@@ -229,6 +248,20 @@
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
+    "packages/specialist-design-evaluator": {
+      "name": "@solutions-builder/specialist-design-evaluator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-estimate-evaluator": {
+      "name": "@solutions-builder/specialist-estimate-evaluator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
     "packages/specialist-estimator": {
       "name": "@solutions-builder/specialist-estimator",
       "version": "0.1.0",
@@ -238,6 +271,13 @@
     },
     "packages/specialist-experience-designer": {
       "name": "@solutions-builder/specialist-experience-designer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-plan-evaluator": {
+      "name": "@solutions-builder/specialist-plan-evaluator",
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/specialist-shared": "workspace:*",
@@ -866,6 +906,8 @@
 
     "@solutions-builder/installer": ["@solutions-builder/installer@workspace:packages/installer"],
 
+    "@solutions-builder/specialist-approach-evaluator": ["@solutions-builder/specialist-approach-evaluator@workspace:packages/specialist-approach-evaluator"],
+
     "@solutions-builder/specialist-architect": ["@solutions-builder/specialist-architect@workspace:packages/specialist-architect"],
 
     "@solutions-builder/specialist-brainstormer": ["@solutions-builder/specialist-brainstormer@workspace:packages/specialist-brainstormer"],
@@ -876,13 +918,21 @@
 
     "@solutions-builder/specialist-companions": ["@solutions-builder/specialist-companions@workspace:packages/specialist-companions"],
 
+    "@solutions-builder/specialist-constraints-evaluator": ["@solutions-builder/specialist-constraints-evaluator@workspace:packages/specialist-constraints-evaluator"],
+
     "@solutions-builder/specialist-constraints-mapper": ["@solutions-builder/specialist-constraints-mapper@workspace:packages/specialist-constraints-mapper"],
 
     "@solutions-builder/specialist-delivery-verifier": ["@solutions-builder/specialist-delivery-verifier@workspace:packages/specialist-delivery-verifier"],
 
+    "@solutions-builder/specialist-design-evaluator": ["@solutions-builder/specialist-design-evaluator@workspace:packages/specialist-design-evaluator"],
+
+    "@solutions-builder/specialist-estimate-evaluator": ["@solutions-builder/specialist-estimate-evaluator@workspace:packages/specialist-estimate-evaluator"],
+
     "@solutions-builder/specialist-estimator": ["@solutions-builder/specialist-estimator@workspace:packages/specialist-estimator"],
 
     "@solutions-builder/specialist-experience-designer": ["@solutions-builder/specialist-experience-designer@workspace:packages/specialist-experience-designer"],
+
+    "@solutions-builder/specialist-plan-evaluator": ["@solutions-builder/specialist-plan-evaluator@workspace:packages/specialist-plan-evaluator"],
 
     "@solutions-builder/specialist-plan-review": ["@solutions-builder/specialist-plan-review@workspace:packages/specialist-plan-review"],
 

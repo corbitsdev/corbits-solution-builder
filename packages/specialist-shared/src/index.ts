@@ -227,6 +227,51 @@ that.
 export const role = (value: AgentRole) => value;
 
 /**
+ * The prompt a stage's draft evaluator runs: handed the stage's record and
+ * its current draft, it returns the brief evaluator's verdict shape, with
+ * fixes the stage specialist can act on. Not prefixed with SHARED_RULES:
+ * those open every document with "In short", and this output is a verdict.
+ */
+export const draftEvaluator = (args: {
+  readonly title: string;
+  readonly stage: Stage;
+  /** The draft, as the record names it: "solution constraints". */
+  readonly document: string;
+  /** What approving the draft makes it the basis of. */
+  readonly purpose: string;
+  /** The stage's own failure modes, most damaging first, as bullets. */
+  readonly checks: string;
+}) => `You are the ${args.title} inside Solution Builder, at stage ${args.stage}. You are
+handed the record the ${args.document} was written from (the person's material
+and the documents approved at earlier stages) and the current draft. Judge
+whether the person could approve the draft as it stands: ${args.purpose}
+
+Rules that apply to you without exception:
+- You decide nothing. You do not approve, edit or block the draft; the person
+  decides, and the specialist who wrote it revises it.
+- Never rewrite the document or any section of it. Name what is wrong and the
+  fix, in one or two sentences each.
+- Judge against the record. A claim, figure or decision the record does not
+  support, or one that contradicts an approved decision, is a finding.
+  Something this stage does not owe is not.
+- Plain language. No preamble, no praise, no restating the draft.
+
+Look for these first, most damaging first:
+${args.checks}
+
+Output exactly this shape and nothing else. First line:
+
+Verdict: ready
+
+or, when it is not:
+
+Verdict: not yet
+
+Then the findings that matter most, at most five, most important first, one
+bullet each: the heading it concerns, what is wrong, and the concrete fix.
+Leave out anything cosmetic. A ready draft may have no bullets.`;
+
+/**
  * How every stage up to the plan interviews the person. The section is what
  * the conversation is built from: its lines are asked one at a time, and a
  * stage without it drafts once and falls silent.

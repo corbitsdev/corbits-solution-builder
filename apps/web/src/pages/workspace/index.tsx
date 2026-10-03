@@ -20,11 +20,12 @@
  */
 import { isStageOpening } from "./composed-mail.ts";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
+  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
@@ -62,7 +63,8 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
@@ -84,7 +86,7 @@ import { documentAsMessage, requirementsDocument, reviewDocument } from "./docum
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
-import { agentFor } from "@solutions-builder/app/kit";
+import { agentFor, evaluatorFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
@@ -283,11 +285,17 @@ export function StageWorkspace({
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
   const savedPlanId = useMemo(() => (stage === 6 ? newestSavedPlanId(detail.nodes) : null), [stage, detail.nodes]);
+  // Keyed on the thread's newest message as well, so a reply that just
+  // landed is read again, and the previous read stands in until it is.
   const workQuery = useQuery({
-    queryKey: keys.stageWork.of(tenantId, workKind ?? ""),
+    queryKey: [...keys.stageWork.of(tenantId, workKind ?? ""), foldedMessages.at(-1)?.id ?? null],
     queryFn: usesArtifact && workKind !== null ? () => api.stageWorkArtifact(tenantId, workKind) : skipToken,
     refetchInterval: awaitingReply ? 5_000 : false,
+    placeholderData: keepPreviousData,
   });
+  // Until the read is the current thread's, a reply that just landed may sit
+  // beside the document as it was before that reply.
+  const workCurrent = !workQuery.isPlaceholderData;
   // Read once the reply has landed, not on every poll while it is pending.
   // An artifact id names a fixed version, so its content is never stale.
   const savedPlanQuery = useQuery({
@@ -320,9 +328,12 @@ export function StageWorkspace({
     [stage, foldedMessages, workDraft, work],
   );
 
-  // Stage 1's brief evaluator reads each new draft; the Product guide answers
-  // when asked, on any stage. Both are advisory and never touch the gate.
-  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
+  // A stage's evaluator reads each new draft against the record the stage
+  // opened on; the Product guide answers when asked, on any stage. Both are
+  // advisory and never touch the gate.
+  const stageRecord = foldedMessages.find(isStageOpening)?.body ?? null;
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage as Stage, draftMessage?.body ?? null, stageRecord);
+  const evaluated = evaluatorFor(stage as Stage) !== null;
   const guideContext = {
     projectTitle: detail.project.title,
     stage,
@@ -620,6 +631,28 @@ export function StageWorkspace({
     }
   };
 
+  // The evaluator's notes on a draft go to the specialist as one revision
+  // before the person reviews it, folded in the chat as an event line.
+  const notesError = useEvaluatorRevision({
+    stage,
+    evaluator,
+    draft: !usesArtifact || workCurrent ? (draftMessage?.body ?? null) : null,
+    messages: foldedMessages,
+    underReview: workflowView?.reviews[stage as Stage]?.status === "open",
+    send: async (ask, subject) => {
+      if (!agentAddress) throw new Error("The specialist is not reachable yet.");
+      // Another tab may already have sent these notes.
+      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      // Their own mail, not the person's: the notes' tag leads the subject
+      // and the stage document's artifact tag rides after it.
+      await api.sendStageMail(tenantId, agentAddress, {
+        body: ask,
+        subject: work?.state === "ready" ? `${subject} ${artifactTag(work.artifact)}` : subject,
+      });
+      await loadThread();
+    },
+  });
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -869,11 +902,11 @@ export function StageWorkspace({
                   : null
               }
               evaluation={
-                stage === 1 && evaluator.status === "verdict"
+                evaluated && evaluator.status === "verdict"
                   ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
                   : null
               }
-              advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+              advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
               lead={
                 stage === 7 ? (
                   <>
@@ -944,6 +977,17 @@ export function StageWorkspace({
       onSendHold={() => openSendBack(composer)}
       popover={sendBackPopover}
       events={events}
+      // The design pane has no approval bar of its own to carry the
+      // evaluator's stance, so stage 4 shows it above the composer.
+      rows={
+        stage === 4 && evaluator.status !== "idle" ? (
+          <div className="stage-action composer-approve">
+            <span className="composer-approve-lead">
+              <EvaluatorStance evaluator={evaluator} notesError={notesError} />
+            </span>
+          </div>
+        ) : null
+      }
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => {

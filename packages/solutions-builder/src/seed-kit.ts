@@ -48,6 +48,7 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
   },
   { id: "delivery-verification", instructions: "Verify accessible bytes against the manifest. An unknown is not a pass.", tools: [...SPECIALIST_TOOLS.delivery] },
   { id: "brief-evaluation", instructions: "Judge whether a problem brief is ready for a person to approve. Advisory only: never approves, edits or blocks.", tools: [] },
+  { id: "draft-evaluation", instructions: "Judge a stage draft against the record it was written from and name what to fix. Advisory only: never approves, edits or blocks.", tools: [] },
 ];
 
 /** §8's stable grouping, by the keys it names. */
@@ -55,7 +56,16 @@ const DIRECTORS: readonly DirectorRecord[] = [
   {
     key: "sb-facilitator",
     title: "Facilitator",
-    agents: ["product-guide", "constraints-mapper", "brief-evaluator"],
+    agents: [
+      "product-guide",
+      "constraints-mapper",
+      "brief-evaluator",
+      "constraints-evaluator",
+      "approach-evaluator",
+      "design-evaluator",
+      "plan-evaluator",
+      "estimate-evaluator",
+    ],
   },
   {
     key: "sb-specialists",
@@ -104,6 +114,7 @@ function skillsFor(role: AgentRole): string[] {
     "delivery-verifier": ["delivery-verification"],
     "brief-evaluator": ["brief-evaluation"],
   };
+  if (role.id.endsWith("-evaluator") && role.id !== "brief-evaluator") return ["draft-evaluation"];
   if (role.id.startsWith("senior-engineer-")) {
     const specialty = role.id.replace("senior-engineer-", "");
     return ["build-planning", `${specialty}-review`, "interchange-platform"];

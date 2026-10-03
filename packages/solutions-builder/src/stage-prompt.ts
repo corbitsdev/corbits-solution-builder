@@ -38,6 +38,25 @@ export function renderInputs(inputs: Inputs, stage: number): string {
     .join("\n\n");
 }
 
+/**
+ * What a stage's draft evaluator is mailed: the record the stage opened
+ * with, then the draft. Without the record it could judge only the page,
+ * never whether the page is faithful to what was approved.
+ */
+export function evaluationRequest(args: { record: string | null; draft: string }): string {
+  if (!args.record) return args.draft;
+  return ["--- THE RECORD THE DRAFT WAS WRITTEN FROM ---", args.record.trim(), "", "--- THE DRAFT TO JUDGE ---", args.draft.trim()].join("\n");
+}
+
+/** The evaluator's notes, as the one revision the app asks the specialist for before the person reviews. */
+export function evaluatorNotesAsk(notes: readonly string[]): string {
+  return [
+    "A reviewer read this version against the record and noted the points below. Fix each one that holds up against the record; where one does not, leave that part as it is. Change nothing else.",
+    "",
+    ...notes.map((note) => `- ${note}`),
+  ].join("\n");
+}
+
 /** A stage-3 choice the person's message made, taken apart for the repair. */
 function choiceIn(stage: number, userInput: string): { heading: string; letter: string; name: string | null } | null {
   if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return null;

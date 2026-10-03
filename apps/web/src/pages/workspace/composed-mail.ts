@@ -12,6 +12,7 @@
 import type { ChatMessage } from "../../stage-mail.ts";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
 import { stageName } from "../../stage-names.ts";
+import { shortPromptHash } from "../../design-disposition.ts";
 
 export type ComposedFold = {
   /** The one line the chat shows; null when nothing folds and only `lead` shows. */
@@ -60,6 +61,23 @@ function openedStage(message: Pick<ChatMessage, "author" | "subject">): number |
  *  person's own problem statement and stays theirs. */
 export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
   return (openedStage(message) ?? 0) > 1;
+}
+
+const EVALUATOR_NOTES_TAG = "[evaluator-notes:";
+
+/** The tag on a draft's request to its stage evaluator, keyed on the draft's text so one draft is judged once. */
+export function evaluationTag(stage: number, draft: string): string {
+  return `[evaluation:${stage}:${shortPromptHash(draft)}]`;
+}
+
+/** The subject of the evaluator's notes the app sends a specialist, keyed on the draft they judged so one draft's notes go once. */
+export function evaluatorNotesSubject(stage: number, draft: string): string {
+  return `${EVALUATOR_NOTES_TAG}${stage}:${shortPromptHash(draft)}]`;
+}
+
+/** The evaluator's notes, sent by the app: an event in the stage, never the person's words. */
+export function isEvaluatorNotes(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject?.startsWith(EVALUATOR_NOTES_TAG) === true;
 }
 
 /**

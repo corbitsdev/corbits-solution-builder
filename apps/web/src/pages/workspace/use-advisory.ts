@@ -3,9 +3,11 @@
  * touches the approve gate, and both say so when they cannot answer:
  * unavailable is a state the person sees, never a silence.
  *
- * Stage 1's brief evaluator (CL-8736): its own deployment
- * (`api.ensureStage1EvaluatorAgent`), mailed a copy of each new draft; its
- * reply is read back as an advisory verdict beside the approve control.
+ * A stage's draft evaluator (CL-8736 for stage 1's brief evaluator): its own
+ * deployment (`api.ensureEvaluatorAgent`), mailed each new draft with the
+ * record the stage opened on; its reply is read back as an advisory verdict
+ * beside the approve control. Its notes go to the stage specialist as one
+ * revision (`evaluatorRevisionDue`), never more than once per draft.
  *
  * The Product guide (CL-8737): calm orientation across the nine stages,
  * asked for rather than shown, through its own deployment
@@ -22,14 +24,19 @@
  * (#61), or a thread cut unevenly by the mailbox's page size, shifts every
  * later pairing by one.
  *
- * The work itself is in `watchEvaluator` and `askGuide`, written against
+ * The work itself is in `judgeDraft` and `askGuide`, written against
  * `AdvisoryDeps` so they run without React; the hooks only bind them.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import { api, ApiFailure } from "../../client.js";
 import type { ArtifactNode } from "../../client.js";
+import { evaluatorFor } from "@solutions-builder/app/kit";
+import type { Stage } from "@solutions-builder/app/ledger";
+import { evaluationRequest, evaluatorNotesAsk } from "@solutions-builder/app/stage-prompt";
+import { evaluationTag, evaluatorNotesSubject, isEvaluatorNotes } from "./composed-mail.ts";
 import type { GuideGuidance } from "../../components.jsx";
-import { subscribeMailbox } from "../../mailbox-events.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
 import { evaluatorVerdict, type EvaluatorVerdict } from "./guidance.js";
@@ -45,40 +52,30 @@ import {
 
 /** How often the guide looks for its answer while a person waits on it. */
 export const POLL_MS = 3_000;
-/** The evaluator's backstop when the mailbox stream is quiet or closed. */
-export const BACKSTOP_MS = 10_000;
+/** How long after "not answered yet" the evaluator's thread is read again. */
+const LATE_VERDICT_MS = 30_000;
 /** How long a reply may take before the person is told it has not come. A
  *  local model drafting a verdict or an orientation routinely needs well over
  *  a minute. Counted from when the request was sent. */
 export const REPLY_BUDGET_MS = 180_000;
-/** Consecutive failures before a state says so. */
-const TOLERATED_FAILURES = 3;
 
 /** What the two agents need from the app, injectable so the logic runs in a test. */
 export type AdvisoryDeps = {
-  readonly ensureEvaluator: (projectId: string) => Promise<{ address: string }>;
+  readonly ensureEvaluator: (projectId: string, stage: Stage) => Promise<{ address: string }>;
   readonly ensureGuide: (projectId: string) => Promise<{ address: string }>;
   readonly readThread: (tenantId: string, addresses: string[]) => Promise<ChatMessage[]>;
   readonly sendMail: (tenantId: string, address: string, input: { body: string; subject: string }) => Promise<void>;
   readonly artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
-  readonly subscribe: (tenantId: string, onNudge: () => void) => { unsubscribe(): void };
-  /** Runs `fn` every `ms`; returns what stops it. */
-  readonly every: (ms: number, fn: () => void) => () => void;
   readonly wait: (ms: number) => Promise<void>;
   readonly now: () => number;
 };
 
 const liveDeps: AdvisoryDeps = {
-  ensureEvaluator: (projectId) => api.ensureStage1EvaluatorAgent(projectId),
+  ensureEvaluator: (projectId, stage) => api.ensureEvaluatorAgent(projectId, stage),
   ensureGuide: (projectId) => api.ensureGuideAgent(projectId),
   readThread: (tenantId, addresses) => api.readStageThread(tenantId, addresses),
   sendMail: (tenantId, address, input) => api.sendStageMail(tenantId, address, input),
   artifactContent: (tenantId, nodeId) => api.artifactContent(tenantId, nodeId),
-  subscribe: (tenantId, onNudge) => subscribeMailbox(tenantId, onNudge),
-  every: (ms, fn) => {
-    const timer = setInterval(fn, ms);
-    return () => clearInterval(timer);
-  },
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
 };
@@ -96,20 +93,29 @@ function firstLine(body: string): string {
 
 const sameText = (a: string, b: string) => a.trim().replace(/\s+/g, " ") === b.trim().replace(/\s+/g, " ");
 
+type Answer = { readonly request: ChatMessage; readonly reply: ChatMessage | null };
+
 /**
- * The latest request in `thread` whose body is `requestBody`, and the reply
+ * The latest request in `thread` that `isRequest` picks, and the reply
  * paired with it by queue order (null while unanswered). Null when no such
  * request was sent. See the header for when queue order can mislead.
  */
-export function answerTo(
-  thread: readonly ChatMessage[],
-  requestBody: string,
-): { readonly request: ChatMessage; readonly reply: ChatMessage | null } | null {
-  const request = [...thread].reverse().find((message) => message.author === "me" && sameText(message.body, requestBody));
+function answerWhere(thread: readonly ChatMessage[], isRequest: (message: ChatMessage) => boolean): Answer | null {
+  const request = thread.findLast((message) => message.author === "me" && isRequest(message));
   if (!request) return null;
   const { answeredBy } = pairReplies(thread);
   const reply = thread.find((message) => message.author === "agent" && answeredBy.get(message.id) === request.id) ?? null;
   return { request, reply };
+}
+
+/** The answer to the latest request whose body is `requestBody`. */
+export function answerTo(thread: readonly ChatMessage[], requestBody: string): Answer | null {
+  return answerWhere(thread, (message) => sameText(message.body, requestBody));
+}
+
+/** The answer to the latest request sent under `tag` in its subject. */
+export function taggedAnswer(thread: readonly ChatMessage[], tag: string): Answer | null {
+  return answerWhere(thread, (message) => message.subject?.startsWith(tag) === true);
 }
 
 export type StageEvaluator =
@@ -118,174 +124,134 @@ export type StageEvaluator =
   | { readonly status: "verdict"; readonly verdict: EvaluatorVerdict }
   | { readonly status: "unavailable"; readonly reason: string };
 
+const IDLE: StageEvaluator = { status: "idle" };
+const CHECKING: StageEvaluator = { status: "checking" };
+
 /** The state an evaluator reply puts the verdict in. */
 export function evaluatorStateOf(reply: ChatMessage): StageEvaluator {
   const verdict = evaluatorVerdict([reply]);
   return verdict
     ? { status: "verdict", verdict }
-    : { status: "unavailable", reason: `The brief evaluator could not judge this draft: ${firstLine(reply.body)}` };
+    : { status: "unavailable", reason: `The evaluator could not judge this draft: ${firstLine(reply.body)}` };
 }
 
 /**
- * Has the brief evaluator judge one draft, reporting each state it passes
- * through. The draft is mailed once: one already sent (a reload, coming back
- * to stage 1) is read, not re-sent. A failed deploy or read is retried on the
- * next wake. A failed send is reported with its reason at once, and that
- * reason stays shown until a reply pairs: the mailbox may keep the Sent copy
- * of an undelivered request (#61), so finding the request later does not mean
- * it arrived. It wakes on mailbox events and a backstop timer, and closes both
- * once the reply is in. Returns what stops it.
+ * Has a stage's evaluator judge one draft, and waits for its verdict. The
+ * request carries the draft's tag in its subject, so one already sent (a
+ * reload, a second tab) is read, never sent again. The budget counts from
+ * the send; a verdict later than that is found by the next read. A failed
+ * deploy, read or send throws.
  */
-export function watchEvaluator(
+export async function judgeDraft(
   deps: AdvisoryDeps,
-  input: { readonly projectId: string; readonly tenantId: string; readonly body: string },
-  report: (state: StageEvaluator) => void,
-): () => void {
-  const { projectId, tenantId, body } = input;
-  let stopped = false;
-  let busy = false;
-  let again = false;
-  let address: string | null = null;
-  let deadline = Number.POSITIVE_INFINITY;
-  let failures = 0;
-  let failing = false;
-  let timedOut = false;
-  // Why the request's send failed, kept until a reply shows it did arrive.
-  let sendFailure: string | null = null;
-  const closers: (() => void)[] = [];
-  const emit = (state: StageEvaluator) => {
-    if (!stopped) report(state);
-  };
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-    for (const close of closers) close();
-  };
-  const failed = (reason: string) => {
-    failures += 1;
-    if (failures >= TOLERATED_FAILURES) {
-      failing = true;
-      emit({ status: "unavailable", reason });
-    }
-  };
-  const recovered = () => {
-    failures = 0;
-    if (failing) {
-      failing = false;
-      emit(sendFailure ? { status: "unavailable", reason: sendFailure } : { status: "checking" });
-    }
-  };
-  const settleFrom = (thread: readonly ChatMessage[]) => {
-    const reply = answerTo(thread, body)?.reply ?? null;
-    if (reply) {
-      emit(evaluatorStateOf(reply));
-      stop();
-    } else if (!sendFailure && !timedOut && deps.now() >= deadline) {
-      // Said once; a slow model's verdict still replaces it.
-      timedOut = true;
-      emit({ status: "unavailable", reason: "The brief evaluator has not answered yet." });
-    }
-  };
-
-  const start = async () => {
-    let deployed: string;
-    let thread: ChatMessage[];
-    try {
-      deployed = (await deps.ensureEvaluator(projectId)).address;
-      thread = await deps.readThread(tenantId, [deployed]);
-    } catch (cause) {
-      failed(`The brief evaluator could not be reached: ${reasonOf(cause)}`);
-      return;
-    }
-    if (stopped) return;
-    const earlier = answerTo(thread, body);
-    if (earlier) {
-      recovered();
-      address = deployed;
-      const sentAt = Date.parse(earlier.request.at);
-      deadline = (Number.isFinite(sentAt) ? sentAt : deps.now()) + REPLY_BUDGET_MS;
-      settleFrom(thread);
-      return;
-    }
-    try {
-      await deps.sendMail(tenantId, deployed, { body, subject: "Stage 1 draft for review" });
-    } catch (cause) {
-      // Shown now, not after retries: a send is not re-tried blindly, since a
-      // failed one can still leave its Sent copy, which the next wake finds.
-      sendFailure = `The brief evaluator could not be reached: ${reasonOf(cause)}`;
-      emit({ status: "unavailable", reason: sendFailure });
-      return;
-    }
-    const hadFailed = sendFailure !== null;
-    sendFailure = null;
-    recovered();
-    if (hadFailed) emit({ status: "checking" });
-    address = deployed;
-    deadline = deps.now() + REPLY_BUDGET_MS;
-  };
-
-  const check = async (at: string) => {
-    let thread: ChatMessage[];
-    try {
-      thread = await deps.readThread(tenantId, [at]);
-    } catch (cause) {
-      failed(`The brief evaluator's reply could not be read: ${reasonOf(cause)}`);
-      return;
-    }
-    if (stopped) return;
-    recovered();
-    settleFrom(thread);
-  };
-
-  // One step at a time; a wake that arrives mid-step runs again right after,
-  // rather than waiting for the backstop.
-  const wake = async () => {
-    if (stopped) return;
-    if (busy) {
-      again = true;
-      return;
-    }
-    busy = true;
-    try {
-      do {
-        again = false;
-        if (address === null) await start();
-        else await check(address);
-      } while (again && !stopped);
-    } finally {
-      busy = false;
-    }
-  };
-
-  emit({ status: "checking" });
-  const subscription = deps.subscribe(tenantId, () => void wake());
-  closers.push(() => subscription.unsubscribe());
-  closers.push(deps.every(BACKSTOP_MS, () => void wake()));
-  void wake();
-  return stop;
+  input: {
+    readonly projectId: string;
+    readonly tenantId: string;
+    readonly stage: Stage;
+    readonly tag: string;
+    readonly body: string;
+    readonly signal: AbortSignal;
+  },
+): Promise<StageEvaluator> {
+  const { projectId, tenantId, stage, tag, body, signal } = input;
+  const { address } = await deps.ensureEvaluator(projectId, stage);
+  let answer = taggedAnswer(await deps.readThread(tenantId, [address]), tag);
+  if (!answer) {
+    await deps.sendMail(tenantId, address, { body, subject: `${tag} Stage ${stage} draft for review` });
+    answer = taggedAnswer(await deps.readThread(tenantId, [address]), tag);
+  }
+  const deadline = (answer ? Date.parse(answer.request.at) : deps.now()) + REPLY_BUDGET_MS;
+  while (!answer?.reply) {
+    if (deps.now() >= deadline) return { status: "unavailable", reason: "The evaluator has not answered yet." };
+    await deps.wait(POLL_MS);
+    signal.throwIfAborted();
+    answer = taggedAnswer(await deps.readThread(tenantId, [address]), tag);
+  }
+  return evaluatorStateOf(answer.reply);
 }
 
 /**
- * Asks the brief evaluator about each new stage 1 draft, and reports the
- * reply to that draft's request.
+ * The verdict of the stage's evaluator on the current draft, handed with the
+ * record the stage opened on (stage 1's brief evaluator judges the page
+ * alone, as it always has). A draft is new when its text is: a reply that
+ * leaves the document as it was is not judged again. Idle on a stage no
+ * evaluator reads.
  */
-export function useStageEvaluator(projectId: string, tenantId: string, stage: number, draftMessage: ChatMessage | null): StageEvaluator {
-  const [state, setState] = useState<StageEvaluator>({ status: "idle" });
-  const draftId = stage === 1 ? (draftMessage?.id ?? null) : null;
-  // The body of the draft being judged, read when its watch starts without
-  // re-running the effect when only unrelated fields of the message change.
-  const bodyRef = useRef(draftMessage?.body ?? "");
-  bodyRef.current = draftMessage?.body ?? "";
+export function useStageEvaluator(
+  projectId: string,
+  tenantId: string,
+  stage: Stage,
+  draft: string | null,
+  record: string | null,
+): StageEvaluator {
+  const tag = draft !== null && evaluatorFor(stage) !== null ? evaluationTag(stage, draft) : null;
+  const query = useQuery({
+    queryKey: keys.evaluation.of(projectId, tag ?? ""),
+    queryFn: ({ signal }) =>
+      judgeDraft(liveDeps, {
+        projectId,
+        tenantId,
+        stage,
+        tag: tag ?? "",
+        body: stage === 1 ? (draft ?? "") : evaluationRequest({ record, draft: draft ?? "" }),
+        signal,
+      }),
+    enabled: tag !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+    // "Not answered yet" is looked at again: a slow model's verdict replaces it.
+    refetchInterval: (current) => (current.state.data?.status === "unavailable" ? LATE_VERDICT_MS : false),
+  });
+  if (tag === null) return IDLE;
+  if (query.error) return { status: "unavailable", reason: `The evaluator could not be reached: ${reasonOf(query.error)}` };
+  return query.data ?? CHECKING;
+}
 
-  useEffect(() => {
-    if (draftId === null) {
-      setState({ status: "idle" });
-      return;
-    }
-    return watchEvaluator(liveDeps, { projectId, tenantId, body: bodyRef.current }, setState);
-  }, [draftId, projectId, tenantId]);
+/**
+ * The subject to send the evaluator's notes on `draft` under, when they are
+ * owed to the specialist now; null when not. They are owed once per draft,
+ * and only for a draft the person has not answered and that is not itself
+ * the revision earlier notes asked for, so the round never loops. A stage
+ * under review is left alone: the person is deciding on that version.
+ */
+export function evaluatorRevisionDue(args: {
+  readonly stage: number;
+  readonly evaluator: StageEvaluator;
+  readonly draft: string | null;
+  readonly messages: readonly ChatMessage[];
+  readonly underReview: boolean;
+}): string | null {
+  const { stage, evaluator, draft, messages, underReview } = args;
+  if (stage === 1 || underReview || draft === null) return null;
+  if (evaluator.status !== "verdict" || evaluator.verdict.ready || evaluator.verdict.notes.length === 0) return null;
+  if (messages.at(-1)?.author !== "agent") return null;
+  const lastAsk = messages.findLast((message) => message.author === "me");
+  if (lastAsk && isEvaluatorNotes(lastAsk)) return null;
+  const subject = evaluatorNotesSubject(stage, draft);
+  return messages.some((message) => message.subject?.startsWith(subject)) ? null : subject;
+}
 
-  return state;
+/**
+ * Sends the evaluator's notes to the specialist as one revision request when
+ * `evaluatorRevisionDue` says they are owed; `send` composes and mails it,
+ * standing down when the subject was already sent. Returns why the notes
+ * could not be sent, or null.
+ */
+export function useEvaluatorRevision(
+  args: Parameters<typeof evaluatorRevisionDue>[0] & { readonly send: (ask: string, subject: string) => Promise<void> },
+): string | null {
+  const subject = evaluatorRevisionDue(args);
+  const notes = args.evaluator.status === "verdict" ? args.evaluator.verdict.notes : [];
+  const query = useQuery({
+    queryKey: keys.evaluatorNotes.of(subject ?? ""),
+    queryFn: async () => {
+      await args.send(evaluatorNotesAsk(notes), subject ?? "");
+      return subject;
+    },
+    enabled: subject !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  return query.error ? reasonOf(query.error) : null;
 }
 
 /** Reads the versions the guide is handed, and keeps what fits its budget. */
