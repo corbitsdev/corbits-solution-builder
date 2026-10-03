@@ -41,6 +41,7 @@ import {
   upgradeWorkspace as installerUpgradeWorkspace,
   vendoredMemberFiles,
   waitForDeploymentPlacement,
+  waitForPark,
   type PlacementResult,
   workflowsFor,
   workspaceOwnedCredentialIds,
@@ -2568,6 +2569,9 @@ export const api = {
       // byte-identical retry is accepted by the hub as a no-op, so it never
       // reaches this catch at all.
       //
+      // A fresh run names its project before its loop first parks, and a
+      // decision delivered before that park kills the run.
+      await waitForPark(transport, ref);
       // Signalled in the tenant the ref names (#163): the project's own for
       // a deployment made since #29, the workspace for a legacy one still
       // live there. The workspace's route answers 404 for a project-tenant

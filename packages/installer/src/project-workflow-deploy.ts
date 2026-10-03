@@ -482,6 +482,30 @@ function parkedOn(events: readonly { seq: number; type: string }[]): boolean {
   return newest?.type === "SignalAwaited";
 }
 
+/** How long a decision waits for its run to park: a fresh run names its
+ *  project before its loop first parks, bounded by the name step's timeout. */
+const PARK_WAIT_MS = 90_000;
+
+/** A signal appended while the run's writer is busy collides with its next
+ *  sequence number and kills the run (#188), including one sent before a
+ *  fresh run's first park. */
+export async function waitForPark(
+  transport: Transport,
+  run: ProjectWorkflowDeployment,
+  options: { readonly timeoutMs?: number; readonly pollMs?: number; readonly onStill?: (events: readonly { seq: number; type: string }[]) => void } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? PARK_WAIT_MS;
+  const workflows = workflowsOf(transport, run);
+  const parked = await pollUntil(timeoutMs, options.pollMs ?? REPLAY_POLL_MS, async () => {
+    const { events } = await workflows.runEvents(run.deploymentId, run.runId);
+    if (events.some((event) => TERMINAL_RUN_EVENTS.has(event.type))) throw new Error(`the project's workflow run ${run.runId} has ended`);
+    if (parkedOn(events)) return true;
+    options.onStill?.(events);
+    return null;
+  });
+  if (!parked) throw new Error(`the project's workflow run ${run.runId} did not become ready for a decision within ${String(Math.round(timeoutMs / 1000))}s`);
+}
+
 /** How the replay paces itself, how long it lets the run sit still, and
  *  how long it waits on the hub to place the target; all shortened by tests.
  *  `onProgress` hears each decision land (#295). */
@@ -573,9 +597,9 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   // Progress is the top-level log growing. Called on every read that finds
   // the run neither where the replay needs it nor ended. Counted only once
   // the run has parked at least once: before its first park it is still
-  // starting up, and the namer it waits for (#201) can take longer than
-  // the stall bound with nothing to show for it; the pre-send budget
-  // bounds that wait instead.
+  // starting up, and the name step it waits for can take longer than the
+  // stall bound with nothing to show for it; the pre-send budget bounds
+  // that wait instead.
   let newestSeq = -1;
   let movedAt = Date.now();
   let parkedOnce = false;
@@ -598,15 +622,7 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
     if (held.has(decision.signalId)) continue;
     // A decision held only by a snapshot has no signal to send again (#299).
     if (!decision.replayable) throw new Error(`the project's workflow cannot take decision ${decision.signalId} again: it exists only in a snapshot`);
-    // Not before the run is parked: its writer is idle only then.
-    const ready = await pollUntil(90_000, pollMs, async () => {
-      const events = await topLevel();
-      if (ended(events)) throw new Error("the project's workflow ended while its history was being replayed");
-      if (parkedOn(events)) return true;
-      stillFor(events, decision.signalId);
-      return null;
-    });
-    if (!ready) throw new Error(`the project's workflow did not park before decision ${decision.signalId} could be replayed`);
+    await waitForPark(transport, target, { pollMs, onStill: (events) => stillFor(events, decision.signalId) });
     try {
       await workflows.signal(target.deploymentId, {
         runId: target.runId,
