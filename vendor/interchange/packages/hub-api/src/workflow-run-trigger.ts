@@ -28,6 +28,7 @@ import type { GrantStore } from "@intx/types/authz";
 import {
   assembleSignedContent,
   assembleMessage,
+  isMessageId,
   type MessageHeaders,
 } from "@intx/mime";
 import { createDetachedSignatureWithSigner } from "@intx/crypto";
@@ -379,12 +380,15 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
       stepGrants = staged.stepGrants;
     }
 
-    // A trigger occurrence is threading-less at the mail boundary, so no
-    // inReplyTo or references are stamped, and it carries no agent session, so
-    // the interchangeSessionId/agentId headers are left unset. The supervisor
+    // A trigger occurrence carries the caller's thread headers when it names
+    // them, so the run's connector router can continue its thread instead of
+    // passing the message through; only well-formed msg-ids are stamped. It
+    // carries no agent session, so the interchangeSessionId/agentId headers
+    // are left unset. The supervisor
     // decides whether this first-fires the absent top-level log or resumes a
     // live onTrigger input. This is the same fresh-signed-message shape the
     // deploy-flow fixture's mail trigger assembles.
+    const references = body.references?.filter(isMessageId) ?? [];
     const headers: MessageHeaders = {
       from,
       to: [address],
@@ -392,8 +396,11 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
       date: new Date(),
       messageId,
       subject: undefined,
-      inReplyTo: undefined,
-      references: undefined,
+      inReplyTo:
+        body.inReplyTo !== undefined && isMessageId(body.inReplyTo)
+          ? body.inReplyTo
+          : undefined,
+      references: references.length > 0 ? references : undefined,
       mimeVersion: "1.0",
       interchangeType: "conversation.message",
       interchangeCorrelationId: undefined,

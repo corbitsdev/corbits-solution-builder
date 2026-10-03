@@ -9,6 +9,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Context, MiddlewareHandler } from "hono";
 import { parseRunAddress } from "@intx/types";
+import { buildMessageHeaders, parseHeaderSection } from "@intx/mime";
 import {
   moveNativeMailboxMessage,
   openNativeMailboxStore,
@@ -71,7 +72,7 @@ export const TRIGGER_FLAG_PREFIX = "sb-trigger:";
 /**
  * Records the hub's trigger Message-ID on the Sent copy, found by its own
  * Message-ID. Best-effort: a copy that cannot be found or flagged leaves the
- * send accepted and that turn's pairing to fall back on order.
+ * send accepted and that turn without a reply the client can pair.
  */
 export async function recordTriggerId(
   db: MailboxDb,
@@ -137,12 +138,15 @@ export function createMailboxDeliver(
         if (value !== undefined) headers.set(name, value);
       }
       const content = frameBody(message.raw);
+      // The send route stamps In-Reply-To/References on the frame; the run's
+      // connector router continues its thread only on those (#62).
+      const { inReplyTo, references } = buildMessageHeaders(parseHeaderSection(message.raw).headers);
       for (const runId of runs) {
         const path = `/api/tenants/${encodeURIComponent(tenantId)}/workflows/${encodeURIComponent(runId)}/mail`;
         const response = await opts.app.request(path, {
           method: "POST",
           headers,
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, inReplyTo, references }),
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => "");

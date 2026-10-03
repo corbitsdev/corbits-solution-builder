@@ -2226,7 +2226,7 @@ export const api = {
   sendStageMail: async (
     tenantId: string,
     agentAddress: string,
-    input: { body: string; subject?: string; inReplyTo?: string },
+    input: { body: string; subject?: string },
   ): Promise<void> => {
     try {
       // The mailbox the conversation is in is the one the address's domain

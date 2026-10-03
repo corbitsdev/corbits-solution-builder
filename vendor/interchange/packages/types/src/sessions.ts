@@ -40,6 +40,8 @@ export type SessionStatus = typeof SessionStatus.infer;
 // that an all-or-nothing schema validator cannot produce.
 export const SendMessage = type({
   content: "string",
+  "inReplyTo?": "string",
+  "references?": "string[]",
   "attachments?": type({
     mimeType: "string",
     data: "string",

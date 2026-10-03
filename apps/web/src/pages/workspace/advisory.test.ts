@@ -21,11 +21,11 @@ describe("answerTo", () => {
   });
 
   test("a late verdict on draft A is never taken as draft B's", () => {
-    const a = say("me", "Draft A");
-    const b = say("me", "Draft B");
-    const verdictOnA = say("agent", "Verdict: ready");
+    const a = { ...say("me", "Draft A"), triggerMessageId: "<a@hub>" };
+    const b = { ...say("me", "Draft B"), triggerMessageId: "<b@hub>" };
+    const verdictOnA = { ...say("agent", "Verdict: ready"), inReplyTo: "<a@hub>" };
     expect(answerTo([a, b, verdictOnA], "Draft B")).toMatchObject({ request: { id: b.id }, reply: null });
-    const verdictOnB = say("agent", "Verdict: not yet");
+    const verdictOnB = { ...say("agent", "Verdict: not yet"), inReplyTo: "<b@hub>" };
     expect(answerTo([a, b, verdictOnA, verdictOnB], "Draft B")?.reply?.id).toBe(verdictOnB.id);
   });
 

@@ -15,14 +15,10 @@
  * recorded decisions (`product-guide.ts`). When it cannot answer, the
  * checklist computed from the workflow view is shown, with why.
  *
- * A reply is matched to the request it answers by queue order
- * (`pairReplies`): the n-th reply answers the n-th request. Mail offers
- * nothing better today, because the hub stamps a reply with its own delivery
- * id rather than the sent mail's Message-ID (#62). Queue order holds only
- * while every delivered request gets exactly one reply and the thread read
- * back is complete: a request whose delivery failed but left a Sent row
- * (#61), or a thread cut unevenly by the mailbox's page size, shifts every
- * later pairing by one.
+ * A reply is matched to the request it answers by the trigger id its
+ * `In-Reply-To` names (`pairReplies`, #62). A request whose delivery failed
+ * but left a Sent row (#61) carries no trigger id, so nothing ever pairs
+ * with it.
  *
  * The work itself is in `judgeDraft` and `askGuide`, written against
  * `AdvisoryDeps` so they run without React; the hooks only bind them.
@@ -97,8 +93,8 @@ type Answer = { readonly request: ChatMessage; readonly reply: ChatMessage | nul
 
 /**
  * The latest request in `thread` that `isRequest` picks, and the reply
- * paired with it by queue order (null while unanswered). Null when no such
- * request was sent. See the header for when queue order can mislead.
+ * paired with it (null while unanswered). Null when no such request was
+ * sent.
  */
 function answerWhere(thread: readonly ChatMessage[], isRequest: (message: ChatMessage) => boolean): Answer | null {
   const request = thread.findLast((message) => message.author === "me" && isRequest(message));

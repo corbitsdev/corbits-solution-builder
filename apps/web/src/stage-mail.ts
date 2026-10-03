@@ -17,6 +17,9 @@ export type ChatMessage = {
    *  `[opening:<project>:<stage>]` marker here (`use-opening-dispatch.ts`),
    *  which is how the transcript knows to fold the body. */
   readonly subject?: string;
+  /** The mail's own RFC Message-ID. Absent on a turn imported from a
+   *  legacy transcript, which was never mail. */
+  readonly messageId?: string;
   /** An agent reply: the RFC Message-ID it answers. */
   readonly inReplyTo?: string;
   /** A person turn the hub accepted as a trigger: the Message-ID the hub
@@ -184,6 +187,7 @@ async function readFolder(
         author: folder === "Sent" ? ("me" as const) : ("agent" as const),
         body: frameBody(message.raw),
         at: message.envelope.date,
+        messageId: message.envelope.messageId,
         ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
         ...(message.envelope.inReplyTo !== undefined
           ? { inReplyTo: message.envelope.inReplyTo }
@@ -212,18 +216,33 @@ export async function readStageThread(
   return [...inbox, ...sent].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+/**
+ * The Message-ID the specialist's run last saw on this thread: its latest
+ * reply, or the latest turn it accepted as a trigger. That is the run's
+ * connector `lastMessageId`, so a send naming it in `In-Reply-To` continues
+ * the run's thread and its reply names that send's trigger id (#62).
+ */
+function threadTip(thread: readonly ChatMessage[]): string | undefined {
+  for (const message of [...thread].reverse()) {
+    const id = message.author === "agent" ? message.messageId : message.triggerMessageId;
+    if (id !== undefined) return id;
+  }
+  return undefined;
+}
+
 /** Sends (or replies in) a stage conversation: the same send seam a
- * workbench chat uses, scoped to the stage agent's current address. */
+ * workbench chat uses, scoped to the stage agent's current address and
+ * threaded onto what that address last saw. */
 export async function sendStageMail(
   tenantId: string,
   agentAddress: string,
-  input: { readonly body: string; readonly subject?: string; readonly inReplyTo?: string },
+  input: { readonly body: string; readonly subject?: string },
 ): Promise<void> {
-  const transport = createHubTransport();
-  await transport.fetch("POST", `${mailboxPath(tenantId)}/send`, {
+  const inReplyTo = threadTip(await readStageThread(tenantId, [agentAddress]));
+  await createHubTransport().fetch("POST", `${mailboxPath(tenantId)}/send`, {
     to: [agentAddress],
     subject: input.subject ?? input.body.slice(0, 60),
     body: input.body,
-    ...(input.inReplyTo !== undefined ? { inReplyTo: input.inReplyTo } : {}),
+    ...(inReplyTo !== undefined ? { inReplyTo } : {}),
   });
 }

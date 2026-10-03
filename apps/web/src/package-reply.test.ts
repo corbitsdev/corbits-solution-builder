@@ -40,16 +40,6 @@ describe("packageReplyFor", () => {
     expect(packageReplyFor(thread, seen, "Security")).toBe(securityReply);
   });
 
-  test("falls back on order when the hub recorded no trigger id", () => {
-    const financeAskNoId = ask("Sent:2", "Finance", 2);
-    const securityAskNoId = ask("Sent:3", "Security", 3);
-    const first = agent("INBOX:2", "## Audience: Finance", 5);
-    const second = agent("INBOX:3", "## Audience: Security", 6);
-    const thread = [opening, ack, financeAskNoId, securityAskNoId, first, second];
-    expect(packageReplyFor(thread, seen, "Finance")).toBe(first);
-    expect(packageReplyFor(thread, seen, "Security")).toBe(second);
-  });
-
   test("a request for the same stakeholder written earlier is not this one", () => {
     const earlierAsk = ask("Sent:2", "Finance", 2, "<t-earlier>");
     const earlierReply = agent("INBOX:2", "## Audience: Finance (v1)", 3, "<t-earlier>");

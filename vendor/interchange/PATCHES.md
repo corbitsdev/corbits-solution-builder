@@ -310,6 +310,23 @@ superset.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-573](https://linear.app/abklabs/issue/INTR-573).
 
+## `packages/types/src/sessions.ts`, `packages/hub-api/src/workflow-run-trigger.ts` — a run trigger carries the caller's thread headers
+
+**Why.** A warm specialist's connector router continues its thread only on
+an inbound mail whose `References` include the thread root or whose
+`In-Reply-To` equals its last Message-ID. The trigger route stamped neither,
+so every trigger after the first was a `passthrough` and the run's reply
+named its own previous reply instead of the mail it answers. A client then
+has no way to pair a reply with its request except by order.
+
+**What changed.** `SendMessage` takes optional `inReplyTo` and `references`;
+`triggerWorkflowRun` stamps the well-formed msg-ids among them
+(`isMessageId`, the filter the step invoker already applies) onto the
+signed message's headers. Absent, the trigger is threading-less as before.
+
+**Upstream-able.** Yes; the headers are already part of `MessageHeaders`
+and already forwarded by the step invoker, only the route dropped them.
+
 ## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
 
 **Why.** The catalog restricted `model_provider.plugin` to the four built-in

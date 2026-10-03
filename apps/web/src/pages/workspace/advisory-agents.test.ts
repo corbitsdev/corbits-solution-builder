@@ -19,11 +19,19 @@ function fakeMail() {
   let failSends = 0;
   let onWait: (() => void) | null = null;
 
-  const post = (address: string, author: ChatMessage["author"], body: string, subject?: string): ChatMessage => {
+  // Each address is a run answering its accepted triggers in arrival order,
+  // its reply naming the trigger it answers (#62).
+  const unanswered = new Map<string, string[]>();
+  const post = (address: string, message: Omit<ChatMessage, "id" | "at">): ChatMessage => {
     seq += 1;
-    const message = { id: `${author}:${seq}`, author, body, at: new Date(clock).toISOString(), ...(subject ? { subject } : {}) };
-    threads.set(address, [...(threads.get(address) ?? []), message]);
-    return message;
+    const posted = { ...message, id: `${message.author}:${seq}`, at: new Date(clock).toISOString() };
+    threads.set(address, [...(threads.get(address) ?? []), posted]);
+    return posted;
+  };
+  const trigger = (address: string, body: string, subject?: string) => {
+    const triggerMessageId = `<t${seq + 1}@hub>`;
+    unanswered.set(address, [...(unanswered.get(address) ?? []), triggerMessageId]);
+    post(address, { author: "me", body, triggerMessageId, ...(subject ? { subject } : {}) });
   };
 
   const deps: AdvisoryDeps = {
@@ -36,7 +44,7 @@ function fakeMail() {
         failSends -= 1;
         throw new Error("409 run released");
       }
-      post(address, "me", body, subject);
+      trigger(address, body, subject);
     },
     artifactContent: async (_tenant, id) => ({ content: contents[id] ?? "" }),
     wait: async (ms) => {
@@ -51,7 +59,11 @@ function fakeMail() {
     deps,
     contents,
     sends,
-    reply: (address: string, body: string) => post(address, "agent", body),
+    reply: (address: string, body: string) => {
+      const [inReplyTo, ...rest] = unanswered.get(address) ?? [];
+      unanswered.set(address, rest);
+      return post(address, { author: "agent", body, ...(inReplyTo !== undefined ? { inReplyTo } : {}) });
+    },
     advance: (ms: number) => void (clock += ms),
     failNextSend: () => void (failSends = 1),
     onWait: (fn: () => void) => void (onWait = fn),
