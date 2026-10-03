@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { artifactRevisionRequest, ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
+import { ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
@@ -59,16 +59,3 @@ describe("revisionRequest carries the current version, as alpha main's round did
   });
 });
 
-describe("artifactRevisionRequest names the artifact instead of carrying the document", () => {
-  const mail = artifactRevisionRequest({ userInput: "Chosen: Approach A (Automatic chains).", artifactId: "art_7", version: 3 });
-
-  test("it names the id, the version and the edit to make", () => {
-    expect(mail).toContain("Artifact art_7, version 3.");
-    expect(mail).toContain("expectedVersion 3");
-    expect(mail).toContain("artifact_write");
-  });
-
-  test("the chat and the stage 3 choice still find the person's words", () => {
-    expect(splitRevision(mail)?.ask).toBe("Chosen: Approach A (Automatic chains).");
-  });
-});

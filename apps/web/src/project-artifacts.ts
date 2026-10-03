@@ -11,7 +11,7 @@
  * project keeps every draft it had. Nothing new is written there.
  */
 import type { Transport } from "@intx/hub-client";
-import { getArtifact, listArtifacts, type Artifact, type ArtifactListItem } from "@solutions-builder/installer";
+import { getArtifact, getArtifactVersion, listArtifacts, type Artifact, type ArtifactListItem } from "@solutions-builder/installer";
 import { parentTenantOf } from "./project-tenants.ts";
 
 function projectOf(entry: ArtifactListItem): string | undefined {
@@ -44,11 +44,19 @@ export type FoundArtifact = { readonly artifact: Artifact; readonly tenantId: st
  * a project's older artifact still in the workspace. Null when neither has
  * it. The tenant it was found in is what a follow-up write must target.
  */
-export async function findArtifact(transport: Transport, tenantId: string, artifactId: string): Promise<FoundArtifact | null> {
-  const own = await getArtifact(transport, tenantId, artifactId);
+export async function findArtifact(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+  /** One version rather than the current one. */
+  version?: number,
+): Promise<FoundArtifact | null> {
+  const read = (scope: string) =>
+    version === undefined ? getArtifact(transport, scope, artifactId) : getArtifactVersion(transport, scope, artifactId, version);
+  const own = await read(tenantId);
   if (own) return { artifact: own, tenantId };
   const parentId = await parentTenantOf(transport, tenantId).catch(() => null);
   if (!parentId) return null;
-  const legacy = await getArtifact(transport, parentId, artifactId);
+  const legacy = await read(parentId);
   return legacy ? { artifact: legacy, tenantId: parentId } : null;
 }

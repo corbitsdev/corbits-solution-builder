@@ -13,7 +13,8 @@
  * nothing to open: the reply is a draft whether or not a review has
  * persisted it yet.
  */
-import type { ArtifactNode } from "../../client.ts";
+import { documentMediaType, versionIdFor } from "@solutions-builder/app/artifact-graph";
+import type { ArtifactNode, StageWorkArtifact } from "../../client.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { isSubstantialDraft } from "./guidance.ts";
 
@@ -40,12 +41,9 @@ export function draftReferences(
   messages: readonly ChatMessage[],
   versions: readonly ArtifactNode[],
   noun: string,
-  /** The document is an artifact, so a reply is short whatever it changed:
-   *  every reply is matched to the version saved after it. */
-  everyReply = false,
 ): ReadonlyMap<string, DraftRef> {
   const drafts = messages
-    .filter((message) => message.author === "agent" && (everyReply || isSubstantialDraft(message.body)))
+    .filter((message) => message.author === "agent" && isSubstantialDraft(message.body))
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   if (drafts.length === 0) return EMPTY;
   const heads = new Map(versions.flatMap((node) => (replyIdOf(node) ? [[replyIdOf(node)!, node] as const] : [])));
@@ -67,4 +65,27 @@ export function draftReferences(
     refs.set(draft.id, { version: node?.version ?? null, nodeId: node?.id ?? null, noun });
   });
   return refs;
+}
+
+/**
+ * A stage document the specialist keeps in one artifact: every version of
+ * it, in version order. Each node's id names its exact version, so reading
+ * it reads that version.
+ */
+export function documentVersions(document: StageWorkArtifact, stage: number, kind: string, title: string): ArtifactNode[] {
+  return document.versions.map((version, index) => ({
+    id: versionIdFor(document.id, version.version),
+    kind,
+    variant: null,
+    stage,
+    title,
+    version: version.version,
+    artifactId: document.id,
+    contentHash: versionIdFor(document.id, version.version),
+    mediaType: documentMediaType(kind),
+    createdAt: version.createdAt,
+    supersededByNodeId: index + 1 < document.versions.length ? versionIdFor(document.id, document.versions[index + 1]!.version) : null,
+    provenance: { producer: "agent" },
+    contentSha256: version.contentSha256,
+  }));
 }

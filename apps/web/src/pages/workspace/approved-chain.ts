@@ -11,6 +11,7 @@
  * problem statement and the text read off each attached file. A design is
  * handed as its text, never its markup (#219), capped the way a hand-off is.
  */
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { api, type ArtifactNode } from "../../client.js";
 import type { ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
@@ -50,8 +51,9 @@ export function approvedChainNodes(
   for (let earlier = 1; earlier < stage - 1; earlier += 1) {
     const review = reviews[earlier];
     if (!review || review.status !== "approved") continue;
-    const node = nodes.find((entry) => entry.artifactId === review.artifactId && entry.version === review.version);
-    if (node) approved.push(node);
+    // Read as the version approved: a document kept in one artifact may have moved past it.
+    const node = nodes.find((entry) => entry.artifactId === review.artifactId);
+    if (node) approved.push({ ...node, id: versionIdFor(review.artifactId, review.version), version: review.version });
   }
   return [...material, ...approved];
 }
