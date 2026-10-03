@@ -613,8 +613,10 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     return applyDecision(input(state, OWNER5, { decisionId, kind: "audience", projectId: "p1", stage: 5, audience, decision, at: AT, ...reviewed }));
   }
 
-  function approve5(state: ProjectState, decisionId: string, reviewId = "stage-5-review-1", artifactId = "a5", version = 1, sha256 = "s5"): ProjectState {
-    return applyDecision(input(state, OWNER5, { decisionId, kind: "approve", projectId: "p1", stage: 5, reviewId, artifactId, version, sha256, at: AT }));
+  function approve5(state: ProjectState, decisionId: string, reviewId = "stage-5-review-1", artifactId = "a5", version = 1, sha256 = "s5", withoutSignOff = false): ProjectState {
+    return applyDecision(
+      input(state, OWNER5, { decisionId, kind: "approve", projectId: "p1", stage: 5, reviewId, artifactId, version, sha256, at: AT, ...(withoutSignOff ? { withoutSignOff: true } : {}) }),
+    );
   }
 
   test("a vote is tallied, naming the package it was cast on", () => {
@@ -710,6 +712,28 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     state = vote(state, "v2", "bob", "reject");
     const next = approve5(state, "ap1");
     expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
+  });
+
+  test("proceeding without sign-off never overrides a stakeholder who blocked the current package", () => {
+    for (const block of ["reject", "revise"]) {
+      let state = openReview5({ quorum: 2, stakeholders: ["alice", "bob", "carol"] });
+      state = vote(state, "v1", "alice", "proceed");
+      state = vote(state, "v2", "bob", block);
+      const next = approve5(state, "ap1", "stage-5-review-1", "a5", 1, "s5", true);
+      expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stakeholder_blocked", quorum: { proceeded: 1, required: 2, blocked: ["bob"] } });
+      expect(next.stage).toBe(5);
+      expect(approveReasonText("stakeholder_blocked", next.decisions.at(-1)!)).toBe(
+        "bob has blocked this package; proceeding without sign-off covers only stakeholders who have not decided.",
+      );
+    }
+  });
+
+  test("proceeding without sign-off covers a block cast on an earlier package", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice", "bob"] });
+    state = vote(state, "v1", "bob", "reject", pkg("bob", 1));
+    state = reopen5(state, { quorum: 1, stakeholders: ["alice", "bob"] }, "o5b", "a5", 2, "s5b", packagesFor({ stakeholders: ["alice", "bob"] }, { bob: 2 }));
+    const next = approve5(state, "ap1", "stage-5-review-2", "a5", 2, "s5b", true);
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, withoutSignOff: true, quorum: { proceeded: 0, required: 1, blocked: [], stale: ["bob"] } });
   });
 
   // CL-8870 scope addition: the policy is captured once, by the `open_review`

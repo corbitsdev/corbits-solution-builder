@@ -765,14 +765,31 @@ export function AudiencePackages({
         ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
         : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
   const tally = requiredQuorum > 0 ? `${proceeded} of ${requiredQuorum} required have proceeded.` : "";
-  // An unmet quorum never holds the button: proceeding past it is the
-  // approver's call, recorded on the approval as `withoutSignOff`.
+  // Proceeding past stakeholders who have not decided on the current
+  // package is the approver's call, recorded as `withoutSignOff`; one who
+  // blocked it holds the button (the reducer refuses `stakeholder_blocked`)
+  // until their package is written again and they decide on that.
+  const blocks =
+    blockedBy.length > 0 ? (
+      <>
+        {blockedBy.map((who) => {
+          const vote = votesByAudience[who];
+          return (
+            <span key={who}>
+              {who}: {vote ? DECISION_LABEL[vote.decision] : "Blocked"}
+              {vote?.note ? ` — “${vote.note}”` : ""}.{" "}
+            </span>
+          );
+        })}
+        <Button variant="ghost" loading={blockedBy.some((who) => writing.has(who))} disabled={writing.size > 0} onClick={() => void writePackages([...blockedBy])}>
+          {blockedBy.length === 1 ? `Write ${blockedBy[0]}'s package again` : "Write their packages again"}
+        </Button>
+      </>
+    ) : null;
   const waiting =
     packages.length === 0
       ? "Each stakeholder's package is written first."
-      : !canApprove && approveReason !== "quorum_not_met"
-        ? reason
-        : null;
+      : (blocks ?? (!canApprove && approveReason !== "quorum_not_met" && approveReason !== "stakeholder_blocked" ? reason : null));
   const quorumNote = quorumMet ? null : [tally, quorumReason].filter(Boolean).join(" ");
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
@@ -839,7 +856,7 @@ export function AudiencePackages({
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
   return panes(
-    canApprove || waiting || approveReason === "quorum_not_met" ? (
+    canApprove || waiting || approveReason === "quorum_not_met" || approveReason === "stakeholder_blocked" ? (
       <ApproveRow
         waiting={waiting}
         note={quorumNote}

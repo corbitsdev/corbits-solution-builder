@@ -34,6 +34,7 @@ const STACK_MISSING_MESSAGE =
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
   quorum_not_met: "The stakeholder quorum has not been met yet.",
+  stakeholder_blocked: "A stakeholder has blocked this package.",
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
   requirements_already_minted: "The requirement ids are already set for this project.",

@@ -268,6 +268,7 @@ export type RefusalCode =
   | "already_done"
   | "evidence_missing"
   | "quorum_not_met"
+  | "stakeholder_blocked"
   | "target_missing"
   | "frozen_already"
   | "requirements_already_minted"
@@ -482,12 +483,15 @@ export function quorumState(
  *  `open_review` captured and the votes recorded since -- never the
  *  approve's own `evidence` (CL-8870: an edit to the stakeholder list after
  *  a review opens can never change the gate that review is checked
- *  against). An approve that says `withoutSignOff` proceeds past an unmet
- *  quorum, and its approval records that it did. */
+ *  against). An approve that says `withoutSignOff` proceeds past stakeholders
+ *  who have not decided on the current package, and its approval records
+ *  that it did; it never overrides one who blocked it. */
 const stage5Rule: StageRule = (state, payload) => {
   if (!state.audiencePolicy) return "evidence_missing";
-  if (payload.withoutSignOff) return null;
-  return quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages).met ? null : "quorum_not_met";
+  const quorum = quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages);
+  if (quorum.met) return null;
+  if (!payload.withoutSignOff) return "quorum_not_met";
+  return quorum.blocked.length > 0 ? "stakeholder_blocked" : null;
 };
 
 function isStackChoiceShape(value: unknown): value is StackChoice {
@@ -635,6 +639,7 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
   already_done: "This project is already finished.",
   evidence_missing: "The recorded decisions don't match what this approval expects.",
   quorum_not_met: "The stakeholder quorum has not been met yet.",
+  stakeholder_blocked: "A stakeholder has blocked this package.",
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
   requirements_already_minted: "The requirement ids are already set for this project.",
@@ -652,6 +657,10 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
  *  own `lastRefusal` when it matches this reason; its `quorum` field (set by
  *  `refusalExtra`) names which stakeholders blocked it. */
 export function approveReasonText(reason: ApproveReason, refusal: DecisionRecord | null): string {
+  if (reason === "stakeholder_blocked" && refusal?.quorum && refusal.quorum.blocked.length > 0) {
+    const { blocked } = refusal.quorum;
+    return `${blocked.join(" and ")} ${blocked.length === 1 ? "has" : "have"} blocked this package; proceeding without sign-off covers only stakeholders who have not decided.`;
+  }
   if (reason === "quorum_not_met" && refusal?.quorum) {
     const { blocked, proceeded, required, stale = [] } = refusal.quorum;
     if (blocked.length > 0) return `${blocked.join(" and ")} ${blocked.length === 1 ? "has" : "have"} blocked this.`;
@@ -715,7 +724,7 @@ function refused(
  *  stakeholders block quorum, what target was missing) without re-deriving
  *  it from the evidence itself -- the workflow already computed it once. */
 function refusalExtra(state: ProjectState, code: RefusalCode, evidence: unknown): Partial<Pick<DecisionRecord, "quorum" | "target">> {
-  if (code === "quorum_not_met" && state.stage === 5 && state.audiencePolicy) {
+  if ((code === "quorum_not_met" || code === "stakeholder_blocked") && state.stage === 5 && state.audiencePolicy) {
     const q = quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages);
     return { quorum: { proceeded: q.proceeded, required: q.required, blocked: q.blocked, stale: q.stale } };
   }
