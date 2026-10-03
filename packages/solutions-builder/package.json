@@ -11,6 +11,7 @@
   "dependencies": {
     "@solutions-builder/specialist-architect": "workspace:*",
     "@solutions-builder/specialist-brainstormer": "workspace:*",
+    "@solutions-builder/specialist-brief-evaluator": "workspace:*",
     "@solutions-builder/specialist-build-supervisor": "workspace:*",
     "@solutions-builder/specialist-companions": "workspace:*",
     "@solutions-builder/specialist-constraints-mapper": "workspace:*",
@@ -18,6 +19,7 @@
     "@solutions-builder/specialist-estimator": "workspace:*",
     "@solutions-builder/specialist-experience-designer": "workspace:*",
     "@solutions-builder/specialist-plan-review": "workspace:*",
+    "@solutions-builder/specialist-product-guide": "workspace:*",
     "@solutions-builder/specialist-presentation-creator": "workspace:*",
     "@solutions-builder/specialist-proposer": "workspace:*",
     "@solutions-builder/specialist-runtime": "workspace:*",
