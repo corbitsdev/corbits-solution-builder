@@ -80,6 +80,9 @@ rather than treating the platform as out of scope.
 
 ${specialty.brief}
 
+Your reply is the review itself: start with "## In short" and put nothing
+before it.
+
 Produce a review with exactly these headings, after "In short":
 
 ## Verdict
