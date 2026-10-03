@@ -130,13 +130,10 @@ function pickDeployment(deployments: readonly HubDeployment[], sidecar?: Sidecar
  * target (`StageModelSwitchRecord`, `project-tenant.ts`) while it is still
  * live; otherwise falls back to the default `pickDeployment` (oldest-wins).
  *
- * The switch record is written ONLY by `switchSpecialistDeployment` below,
- * on a person's explicit choice -- never by an ordinary deploy, and never by
- * a restart-driven replacement. So once a switch's target deployment ends
- * (the hub replaces it for any reason, including a restart recovery), this
- * silently reverts to oldest-wins exactly as if no switch had ever happened
- * -- a restart never "redirects" an active session onto stale switch
- * intent, because nothing here treats a dead switch target as special.
+ * Once a switch's target deployment ends (the hub replaces it for any
+ * reason, including a restart recovery), this reverts to oldest-wins: mail
+ * never routes to a dead target. Which model the stage's next deployment
+ * leads with is `ensureSpecialistDeploymentOnce`'s concern, not routing's.
  */
 async function resolveLiveDeployment(
   transport: Transport,
@@ -636,19 +633,20 @@ async function ensureSpecialistDeploymentOnce(
       deploymentId: fresh.deploymentId,
       offeringId: leading.id,
       switchedAt: new Date().toISOString(),
+      ...(recorded?.picked && recorded.offeringId === leading.id ? { picked: true } : {}),
     });
     return fresh;
   }
   // A switch reorders the chain so the chosen offering leads -- the same
   // `sourceOfferingIds`/`defaultSourceOfferingId` story every other deploy
-  // uses, just with the person's pick standing in for "offerings[0]".
-  const offerings = switchToOfferingId
-    ? (() => {
-        const chosen = catalogOfferings.find((offering) => offering.id === switchToOfferingId);
-        if (!chosen) throw new Error("the chosen model is no longer a connected offering");
-        return [chosen, ...catalogOfferings.filter((offering) => offering.id !== switchToOfferingId)];
-      })()
-    : catalogOfferings;
+  // uses, just with the person's pick standing in for "offerings[0]". With
+  // no live deployment left (a restart ends them all), the stage's recorded
+  // pick leads the same way while its offering is still connected.
+  const recordedPick = switchToOfferingId ? undefined : await readStageSwitch(transport, projectId, stage);
+  const leadId = switchToOfferingId ?? (recordedPick?.picked ? recordedPick.offeringId : undefined);
+  const chosen = catalogOfferings.find((offering) => offering.id === leadId);
+  if (switchToOfferingId && !chosen) throw new Error("the chosen model is no longer a connected offering");
+  const offerings = chosen ? [chosen, ...catalogOfferings.filter((offering) => offering !== chosen)] : catalogOfferings;
   const source = pinFor(catalog, offerings[0]!);
   if (!source) {
     throw new Error("the tenant's offering does not resolve to a known model");
@@ -887,6 +885,7 @@ export async function switchSpecialistDeployment(
       deploymentId: result.deploymentId,
       offeringId,
       switchedAt: new Date().toISOString(),
+      picked: true,
     });
     return result;
   });

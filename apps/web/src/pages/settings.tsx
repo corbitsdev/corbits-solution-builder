@@ -36,6 +36,7 @@ import { Dictated } from "../dictation.jsx";
 import { useZenGarden, writeZenGarden } from "../zen-garden-setting.ts";
 import { DesignDocumentsList } from "./design-documents.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
+import { useModelMismatch, writeModelMismatch, type ModelMismatch } from "./workspace/model-nudge-store.ts";
 import "./settings-layout.css";
 
 export function Settings({
@@ -381,6 +382,7 @@ function Inference({
   oauthCandidates: OAuthCandidate[];
   onChanged: () => void;
 }) {
+  const mismatch = useModelMismatch();
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -406,13 +408,25 @@ function Inference({
         {activeModel ? (
           <Row
             label="Primary model"
-            hint="What new projects and stages start on. Make primary on a provider and pick its model to change it; a stage already running keeps its own."
+            hint="What new projects and stages start on. Make primary on a provider and pick its model to change it; a running stage, or one you picked a model for, keeps its own."
           >
             <span className="v">
               {activeModel.providerLabel} · {activeModel.canonicalName}
             </span>
           </Row>
         ) : null}
+        <Row label="When a project uses a different model than the primary" hint="Asked when you open the project. A switch waits for any reply in flight.">
+          <select
+            className="field"
+            aria-label="When a project uses a different model than the primary"
+            value={mismatch}
+            onChange={(event) => writeModelMismatch(event.target.value as ModelMismatch)}
+          >
+            <option value="ask">Ask</option>
+            <option value="switch">Always switch</option>
+            <option value="keep">Always keep</option>
+          </select>
+        </Row>
         <ProviderList
           manage
           providers={providers}
