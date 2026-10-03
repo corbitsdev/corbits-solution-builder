@@ -36,13 +36,13 @@ export function withoutSwitchMarker(message: ChatMessage): string {
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
-function toUiMessages(messages: readonly ChatMessage[], draftRefs: ReadonlyMap<string, DraftRef>): UiChatMessage[] {
+function toUiMessages(messages: readonly ChatMessage[], draftRefs: ReadonlyMap<string, DraftRef>, draftPane: boolean): UiChatMessage[] {
   // A stage with no draft references (4, 5 and 8 keep the draft in a pane of
   // their own) would show the same pointer for every long reply -- one per
   // stakeholder at stage 5. Say it once, at the latest, where the document it
   // names is current.
   const isPointer = (message: ChatMessage) =>
-    message.author !== "me" && !draftRefs.has(message.id) && turnLead(message.body) === null;
+    draftPane && message.author !== "me" && !draftRefs.has(message.id) && turnLead(message.body) === null;
   const lastPointer = messages.findLastIndex(isPointer);
   return messages.flatMap((message, index) => {
     if (index !== lastPointer && isPointer(message)) return [];
@@ -51,7 +51,7 @@ function toUiMessages(messages: readonly ChatMessage[], draftRefs: ReadonlyMap<s
       {
         id: message.id,
         role: message.author === "me" ? "user" : "agent",
-        parts: [{ type: "text", text: message.author === "me" ? body : conversationLead(body) }],
+        parts: [{ type: "text", text: message.author === "me" || !draftPane ? body : conversationLead(body) }],
         createdAt: message.at,
       },
     ];
@@ -150,6 +150,7 @@ export function StageConversation({
   onOpenVersion,
   onAnswer,
   empty,
+  draftPane = true,
 }: {
   messages: readonly ChatMessage[];
   value: string;
@@ -190,13 +191,17 @@ export function StageConversation({
   onAnswer?: ((answer: string) => void) | undefined;
   /** What the column says before the thread has a turn; by default, that the specialist is getting ready. */
   empty?: string;
+  /** Whether a reply's draft has a pane that shows it. Stage 5's pane holds
+   *  only the packages its requests write, so a draft-shaped reply there is
+   *  shown whole, never pointed at. */
+  draftPane?: boolean;
 }) {
   const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const opening = pending && lastAgentId === undefined;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const answeredBy = useMemo(() => pairReplies(messages).answeredBy, [messages]);
   const uiMessages = useMemo(() => {
-    const list = toUiMessages(messages, draftRefs);
+    const list = toUiMessages(messages, draftRefs, draftPane);
     // A turn in flight has no row of its own yet, so the transcript would sit
     // unchanged after the person hits send. This is the one message the thread
     // shows that the host has not recorded.
@@ -209,7 +214,7 @@ export function StageConversation({
       });
     }
     return eventMessages(list, events);
-  }, [messages, pending, events, draftRefs]);
+  }, [messages, pending, events, draftRefs, draftPane]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
   const [attached, setAttached] = useState<AttachedDocument[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);

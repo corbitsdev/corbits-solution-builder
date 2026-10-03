@@ -1008,6 +1008,7 @@ export function StageWorkspace({
       }}
       working={sending}
       disabled={!agentAddress}
+      draftPane={stage !== 5}
       withdrawnIds={withdrawnIds}
       pending={busy}
       onStop={() => void stopTurn()}
