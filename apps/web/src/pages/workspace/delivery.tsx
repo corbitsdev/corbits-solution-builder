@@ -198,7 +198,7 @@ function DeliveryDecision({
       const resolved = lastSeenApprovalId.current ? await approvalById(approvalTenant.current, lastSeenApprovalId.current, transport) : null;
       return { pending: null, delivered: resolved?.status === "approved" ? resolved : null };
     },
-    refetchInterval: (current) => (current.state.data?.delivered ? false : POLL_INTERVAL_MS),
+    refetchInterval: (current) => (finished || current.state.data?.delivered ? false : POLL_INTERVAL_MS),
   });
   const pending = query.data?.pending ?? null;
   const delivered = query.data?.delivered ?? null;
