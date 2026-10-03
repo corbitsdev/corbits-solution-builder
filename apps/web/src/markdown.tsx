@@ -15,14 +15,14 @@ import type { JSX, ReactNode } from "react";
 import { DEL, END, INS } from "./revisions.js";
 
 /**
- * Inline spans: code, bold, italic, with tracked changes threaded through them.
+ * Inline spans: code, bold, italic, links, with tracked changes threaded through them.
  * Formatting is matched first so a change that starts outside a bold run and
  * ends inside it still renders as bold; the change state carries across.
  */
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = [];
   // One pass, longest markers first, so `**` never matches as two `*`.
-  const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
+  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
   const state = { open: null as string | null };
   let last = 0;
   let match: RegExpExecArray | null;
@@ -34,6 +34,19 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     const key = `${keyPrefix}-${index++}`;
     if (token.startsWith("`")) {
       out.push(<code key={key}>{token.slice(1, -1).replace(MARKS, "")}</code>);
+    } else if (match[2] !== undefined && match[3] !== undefined) {
+      // A model wrote this href: only http(s) may navigate; anything else shows as its words.
+      const label = inline(match[2], key);
+      const href = match[3].replace(MARKS, "");
+      if (href.startsWith("https://") || href.startsWith("http://")) {
+        out.push(
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer">
+            {label}
+          </a>,
+        );
+      } else {
+        out.push(...label);
+      }
     } else if (token.startsWith("**")) {
       out.push(<strong key={key}>{marked(token.slice(2, -2), key, state)}</strong>);
     } else {
