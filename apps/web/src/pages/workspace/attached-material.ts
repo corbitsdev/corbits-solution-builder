@@ -14,7 +14,7 @@
  * project was further on. Pure, so the rule is testable without the hook:
  * the hook only sends what this returns.
  */
-import { renderInputs, splitRevision, type Inputs } from "@solutions-builder/app/stage-prompt";
+import { personWordsIn, renderInputs, type Inputs } from "@solutions-builder/app/stage-prompt";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { attachedMaterialNodes, type ChainNode } from "./approved-chain.ts";
 
@@ -58,12 +58,12 @@ const MATERIAL_HEADING = /^--- MATERIAL THE PERSON PROVIDED: (.+) ---$/gm;
 /**
  * A material mail taken apart for the transcript: the files it names and
  * the text it carries for them. Null for any other message. With a draft
- * on the table the mail travels as a revision turn, so the ask of one is
- * looked at too; a mail that only quotes a material mail further down,
+ * on the table the mail travels as a revision turn, so the person's words
+ * in one are looked at too; a mail that only quotes a material mail further down,
  * as a hand-off's recap does, is not one.
  */
 export function splitMaterialMail(body: string): { readonly names: readonly string[]; readonly material: string } | null {
-  const text = splitRevision(body)?.ask ?? body;
+  const text = personWordsIn(body)?.words ?? body;
   if (!text.startsWith(MATERIAL_MAIL_LEAD)) return null;
   const end = text.indexOf(MATERIAL_MAIL_END);
   if (end === -1) return null;

@@ -786,15 +786,17 @@
   border-bottom: 0;
 }
 
+/* Block, not flex: a flex container cannot ellipsize its bare label text. */
 .artifact-strip-tabs [role="tab"] {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  /* One line per tab: the list scrolls sideways, so a tab never shrinks
-     into a two-line label to make room for its neighbours. */
-  flex: none;
+  display: inline-block;
+  flex-shrink: 0;
+  max-width: 18rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* One size with the header's chips and selects; the border takes 2px. */
   height: 32px;
+  line-height: 30px;
   font-family: var(--wb-font-mono);
   font-size: 11.5px;
   color: var(--wb-muted-foreground);
@@ -808,6 +810,19 @@
   transition:
     color 150ms var(--ease-out, ease),
     background-color 150ms var(--ease-out, ease);
+}
+
+.artifact-strip-tabs [role="tab"] > span {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.artifact-strip-tabs [role="tab"] > span:first-child {
+  margin-inline-end: 6px;
+}
+
+.artifact-strip-tabs [role="tab"] > .artifact-strip-live {
+  margin-inline-start: 6px;
 }
 
 .artifact-strip-tabs [role="tab"]:hover {
