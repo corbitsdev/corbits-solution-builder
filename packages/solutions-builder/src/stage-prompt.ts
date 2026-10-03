@@ -85,7 +85,7 @@ export function splitRevision(text: string): { readonly document: string; readon
  * `ensureChoiceSection` writes the section deterministically after the
  * draft lands, so approval is never stuck behind a missed instruction.
  */
-/** A stage-3 choice the person's message made, taken apart for the prompt and the repair alike. */
+/** A stage-3 choice the person's message made, taken apart for the prompt. */
 function choiceIn(stage: number, userInput: string): { heading: string; letter: string; name: string | null } | null {
   if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return null;
   const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
@@ -106,18 +106,14 @@ export function withChoiceReminder(stage: number, userInput: string): string {
  * `## Chosen approach` section, gains one naming the choice. The section
  * records the decision — the comparison under Side by side still carries the
  * trade-offs — so the workspace offers approval instead of asking again. A
- * compliant draft, and anything that is not a stage-3 choice, passes through
- * untouched.
+ * compliant draft passes through untouched.
  */
-export function ensureChoiceSection(stage: number, userInput: string, draft: string): string {
-  const choice = choiceIn(stage, userInput);
-  if (!choice) return draft;
+export function ensureChoiceSection(choice: string, draft: string): string {
   if (/^##\s+chosen approach\b/im.test(draft)) return draft;
-  const named = choice.name !== null ? `Approach ${choice.letter} (${choice.name})` : "the chosen approach";
   const section = [
-    `## ${choice.heading}`,
+    `## Chosen approach: ${choice}`,
     "",
-    `The person chose ${named}. Why it won, and the rejected alternative, are read from the approaches below — this section records the choice so the document opens with what was decided.`,
+    `The person chose ${choice}. Why it won, and the rejected alternative, are read from the approaches below — this section records the choice so the document opens with what was decided.`,
   ].join("\n");
   const lines = draft.replace(/\r\n/g, "\n").split("\n");
   const inShort = lines.findIndex((line) => /^##\s+in short\b/i.test(line.trim()));

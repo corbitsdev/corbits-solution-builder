@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { withChoiceReminder } from "@solutions-builder/app/stage-prompt";
 import {
   api,
   type ArtifactNode,
@@ -59,6 +58,7 @@ export function StageDocument({
   draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
+  onChoose,
   onAddMaterial,
   onSubmit,
   soloApproval,
@@ -98,6 +98,8 @@ export function StageDocument({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
+  /** Sends stage 3's choice of approach. */
+  onChoose: (letter: string, name: string) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   onSubmit: () => void;
@@ -509,9 +511,7 @@ export function StageDocument({
                     key={section.heading}
                     variant="primary"
                     disabled={busy !== null}
-                    onClick={() =>
-                      onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
-                    }
+                    onClick={() => onChoose(letter, name)}
                   >
                     {name}
                   </Button>

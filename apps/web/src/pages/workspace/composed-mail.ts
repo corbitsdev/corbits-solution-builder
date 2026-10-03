@@ -69,20 +69,35 @@ const APP_SUBJECT = "[app:";
 const APP_LINES = new Map<string, readonly [(about: string) => string, ((about: string) => string) | null]>([
   ["package", [(audience) => `Asked for the package for ${audience}`, (audience) => `Answered the package request for ${audience}`]],
   ["brief", [(attempt) => `Recorded attempt ${attempt} for the build supervisor`, null]],
+  ["choice", [(approach) => `You chose ${approach}`, null]],
 ]);
 
-export function appSubject(kind: "package" | "brief", about: string): string {
-  return `${APP_SUBJECT}${kind}] ${about}`;
+type AppKind = "package" | "brief" | "choice";
+
+/** `about` comes last, after any other tags, so it is read back whole. */
+export function appSubject(kind: AppKind, about: string, tags: readonly string[] = []): string {
+  return `${APP_SUBJECT}${kind}] ${[...tags, about].join(" ")}`;
+}
+
+/** What a person-side app subject names, by kind; null for any other message. */
+function appSubjectOf(message: Pick<ChatMessage, "author" | "subject"> | undefined): { readonly kind: string; readonly about: string } | null {
+  const subject = message?.author === "me" ? (message.subject ?? "") : "";
+  if (!subject.startsWith(APP_SUBJECT)) return null;
+  return { kind: subject.slice(APP_SUBJECT.length, subject.indexOf("]")), about: subject.slice(subject.lastIndexOf("] ") + 2) };
+}
+
+/** The stage 3 approach a message chose, or null. */
+export function chosenApproach(message: Pick<ChatMessage, "author" | "subject">): string | null {
+  const app = appSubjectOf(message);
+  return app?.kind === "choice" ? app.about : null;
 }
 
 /** The line a message shows as instead of a bubble, or null. Only a
  *  person-side subject is read: nothing a specialist writes becomes one. */
 export function appEventLine(message: Pick<ChatMessage, "author" | "subject">, answers: Pick<ChatMessage, "author" | "subject"> | undefined): string | null {
-  const subject = (message.author === "me" ? message : answers?.author === "me" ? answers : undefined)?.subject ?? "";
-  const close = subject.startsWith(APP_SUBJECT) ? subject.indexOf("] ") : -1;
-  const lines = close < 0 ? undefined : APP_LINES.get(subject.slice(APP_SUBJECT.length, close));
-  if (!lines) return null;
+  const app = appSubjectOf(message.author === "me" ? message : answers);
+  const lines = app ? APP_LINES.get(app.kind) : undefined;
+  if (!app || !lines) return null;
   const [sent, answer] = lines;
-  const about = subject.slice(close + 2);
-  return message.author === "me" ? sent(about) : (answer?.(about) ?? null);
+  return message.author === "me" ? sent(app.about) : (answer?.(app.about) ?? null);
 }
