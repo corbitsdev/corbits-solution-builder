@@ -31,13 +31,16 @@ export function stageEvents(
   marks: readonly WithdrawnMark[],
 ): StageEvent[] {
   // Read by anyone the project is shared with, so each line says who acted
-  // and names the document as its tab does. Only the owner decides today.
-  const nodeOf = new Map(nodes.map((node) => [node.artifactId, node]));
+  // and names the document as its tab does. The owner is the only actor: the
+  // workflow authorises only the owner's principals at every stage
+  // (`ensureProjectWorkflowWith`, client.ts) and records anyone else's
+  // decision as refused, and a stakeholder's vote is an `audience` decision
+  // the owner records, which no line here shows.
   const out: StageEvent[] = [];
   const approved = (decision: DecisionRecord): string => {
-    const node = decision.artifactId ? nodeOf.get(decision.artifactId) : undefined;
-    if (!node) return `The owner approved stage ${String(stage)}`;
-    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.position ?? decision.version ?? 1)}`;
+    const node = nodes.find((entry) => entry.artifactId === decision.artifactId && entry.version === decision.version);
+    if (!node) return `The owner approved ${stageName(stage)}`;
+    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.version)}`;
   };
   const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
 
@@ -53,6 +56,8 @@ export function stageEvents(
   }
 
   for (const decision of decisions) {
+    // A refused decision changed nothing; the approval bar gives its reason.
+    if (!decision.accepted) continue;
     const at = decision.at ?? "";
     if (decision.kind === "approve" && decision.stage === stage) {
       out.push({
