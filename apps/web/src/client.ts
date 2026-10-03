@@ -10,6 +10,7 @@ import { AUTHORITIES, STAGES, type Authority, type Stage } from "@solutions-buil
 import { agentById, agentFor, evaluatorFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import type { Surface } from "@solutions-builder/app/project-workflow/contracts";
 import { newestRun, runStateOf, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -59,6 +60,7 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readDesignerSettings,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
   topLevelRunIds,
@@ -1268,6 +1270,20 @@ async function localizedRole(transport: ReturnType<typeof createHubTransport>, w
   return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
 }
 
+/**
+ * A stage's role as its specialist is deployed: localized, and for the
+ * experience designer, with the workspace's designer settings (surface,
+ * design language) read at deploy time the same way. A changed setting makes
+ * the rendered entry differ from the deployed one, so the next
+ * `ensureSpecialistDeployment` redeploys it.
+ */
+async function stageRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<AgentRole> {
+  const role = await localizedRole(transport, workspaceTenantId, agentFor(stage));
+  if (stage !== 4) return role;
+  const settings = await readDesignerSettings(transport, workspaceTenantId);
+  return { ...role, system: `${role.system}\n\n${designerGuidance(settings)}` };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   /** The build lane: the chosen worker, whether it is on this host, and how to get it when not. */
@@ -2372,7 +2388,7 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         undefined,
-        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
@@ -2407,7 +2423,7 @@ export const api = {
         specialistHubOrigin(),
         offeringId,
         undefined,
-        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
