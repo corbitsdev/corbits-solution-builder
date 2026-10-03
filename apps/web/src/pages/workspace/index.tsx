@@ -247,7 +247,11 @@ export function StageWorkspace({
   const lastFromPerson = foldedMessages.findLast((message) => message.author === "me");
   const ask = lastFromPerson && isEvaluatorNotes(lastFromPerson)
     ? "review"
-    : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+    : askKind(
+        pending?.body ?? null,
+        // Concept approval's draft is the packages, not a reply: its opening turn is not one.
+        stage === 5 ? detail.nodes.some((node) => node.kind === "audience_package") : foldedMessages.some((message) => message.author === "agent"),
+      );
   useBusyWhile(busy, specialistActivity(stage, ask));
 
   const openingDispatch = useOpeningDispatch({
