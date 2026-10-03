@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { verifyApiTarget, verifyWebTarget } from "./target-verify.js";
+import { runBounded, verifyApiTarget, verifyWebTarget } from "./target-verify.js";
+
+/** Only macOS can confine a started target; elsewhere none is started. */
+const confinable = process.platform === "darwin";
 
 /** A real Bun HTTP server, written to disk and started as a real subprocess
  *  — the fixture exercises the same "start a command, hit a port" path a
@@ -37,7 +40,7 @@ function freePort(): number {
   return 20_000 + Math.floor(Math.random() * 20_000);
 }
 
-describe("verifyApiTarget", () => {
+describe.if(confinable)("verifyApiTarget", () => {
   test("starts the process, waits for the port, and hits declared routes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "target-verify-api-"));
     try {
@@ -126,7 +129,7 @@ Bun.serve({ port, fetch: () => new Response("ok") });
   }, 15_000);
 });
 
-describe("ending a probed target", () => {
+describe.if(confinable)("ending a probed target", () => {
   test("a server started through a shell string is ended with the shell, not left on its port", async () => {
     const dir = await mkdtemp(join(tmpdir(), "target-verify-group-"));
     try {
@@ -155,7 +158,7 @@ describe("ending a probed target", () => {
   }, 20_000);
 });
 
-describe("verifyWebTarget", () => {
+describe.if(confinable)("verifyWebTarget", () => {
   test("loads the page and one referenced asset over HTTP, and says this is not a browser check", async () => {
     const dir = await mkdtemp(join(tmpdir(), "target-verify-web-"));
     try {
@@ -196,4 +199,35 @@ describe("verifyWebTarget", () => {
       await rm(dir, { recursive: true, force: true });
     }
   }, 15_000);
+});
+
+describe("confinement to the attempt directory", () => {
+  test.if(confinable)("a command reads nothing in the home directory, writes nothing outside the attempt and reaches no other machine", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "target-verify-confined-"));
+    const escape = join(homedir(), "sb-escape-test");
+    try {
+      const command = `cat ~/.ssh/known_hosts; cat ${homedir()}/.ssh/known_hosts; echo x > ${escape}; curl -sS -m 5 https://example.com; echo x > inside && cat inside`;
+      const run = await runBounded({ command: ["sh", "-c", command], cwd: dir, timeoutMs: 15_000 });
+      if (typeof run === "string") throw new Error(run);
+      expect(run.output).toContain(`${homedir()}/.ssh/known_hosts: Operation not permitted`);
+      expect(run.output).toContain(`${escape}: Operation not permitted`);
+      expect(run.output).toContain("Couldn't connect to server");
+      expect(run.output.trim().endsWith("x")).toBe(true);
+      expect(await Bun.file(escape).exists()).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test.if(!confinable)("where nothing can confine it, a command is not run", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "target-verify-confined-"));
+    try {
+      expect(await runBounded({ command: ["true"], cwd: dir, timeoutMs: 1_000 })).toBe(`no confinement on ${process.platform}`);
+      const result = await verifyApiTarget("api", { command: ["true"], cwd: dir, port: freePort(), routes: ["/"] });
+      expect(result.exercised).toBe(false);
+      expect(result.transcript).toContain(`not run: no confinement on ${process.platform}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -119,7 +119,8 @@ Bun.serve({
 const freePort = () => 20_000 + Math.floor(Math.random() * 20_000);
 
 describe("probeTargets", () => {
-  test("an api target that opens its port and answers its routes is verified; one that never opens is failed", async () => {
+  // Only macOS can confine a started target; elsewhere none is started.
+  test.if(process.platform === "darwin")("an api target that opens its port and answers its routes is verified; one that never opens is failed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "sb-probe-"));
     try {
       const server = await writeFixtureServer(dir);

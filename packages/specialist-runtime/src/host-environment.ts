@@ -12,6 +12,9 @@
  * its own sign-in. The same rule the sidecar provisioner keeps
  * (`packages/embed-hub/src/process-provisioner.ts`).
  */
+import { mkdir, mkdtemp, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, isAbsolute, join, sep } from "node:path";
 
 /** What any process needs to run at all. `LC_*` is matched by prefix. */
 const BASE_NAMES: readonly string[] = [
@@ -58,21 +61,82 @@ export function inheritedEnvironment(named: readonly string[] = [], host: NodeJS
   return env;
 }
 
-/** Every outbound connection refused but those to this machine. */
-const LOCAL_NETWORK_PROFILE =
-  '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))(allow network-outbound (remote unix-socket))';
+/** The toolchain directories under the home directory a confined command may read: each `PATH` entry there, and a `bin` entry's own install root (`~/.bun`, `~/.nvm/versions/node/<v>`), where a runtime keeps its libraries. Never the home directory itself, nor `~/.local`, which holds other programs' data. */
+async function toolchainUnder(home: string, path: string): Promise<string[]> {
+  const shared = new Set([home, join(home, ".local")]);
+  const dirs = new Set<string>();
+  for (const entry of path.split(delimiter)) {
+    if (!isAbsolute(entry)) continue;
+    let real: string;
+    try {
+      real = await realpath(entry);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw cause;
+    }
+    if (!real.startsWith(`${home}${sep}`)) continue;
+    dirs.add(real);
+    if (basename(real) === "bin" && !shared.has(dirname(real))) dirs.add(dirname(real));
+  }
+  return [...dirs];
+}
+
+const sbplString = (path: string) => JSON.stringify(path);
 
 /**
- * `command` confined to this machine's network where the platform can do
- * it: macOS's `sandbox-exec`. Elsewhere it runs as given, and `confined`
- * says so for the caller to record.
+ * Network: this machine only. Writes: the attempt directory, and the
+ * terminal and null devices. Reads: anywhere but the home directory, where
+ * only the attempt directory and the toolchain are readable, and their
+ * ancestors may be stat'ed, never listed: resolving a real path walks them.
+ * Later rules win.
  */
-export function localNetworkOnly(command: readonly string[]): { command: string[]; confined: boolean } {
-  if (process.platform !== "darwin") return { command: [...command], confined: false };
-  return { command: ["/usr/bin/sandbox-exec", "-p", LOCAL_NETWORK_PROFILE, ...command], confined: true };
+function attemptProfile(attempt: string, home: string, toolchain: readonly string[]): string {
+  const readable = [attempt, ...toolchain];
+  const ancestors = new Set<string>();
+  for (const dir of readable) {
+    for (let up = dirname(dir); up === home || up.startsWith(`${home}${sep}`); up = dirname(up)) ancestors.add(up);
+  }
+  return [
+    "(version 1)(allow default)",
+    '(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))(allow network-outbound (remote unix-socket))',
+    `(deny file-write*)(allow file-write* (subpath ${sbplString(attempt)}) (literal "/dev/null") (literal "/dev/dtracehelper") (regex #"^/dev/tty"))`,
+    `(deny file-read* (subpath ${sbplString(home)}))`,
+    `(allow file-read* ${readable.map((dir) => `(subpath ${sbplString(dir)})`).join(" ")})`,
+    // An allow with no filter would allow every path.
+    ancestors.size === 0 ? "" : `(allow file-read-metadata ${[...ancestors].map((dir) => `(literal ${sbplString(dir)})`).join(" ")})`,
+  ].join("");
 }
 
-/** The transcript's line for what a started process could connect to. */
-export function networkLine(confined: boolean): string {
-  return confined ? "network: this machine only (sandbox-exec)." : `network: not confined; there is no confinement on ${process.platform} here.`;
+export type Confined = {
+  readonly command: string[];
+  /** Set over everything else the process is given: its home and temp directory, both inside `scratch`. */
+  readonly env: Record<string, string>;
+  /** Inside the attempt directory; the caller removes it once the process has ended. */
+  readonly scratch: string;
+};
+
+/**
+ * `command` confined to the attempt directory `dir`, where the platform can
+ * confine it: macOS's `sandbox-exec`. Its home and temp directory are a
+ * fresh scratch directory inside the attempt, so a tool's caches and
+ * dotfiles are its own. Elsewhere there is no confinement and the command
+ * must not run; the reason is returned for the caller to record.
+ */
+export async function confinedToAttempt(command: readonly string[], dir: string): Promise<Confined | string> {
+  if (process.platform !== "darwin") return `no confinement on ${process.platform}`;
+  const attempt = await realpath(dir);
+  const home = await realpath(homedir());
+  await mkdir(join(attempt, ".solutions-builder"), { recursive: true });
+  const scratch = await mkdtemp(join(attempt, ".solutions-builder", "run-"));
+  await Promise.all([mkdir(join(scratch, "home")), mkdir(join(scratch, "tmp"))]);
+  const profile = attemptProfile(attempt, home, await toolchainUnder(home, process.env.PATH ?? ""));
+  return {
+    command: ["/usr/bin/sandbox-exec", "-p", profile, ...command],
+    env: { HOME: join(scratch, "home"), TMPDIR: join(scratch, "tmp") },
+    scratch,
+  };
 }
+
+/** The transcript's line for what a started process could reach. */
+export const CONFINEMENT_LINE =
+  "confined (sandbox-exec): network to this machine only; writes only inside the attempt directory; nothing in the home directory readable but the attempt directory and the toolchain.";

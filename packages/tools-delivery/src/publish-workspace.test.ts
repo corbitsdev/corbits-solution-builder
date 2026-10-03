@@ -67,7 +67,8 @@ type FallbackResult = {
 };
 
 describe("publish_workspace (fallback path)", () => {
-  test("archives the current attempt, checks the archive against its own manifest, and probes the target it is told about", async () => {
+  // Only macOS can confine a started target; elsewhere none is started.
+  test.if(process.platform === "darwin")("archives the current attempt, checks the archive against its own manifest, and probes the target it is told about", async () => {
     const cwd = await fixtureWorkspace();
     try {
       const port = 20_000 + Math.floor(Math.random() * 20_000);

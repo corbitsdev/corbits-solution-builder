@@ -4,14 +4,15 @@
  * `RUN_DECLARATION` naming its test command and how to start it; when the
  * host packages the attempt it runs the tests and starts the target from
  * the attempt directory (`verify.ts`), each bounded in time and confined to
- * this machine's network where the platform can confine it. A declaration
+ * that directory and this machine's network (`confinedToAttempt`), or not
+ * run at all where the platform cannot confine it. A declaration
  * that is missing or does not parse is a failed check, never a skipped one.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
 import type { VerificationItem } from "./delivery.js";
-import { networkLine } from "./host-environment.js";
+import { CONFINEMENT_LINE } from "./host-environment.js";
 import { describeRun, runBounded } from "./target-verify.js";
 import { classifyTarget } from "./targets.js";
 import type { TargetProbe } from "./verify.js";
@@ -51,6 +52,7 @@ async function readRunDeclaration(dir: string): Promise<RunDeclaration | string>
 /** Runs the declared test command in the attempt directory and records how it ended. */
 async function runDeclaredTests(dir: string, command: string): Promise<VerificationItem> {
   const run = await runBounded({ command: ["sh", "-c", command], cwd: dir, timeoutMs: TEST_TIMEOUT_MS, env: { CI: "1" } });
+  if (typeof run === "string") return notRun("tests", "tests", run);
   const passed = !run.timedOut && run.exitStatus === 0;
   return {
     category: "tests",
@@ -58,7 +60,7 @@ async function runDeclaredTests(dir: string, command: string): Promise<Verificat
     required: true,
     status: passed ? "verified" : "failed",
     checkedBy: "tool",
-    detail: `run by the host: \`${command}\` ${describeRun(run, TEST_TIMEOUT_MS)}; ${networkLine(run.confined)}\n${run.output.trim().slice(-TEST_OUTPUT_KEEP) || "(no output)"}`,
+    detail: `run by the host: \`${command}\` ${describeRun(run, TEST_TIMEOUT_MS)}; ${CONFINEMENT_LINE}\n${run.output.trim().slice(-TEST_OUTPUT_KEEP) || "(no output)"}`,
   };
 }
 

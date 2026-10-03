@@ -7,8 +7,9 @@
  * by the person, by the build engineer, or by the attempt's own run
  * declaration (`run-declared.ts`) — and the resulting `TargetVerification`
  * is recorded on the delivery manifest, where stage 9 and the person read
- * it. What a target starts may reach this machine's network and nothing
- * else, where the platform can confine it (`localNetworkOnly`).
+ * it. What a target starts is confined to the attempt directory and this
+ * machine's network (`confinedToAttempt`); where the platform cannot
+ * confine it, it is not started at all.
  *
  * The `web` and `api` checks are HTTP-only. There is no headless browser in this repo (no
  * playwright, no puppeteer) — `verifyWebTarget` fetches pages over plain
@@ -16,8 +17,9 @@
  * than implying a browser check that is not there.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { inheritedEnvironment, localNetworkOnly, networkLine } from "./host-environment.js";
-import type { TargetVerification } from "./targets.js";
+import { rm } from "node:fs/promises";
+import { CONFINEMENT_LINE, confinedToAttempt, inheritedEnvironment } from "./host-environment.js";
+import type { TargetModality, TargetVerification } from "./targets.js";
 
 const DEFAULT_START_TIMEOUT_MS = 15_000;
 const PORT_POLL_INTERVAL_MS = 200;
@@ -60,23 +62,24 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Starts a target as the leader of its own process group, so ending it
- * ends what it started too: a start command given as one shell string runs
- * through `sh -c`, and ending only the shell left the server it started
- * listening on the port, in the attempt directory. On Windows there are no
- * groups; the tree is taken down by pid.
+ * Starts a target, confined to its attempt directory, as the leader of its
+ * own process group, so ending it ends what it started too: a start command
+ * given as one shell string runs through `sh -c`, and ending only the shell
+ * left the server it started listening on the port, in the attempt
+ * directory. Returns why it was not started where it cannot be confined.
  */
-type Started = { child: ChildProcess; exited: Promise<void>; confined: boolean };
+type Started = { child: ChildProcess; exited: Promise<void>; scratch: string };
 
-function startTarget(input: Omit<ProcessTarget, "port">, output?: Buffer[]): Started {
-  const { command: confinedCommand, confined } = localNetworkOnly(input.command);
-  const [command, ...rest] = confinedCommand;
+async function startTarget(input: Omit<ProcessTarget, "port">, output?: Buffer[]): Promise<Started | string> {
+  const confined = await confinedToAttempt(input.command, input.cwd);
+  if (typeof confined === "string") return confined;
+  const [command, ...rest] = confined.command;
   const child = spawn(command ?? "", rest, {
     cwd: input.cwd,
     stdio: ["ignore", "pipe", "pipe"],
     // Never the host's own environment: see host-environment.ts.
-    env: { ...inheritedEnvironment(), ...input.env },
-    detached: process.platform !== "win32",
+    env: { ...inheritedEnvironment(), ...input.env, ...confined.env },
+    detached: true,
   });
   // Kept when asked for, else drained and discarded: a target that fills its pipe would otherwise stall.
   if (output) {
@@ -93,18 +96,21 @@ function startTarget(input: Omit<ProcessTarget, "port">, output?: Buffer[]): Sta
       resolve();
     });
   });
-  return { child, exited, confined };
+  return { child, exited, scratch: confined.scratch };
 }
 
-async function killProcess(target: { child: ChildProcess; exited: Promise<void> }): Promise<void> {
-  const { child, exited } = target;
-  if (child.pid === undefined) return;
-  const pid = child.pid;
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }).once("error", () => child.kill("SIGKILL"));
-    await exited;
+/** A target that was never started, and why. */
+function notStarted(target: string, modality: TargetModality, command: readonly string[], reason: string): TargetVerification {
+  return { target, modality, exercised: false, realInputFed: false, ranSuccessfully: false, producedOutput: false, transcript: `$ ${command.join(" ")}\n\nnot run: ${reason}` };
+}
+
+async function killProcess(target: Started): Promise<void> {
+  const { child, exited, scratch } = target;
+  if (child.pid === undefined) {
+    await rm(scratch, { recursive: true, force: true });
     return;
   }
+  const pid = child.pid;
   const signalGroup = (signal: NodeJS.Signals) => {
     try {
       process.kill(-pid, signal);
@@ -121,6 +127,7 @@ async function killProcess(target: { child: ChildProcess; exited: Promise<void> 
   // outlives its probe.
   signalGroup("SIGTERM");
   setTimeout(() => signalGroup("SIGKILL"), 2_000).unref();
+  await rm(scratch, { recursive: true, force: true });
 }
 
 /**
@@ -142,7 +149,8 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
       transcript: "no routes were declared to check — nothing to verify against a running process.",
     };
   }
-  const child = startTarget(input);
+  const child = await startTarget(input);
+  if (typeof child === "string") return notStarted(target, "api", input.command, child);
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
     if (!opened) {
@@ -153,7 +161,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
         realInputFed: false,
         ranSuccessfully: false,
         producedOutput: false,
-        transcript: `$ ${input.command.join(" ")}\n\n${networkLine(child.confined)}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
+        transcript: `$ ${input.command.join(" ")}\n\n${CONFINEMENT_LINE}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
       };
     }
     const results: { route: string; status: number | "unreachable"; bodyLength: number }[] = [];
@@ -173,7 +181,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
     const producedOutput = results.some((r) => typeof r.status === "number" && r.status < 500 && r.bodyLength > 0);
     const transcript = [
       `$ ${input.command.join(" ")}`,
-      networkLine(child.confined),
+      CONFINEMENT_LINE,
       `port ${input.port} opened.`,
       results.map((r) => `GET ${r.route} -> ${r.status}${typeof r.status === "number" ? ` (${r.bodyLength} bytes)` : ""}`).join("\n"),
     ].join("\n\n");
@@ -202,7 +210,8 @@ function resolveAsset(base: string, assetPath: string): string | null {
  */
 export async function verifyWebTarget(target: string, input: WebVerificationInput): Promise<TargetVerification> {
   const path = input.path ?? "/";
-  const child = startTarget(input);
+  const child = await startTarget(input);
+  if (typeof child === "string") return notStarted(target, "web", input.command, child);
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
     if (!opened) {
@@ -213,7 +222,7 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
         realInputFed: false,
         ranSuccessfully: false,
         producedOutput: false,
-        transcript: `$ ${input.command.join(" ")}\n\n${networkLine(child.confined)}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
+        transcript: `$ ${input.command.join(" ")}\n\n${CONFINEMENT_LINE}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
       };
     }
     const pageUrl = `http://127.0.0.1:${input.port}${path}`;
@@ -245,7 +254,7 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
     const producedOutput = html.trim().length > 0;
     const transcript = [
       `$ ${input.command.join(" ")}`,
-      networkLine(child.confined),
+      CONFINEMENT_LINE,
       `port ${input.port} opened.`,
       `GET ${pageUrl} -> ${pageStatus}${html.length > 0 ? ` (${html.length} bytes)` : ""}`,
       assetLine,
@@ -264,7 +273,6 @@ export type BoundedRun = {
   readonly exitStatus: number | null;
   readonly signal: string | null;
   readonly timedOut: boolean;
-  readonly confined: boolean;
   /** Its stdout and stderr as they came, the last `OUTPUT_KEEP` characters. */
   readonly output: string;
 };
@@ -272,11 +280,13 @@ export type BoundedRun = {
 /**
  * Runs `command` until it ends or `timeoutMs` passes, whichever is first,
  * and returns how it ended with its output's tail. Whatever it left running
- * in its process group is ended either way.
+ * in its process group is ended either way. Returns why it was not run
+ * where it cannot be confined.
  */
-export async function runBounded(input: { command: readonly string[]; cwd: string; timeoutMs: number; env?: Readonly<Record<string, string>> }): Promise<BoundedRun> {
+export async function runBounded(input: { command: readonly string[]; cwd: string; timeoutMs: number; env?: Readonly<Record<string, string>> }): Promise<BoundedRun | string> {
   const output: Buffer[] = [];
-  const started = startTarget(input, output);
+  const started = await startTarget(input, output);
+  if (typeof started === "string") return started;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -290,7 +300,6 @@ export async function runBounded(input: { command: readonly string[]; cwd: strin
     exitStatus: started.child.exitCode,
     signal: started.child.signalCode,
     timedOut,
-    confined: started.confined,
     output: Buffer.concat(output).toString("utf8").slice(-OUTPUT_KEEP),
   };
 }
@@ -309,7 +318,8 @@ export function describeRun(run: BoundedRun, timeoutMs: number): string {
  */
 export async function verifyCliTarget(target: string, input: { command: readonly string[]; cwd: string; timeoutMs: number }): Promise<TargetVerification> {
   const run = await runBounded(input);
-  const transcript = [`$ ${run.command}`, networkLine(run.confined), describeRun(run, input.timeoutMs), run.output.trim() || "(no output)"].join("\n\n");
+  if (typeof run === "string") return notStarted(target, "cli", input.command, run);
+  const transcript = [`$ ${run.command}`, CONFINEMENT_LINE, describeRun(run, input.timeoutMs), run.output.trim() || "(no output)"].join("\n\n");
   return {
     target,
     modality: "cli",
