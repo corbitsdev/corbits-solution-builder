@@ -3025,8 +3025,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .stage-view > .banner,
 .stage-view > .stage-gate,
 .stage-view > .stage-model-row,
-.stage-view > .model-nudge,
-.stage-view > .model-nudge-pending {
+.stage-view > .model-nudge {
   flex: none;
 }
 
@@ -3143,10 +3142,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
   cursor: pointer;
-}
-
-.model-nudge-pending {
-  margin: 0 var(--space-4);
 }
 
 /* KEEP: stage-view cards + stage-conversation bounds (conv) */

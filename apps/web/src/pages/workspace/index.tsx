@@ -18,7 +18,7 @@
  * and each render block a focused component (`workspace-chrome.tsx`). What
  * stays here is the wiring between them and the stage-specific composition.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiFailure,
@@ -71,7 +71,8 @@ import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, inferenceRemoved } from "./inference-options.ts";
-import { loadDismissedDefault, saveDismissedDefault, useModelMismatch, writeModelMismatch } from "./model-nudge-store.ts";
+import { dismissPrimary, useDismissedPrimary, useModelMismatch, writeModelMismatch } from "./model-nudge-store.ts";
+import { useMountEffect } from "../../use-mount-effect.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
@@ -432,10 +433,7 @@ export function StageWorkspace({
       cancelled = true;
     };
   }, [detail.project.id]);
-  const [nudgeDismissedFor, setNudgeDismissedFor] = useState<string | null>(null);
-  useEffect(() => {
-    setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));
-  }, [detail.project.id, stage]);
+  const nudgeDismissedFor = useDismissedPrimary(detail.project.id, stage);
   const mismatchChoice = useModelMismatch();
   const [dontAskAgain, setDontAskAgain] = useState(false);
   // The primary is Settings' top row: the first inference option.
@@ -448,29 +446,15 @@ export function StageWorkspace({
     activeModel.canonicalName !== workspaceDefaultModel.canonicalName;
   const modelNudgeVisible = modelDiffers && mismatchChoice === "ask" && nudgeDismissedFor !== workspaceDefaultModel?.canonicalName;
   const dismissModelNudge = () => {
-    if (!workspaceDefaultModel) return;
-    saveDismissedDefault(detail.project.id, stage, workspaceDefaultModel.canonicalName);
-    setNudgeDismissedFor(workspaceDefaultModel.canonicalName);
+    if (workspaceDefaultModel) dismissPrimary(detail.project.id, stage, workspaceDefaultModel.canonicalName);
   };
-  // A switch to the primary never lands mid-reply: it waits here until the
-  // specialist is idle. Asked for at most once per project, stage and
-  // primary, so a failed switch is reported rather than retried in a loop.
-  const primaryKey = `${detail.project.id}:${stage}:${workspaceDefaultModel?.canonicalName}`;
-  const [primarySwitchWanted, setPrimarySwitchWanted] = useState(false);
-  const primarySwitchAskedFor = useRef<string | null>(null);
-  const wantPrimarySwitch = () => {
-    primarySwitchAskedFor.current = primaryKey;
-    setPrimarySwitchWanted(true);
-  };
-  useEffect(() => setPrimarySwitchWanted(false), [detail.project.id, stage]);
-  useEffect(() => {
-    if (mismatchChoice === "switch" && modelDiffers && primarySwitchAskedFor.current !== primaryKey) wantPrimarySwitch();
-  }, [mismatchChoice, modelDiffers, primaryKey]);
-  useEffect(() => {
-    if (!primarySwitchWanted || busy || modelSwitch.switching || !defaultOffering) return;
-    setPrimarySwitchWanted(false);
-    if (modelDiffers) void modelSwitch.switchTo(defaultOffering.offeringId);
-  }, [primarySwitchWanted, busy, modelSwitch.switching, defaultOffering, modelDiffers]);
+  // "Always switch" applies once the stage is known to be idle, so a switch
+  // never lands mid-reply, and tries each primary once: a failed switch is
+  // reported, not retried.
+  const autoSwitchTo =
+    mismatchChoice === "switch" && modelDiffers && !busy && runState.state !== "unknown" && modelSwitch.target !== defaultOffering?.offeringId
+      ? defaultOffering
+      : undefined;
   // Fires the hand-off for ANY redeploy of a stage that already has mail
   // under a prior address — an explicit switch (above) or any other cause
   // (restart, recovery) — never for a brand-new stage (CL-8927's own opening
@@ -945,6 +929,7 @@ export function StageWorkspace({
           <p className="model-nudge-text">
             This project uses {activeModel.providerLabel} · {activeModel.canonicalName}. Your primary is now{" "}
             {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
+            {busy ? " Switching waits for the reply in flight." : null}
           </p>
           <div className="model-nudge-actions">
             <label className="model-nudge-remember" title="Change this any time in Settings → Inference">
@@ -961,11 +946,14 @@ export function StageWorkspace({
               {dontAskAgain ? "Always keep" : `Keep ${activeModel.canonicalName}`}
             </Button>
             <Button
-              disabled={modelSwitch.switching}
+              disabled={busy || modelSwitch.switching}
               onClick={() => {
+                // "Always switch" is carried out by `autoSwitchTo` below.
                 if (dontAskAgain) writeModelMismatch("switch");
-                dismissModelNudge();
-                wantPrimarySwitch();
+                else if (defaultOffering) {
+                  dismissModelNudge();
+                  void modelSwitch.switchTo(defaultOffering.offeringId);
+                }
               }}
             >
               {dontAskAgain ? "Always switch" : `Switch to ${workspaceDefaultModel.canonicalName}`}
@@ -973,11 +961,7 @@ export function StageWorkspace({
           </div>
         </div>
       ) : null}
-      {primarySwitchWanted && busy ? (
-        <p className="model-nudge-pending inline-note" role="status">
-          Switching to {workspaceDefaultModel?.canonicalName} once this reply finishes.
-        </p>
-      ) : null}
+      {autoSwitchTo ? <OnMount action={() => void modelSwitch.switchTo(autoSwitchTo.offeringId)} /> : null}
 
       {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
       {modelHandoff.error ? (
@@ -1232,6 +1216,12 @@ export function StageWorkspace({
 }
 
 /** Loads the stage-4 design history and its feedback, then renders the flow. */
+/** Carries out, after render, a decision the render made. */
+function OnMount({ action }: { action: () => void }) {
+  useMountEffect(action);
+  return null;
+}
+
 function DesignPanel({
   detail,
   tenantId,
