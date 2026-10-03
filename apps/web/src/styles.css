@@ -2844,22 +2844,29 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   outline-offset: 3px;
 }
 
+/* A popover sits in the top layer, so it is placed against the window,
+   opening upward from the dock's ring. */
 .guide-panel {
-  position: absolute;
-  /* Opens upward: it lives at the bottom of the window now. */
-  bottom: calc(100% + var(--space-2));
-  right: 0;
-  z-index: 30;
+  inset: auto;
+  right: var(--space-6);
+  bottom: calc(var(--space-6) + 44px + var(--space-2));
+  margin: 0;
+  border: 0;
   width: 380px;
   max-width: min(380px, calc(100vw - var(--space-8)));
+  max-height: calc(100vh - var(--space-6) - 44px - var(--space-8));
   border-radius: var(--radius-panel);
   padding: var(--space-4);
   background: var(--wb-background);
+  color: var(--wb-foreground);
   box-shadow:
     0 0 0 1px var(--wb-border),
     0 12px 32px rgb(0 0 0 / 28%);
-  display: grid;
   gap: var(--space-2);
+}
+
+.guide-panel:popover-open {
+  display: grid;
 }
 
 .guide-panel-head {
