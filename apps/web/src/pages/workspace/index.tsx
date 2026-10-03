@@ -932,7 +932,6 @@ export function StageWorkspace({
   const stackAsk = stage6StackRemediation();
   const approveControl = (
     <ApproveControl
-      label={detail.soloApproval ? "Approve" : "Send for approval"}
       evaluator={evaluated ? evaluator : null}
       notesError={notesError}
       waiting={

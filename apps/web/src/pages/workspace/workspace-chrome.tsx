@@ -4,7 +4,7 @@
  * presentational — every prop is already resolved by the stage workspace
  * above them.
  */
-import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { Button, stageName } from "../../components.jsx";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
 import { RETURN_TO } from "../send-back.jsx";
@@ -16,16 +16,11 @@ import { WaitingTips } from "./waiting-tips.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
 
 /**
- * A stage evaluator's advisory verdict, as one line in the approval
- * bar (#157): a stance beside the approve button, with the evaluator's notes
- * opening beneath it on a click and closing on a second click or Escape.
- * Never a gate: the approve button's enablement is unchanged. A full
- * verdict inline above the composer pushed the conversation out of
- * view, and the gate repeated its notes a second time.
+ * A stage evaluator's advisory verdict, as one short line in the approval
+ * row (#157), its notes folded behind a native disclosure in the row's own
+ * flow. Never a gate: the approve button's enablement is unchanged.
  */
 export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: StageEvaluator; notesError?: string | null }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
   if (evaluator.status === "idle") return null;
   const judged =
     evaluator.status === "checking"
@@ -33,39 +28,27 @@ export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: S
       : evaluator.status === "unavailable"
         ? { label: "Evaluator unavailable", tone: "unavailable", notes: [evaluator.reason] }
         : evaluator.verdict.ready
-          ? { label: "Approved by evaluator", tone: "ready", notes: evaluator.verdict.notes }
-          : { label: "Not approved by evaluator", tone: "not-ready", notes: evaluator.verdict.notes };
-  const stance = notesError
-    ? { ...judged, notes: [...judged.notes, `These notes could not be sent to the specialist: ${notesError}`] }
-    : judged;
-  const hasNotes = stance.notes.length > 0;
+          ? { label: "Evaluator approved", tone: "ready", notes: evaluator.verdict.notes }
+          : { label: "Evaluator: not yet", tone: "not-ready", notes: evaluator.verdict.notes };
+  const notes = notesError ? [...judged.notes, `These notes could not be sent to the specialist: ${notesError}`] : judged.notes;
+  if (notes.length === 0) {
+    return (
+      <span className="evaluator-stance" data-tone={judged.tone} aria-live="polite">
+        {judged.label}
+      </span>
+    );
+  }
   return (
-    <span className="evaluator-stance" data-tone={stance.tone} data-open={open || undefined} aria-live="polite">
-      <button
-        type="button"
-        className="evaluator-stance-trigger"
-        aria-label="Evaluator verdict"
-        aria-expanded={hasNotes ? open : undefined}
-        aria-controls={hasNotes ? id : undefined}
-        onClick={() => setOpen((was) => !was)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
-        }}
-      >
-        {stance.label}
-      </button>
-      {hasNotes ? (
-        <div id={id} className="evaluator-notes">
-          <ul>
-            {stance.notes.map((note, index) => (
-              <li key={index}>
-                <InlineMarkdown source={note} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </span>
+    <details className="evaluator-stance" data-tone={judged.tone} aria-live="polite">
+      <summary>{judged.label}</summary>
+      <ul className="evaluator-notes">
+        {notes.map((note, index) => (
+          <li key={index}>
+            <InlineMarkdown source={note} />
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
