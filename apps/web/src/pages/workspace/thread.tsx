@@ -144,6 +144,7 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  onAnswer,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -178,7 +179,10 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** Sends a tapped answer to the latest turn's question, as typing it would. */
+  onAnswer?: ((answer: string) => void) | undefined;
 }) {
+  const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -271,11 +275,15 @@ export function StageConversation({
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
-                  ) : draft ? (
-                    <>
-                      <DraftReference draft={draft} onOpen={onOpenVersion} />
-                      {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
-                    </>
+                  ) : !you ? (
+                    <SpecialistTurn
+                      text={text}
+                      note={null}
+                      draft={draft}
+                      onOpenVersion={onOpenVersion ?? (() => undefined)}
+                      onAnswer={message.id === lastAgentId && !pending ? onAnswer : undefined}
+                      onDraft={onValueChange}
+                    />
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -447,6 +455,7 @@ export function SpecialistTurn({
                 ))}
               </div>
             ) : null}
+            {segment.options.length > 0 && onAnswer ? <p className="turn-option-hint">Or type your own answer below.</p> : null}
           </div>
         );
       })}

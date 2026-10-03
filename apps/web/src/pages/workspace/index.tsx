@@ -792,6 +792,10 @@ export function StageWorkspace({
         setComposer("");
         void send(body);
       }}
+      onAnswer={(answer) => {
+        setComposer("");
+        void send(answer);
+      }}
       working={sending}
       disabled={!agentAddress}
       withdrawnIds={withdrawnIds}
