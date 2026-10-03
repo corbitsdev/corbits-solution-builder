@@ -815,17 +815,26 @@ export function AudiencePackages({
     setInlineNote("");
     setInlineBusy(null);
   }, [selected?.variant]);
-  const recordInlineDecision = async (decision: AudienceVote["decision"]) => {
-    if (!selected) return;
-    setInlineBusy(decision);
+  const recordDecision = async (
+    node: (typeof packages)[number],
+    decision: AudienceVote["decision"],
+    note: string,
+    setBusy: (busy: AudienceVote["decision"] | null) => void,
+  ): Promise<boolean> => {
+    setBusy(decision);
     try {
-      await decide(selected, decision, inlineNote);
-      setInlineNote("");
+      await decide(node, decision, note);
+      return true;
     } catch {
       // decide() already surfaced the error via setError.
+      return false;
     } finally {
-      setInlineBusy(null);
+      setBusy(null);
     }
+  };
+  const recordInlineDecision = async (decision: AudienceVote["decision"]) => {
+    if (!selected) return;
+    if (await recordDecision(selected, decision, inlineNote, setInlineBusy)) setInlineNote("");
   };
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
@@ -917,12 +926,7 @@ export function AudiencePackages({
             {voteNode?.variant ? (
               <DecisionButtons
                 busy={gateBusy}
-                onDecide={(decision) => {
-                  setGateBusy(decision);
-                  void decide(voteNode, decision, "")
-                    .catch(() => undefined)
-                    .finally(() => setGateBusy(null));
-                }}
+                onDecide={(decision) => void recordDecision(voteNode, decision, "", setGateBusy)}
               />
             ) : null}
           </div>
