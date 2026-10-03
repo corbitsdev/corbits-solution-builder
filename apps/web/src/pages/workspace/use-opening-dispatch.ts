@@ -187,8 +187,10 @@ export function useOpeningDispatch({
           const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
           // The workspace's language is in the specialist's own instructions
           // (`localizedRole`, client.ts), where a changed setting redeploys
-          // it; the mail carries the record and the stage's lead, nothing else.
-          const body = chain ? `${chain}\n\n${opening}` : opening;
+          // it; the mail carries today's date, the record and the stage's lead.
+          // Stage 1's opening is the person's own words, so it goes as written.
+          const today = stage > 1 ? `Today is ${new Date().toLocaleDateString(undefined, { dateStyle: "full" })}.` : "";
+          const body = [today, chain, opening].filter(Boolean).join("\n\n");
           await api.sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` });
           if (cancelled) return;
           // Marked as opened only now that the send is confirmed —
