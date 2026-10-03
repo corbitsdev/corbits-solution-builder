@@ -38,9 +38,10 @@ A cost approval with these headings, after \`## In short\`:
   ("Build: tokens in", not "BI"), and give tokens in and tokens out as
   separate lines, running cost per month. Where a price per token is given,
   add the approximate money figure and its currency beside the tokens; where
-  none is, the amount is the token count alone. Give the time too. End with exactly one fenced block, opened
-  with \`\`\`json estimate, holding a single JSON object of this shape (from
-  \`estimate.ts\`; add or rename no field):
+  none is, the amount is the token count alone. Give the time too. End
+  with exactly one fenced block, opened with \`\`\`json estimate, holding a
+  single JSON object of this shape (from \`estimate.ts\`; add or rename no
+  field):
 
   \`\`\`
   {
