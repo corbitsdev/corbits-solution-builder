@@ -87,7 +87,7 @@ import {
   type DeckDesignDocument,
   type DesignDocumentScope,
 } from "./deck-design-documents.ts";
-import { parseVersionId, type DesignFeedbackDisposition, type DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
+import { parseVersionId, type ArtifactMetadata, type DesignFeedbackDisposition, type DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
 import {
@@ -2044,15 +2044,21 @@ export const api = {
   workspaceTenantId: () => resolveWorkspace(createHubTransport()).then((workspace) => workspace?.tenantId ?? null),
   /**
    * The document a drafting stage's specialist keeps with the artifact tools:
-   * the newest artifact of the stage's kind that a workflow run wrote in the
+   * the newest artifact of the stage's kind that a workflow run or an import wrote in the
    * project's tenant, and its versions oldest first. Null when there is none
    * yet. A read that fails throws, so the workspace can say the document is
    * unavailable rather than fall back to an older draft.
    */
   stageWorkArtifact: async (tenantId: string, kind: string): Promise<StageWorkArtifact | null> => {
     const transport = createHubTransport();
-    const written = (await listArtifacts(transport, tenantId, { kind }))
-      .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
+    // An import writes the document through the installer, whose artifacts are
+    // all of kind "document"; its `sb` names the stage kind, and the
+    // specialist continues it rather than start a new one.
+    const written = (await listArtifacts(transport, tenantId))
+      .filter((item) => {
+        const sb = (item.metadata as Partial<ArtifactMetadata> | null)?.sb;
+        return item.archivedAt === null && ((item.kind === kind && item.source.origin === "workflow") || (sb?.kind === kind && !sb.variant));
+      })
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
     if (!written) return null;
     const [artifact, versions] = await Promise.all([
