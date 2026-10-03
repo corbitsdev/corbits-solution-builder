@@ -68,7 +68,7 @@ import {
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
 import { parseBundle } from "./project-export.ts";
-import { importProject as importProjectBundle } from "./project-import.ts";
+import { importProject as importProjectBundle, type ImportWrite } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
 import { replayAdoption } from "./adoption-replay.ts";
@@ -87,7 +87,7 @@ import {
   type DeckDesignDocument,
   type DesignDocumentScope,
 } from "./deck-design-documents.ts";
-import { parseVersionId, type DesignFeedbackDisposition, type DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
+import { parseVersionId, type ArtifactMetadata, type DesignFeedbackDisposition, type DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
 import {
@@ -456,11 +456,11 @@ export type ImportOutcome = {
   readonly projectId: string;
   readonly artifacts: number;
   readonly conversations: number;
-  /** Version 1 bundles only: versions written across every artifact. */
+  /** Versions written across every artifact. */
   readonly versions?: number;
-  /** Version 1 bundles only: the stage the workflow reports after the
-   *  replay (null when there was nothing to replay or it never started),
-   *  why the replay stopped short, and what the plan could not do. */
+  /** The stage the workflow reports after the replay (null when there was
+   *  nothing to replay or it never started), why the replay stopped short,
+   *  and what the plan could not do. */
   readonly landing?: { readonly landed: number | null; readonly stopped: string | null; readonly notes: readonly string[] };
 };
 
@@ -1560,52 +1560,25 @@ export const api = {
       };
     }),
   /**
-   * Imports a project bundle another copy of this app exported
-   * (`project-export.ts`'s `assembleBundle`) as a NEW project — client-driven,
-   * no host route. `parseBundle` gives a clear message for the wrong format,
-   * version, or a missing key; `project-import.ts`'s `importPlan` re-keys
-   * every bundled artifact's `sb` metadata to the new project id. The new
-   * project's own workflow starts fresh at stage 1 — no approval is forged
-   * from the bundle's history.
+   * Imports a project another copy of this app exported
+   * (`project-export.ts`) as a NEW project — client-driven, no host route.
+   * `parseBundle` gives a clear message for the wrong format, version, or a
+   * missing key; `project-import.ts` writes every artifact's versions in
+   * order, re-keyed to the new project, so version numbers and build
+   * attempts survive.
    *
    * A version 1 bundle, exported from `main`, carries every artifact
    * version and the ledger the project's position lived in
-   * (`legacy-import.ts`). Its artifacts come in with all their versions,
-   * and once the new project's workflow is running the old ledger is
-   * replayed on it as real decisions (`adoption-replay.ts`), so the project
-   * lands where `main` left it, through stage 6. A replay that stops short
-   * is reported as `landing.stopped`, not thrown: the project is imported
+   * (`legacy-import.ts`). Either way, once the new project's workflow is
+   * running the recorded approvals are replayed on it as real decisions
+   * (`adoption-replay.ts`), through stage 6. A replay that stops short is
+   * reported as `landing.stopped`, not thrown: the project is imported
    * either way.
    */
   importProject: async (raw: unknown): Promise<ImportOutcome> => {
-    if (!isLegacyBundle(raw)) {
-      return asWorkspaceOwner(async (transport, workspaceTenantId) => {
-        const bundle = parseBundle(raw);
-        return importProjectBundle(bundle, {
-          createProject: async ({ title, policy }) => {
-            const { project } = await installerCreateProject(transport, workspaceTenantId, {
-              title,
-              slug: projectSlug(),
-              policy: policy as ProjectPolicy,
-            });
-            return { projectId: project.id };
-          },
-          createArtifact: async ({ title, content, sb }) => {
-            // The project's own tenant (#29): `sb.projectId` names it.
-            const artifact = await installerCreateArtifact(transport, sb.projectId as string, {
-              title,
-              content,
-              metadata: { sb },
-            });
-            return { id: artifact.id };
-          },
-        });
-      });
-    }
     const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const bundle = parseLegacyBundle(raw);
-      return importLegacyProject(bundle, {
-        createProject: async ({ title, policy }) => {
+      const writes = {
+        createProject: async ({ title, policy }: { title: string; policy: unknown }) => {
           const { project } = await installerCreateProject(transport, workspaceTenantId, {
             title,
             slug: projectSlug(),
@@ -1613,30 +1586,32 @@ export const api = {
           });
           return { projectId: project.id };
         },
-        createArtifact: async ({ title, content, sb }) => {
+        // The project's own tenant (#29): `sb.projectId` names it.
+        createArtifact: async ({ title, content, sb }: ImportWrite) => {
           const artifact = await installerCreateArtifact(transport, sb.projectId as string, { title, content, metadata: { sb } });
           return { id: artifact.id, version: artifact.version };
         },
-        reviseArtifact: async (artifactId, { title, content, sb }) => {
+        reviseArtifact: async (artifactId: string, { title, content, sb }: ImportWrite) => {
           const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
           return { version: artifact.version };
         },
-      });
+      };
+      return isLegacyBundle(raw) ? importLegacyProject(parseLegacyBundle(raw), writes) : importProjectBundle(parseBundle(raw), writes);
     });
     const { plan } = imported;
     if (plan.steps.length === 0) {
       return { ...imported, landing: { landed: null, stopped: null, notes: plan.notes } };
     }
-    const landing = await api
-      .ensureProjectWorkflow(imported.projectId)
-      .then(() =>
-        replayAdoption(
-          { view: (projectId) => api.projectWorkflowView(projectId), decide: (projectId, decision) => api.decide(projectId, decision), now: () => new Date().toISOString() },
-          plan,
-        ),
-      )
-      .catch((cause: unknown) => ({ landed: null, stopped: cause instanceof Error ? cause.message : String(cause) }));
-    return { ...imported, landing: { ...landing, notes: plan.notes } };
+    try {
+      await api.ensureProjectWorkflow(imported.projectId);
+      const landing = await replayAdoption(
+        { view: (projectId) => api.projectWorkflowView(projectId), decide: (projectId, decision) => api.decide(projectId, decision), now: () => new Date().toISOString() },
+        plan,
+      );
+      return { ...imported, landing: { ...landing, notes: plan.notes } };
+    } catch (cause) {
+      return { ...imported, landing: { landed: null, stopped: cause instanceof Error ? cause.message : String(cause), notes: plan.notes } };
+    }
   },
   /**
    * Hands files over with the problem; each becomes a `source_material`
@@ -2069,15 +2044,21 @@ export const api = {
   workspaceTenantId: () => resolveWorkspace(createHubTransport()).then((workspace) => workspace?.tenantId ?? null),
   /**
    * The document a drafting stage's specialist keeps with the artifact tools:
-   * the newest artifact of the stage's kind that a workflow run wrote in the
+   * the newest artifact of the stage's kind that a workflow run or an import wrote in the
    * project's tenant, and its versions oldest first. Null when there is none
    * yet. A read that fails throws, so the workspace can say the document is
    * unavailable rather than fall back to an older draft.
    */
   stageWorkArtifact: async (tenantId: string, kind: string): Promise<StageWorkArtifact | null> => {
     const transport = createHubTransport();
-    const written = (await listArtifacts(transport, tenantId, { kind }))
-      .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
+    // An import writes the document through the installer, whose artifacts are
+    // all of kind "document"; its `sb` names the stage kind, and the
+    // specialist continues it rather than start a new one.
+    const written = (await listArtifacts(transport, tenantId))
+      .filter((item) => {
+        const sb = (item.metadata as Partial<ArtifactMetadata> | null)?.sb;
+        return item.archivedAt === null && ((item.kind === kind && item.source.origin === "workflow") || (sb?.kind === kind && !sb.variant));
+      })
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
     if (!written) return null;
     const [artifact, versions] = await Promise.all([

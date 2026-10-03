@@ -79,6 +79,8 @@ const DATA_URL = /^data:([^;,]+)?(;base64)?,/;
 const EXTENSION_OF_MEDIA: Record<string, string> = {
   "text/markdown": "md",
   "text/html": "html",
+  "text/plain": "txt",
+  "application/json": "json",
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
@@ -114,7 +116,7 @@ export function documentsArchiveName(projectTitle: string): string {
 }
 
 /** The bytes of a base64 `data:` URL. */
-function bytesOf(dataUrl: string): Uint8Array {
+export function bytesOf(dataUrl: string): Uint8Array {
   const at = dataUrl.indexOf(",");
   const payload = dataUrl.slice(at + 1);
   if (!/;base64,/.test(dataUrl.slice(0, at + 1))) return new TextEncoder().encode(decodeURIComponent(payload));

@@ -26,7 +26,7 @@
 import type { ArtifactGraphMetadata, ArtifactProvenance } from "./artifact-graph.js";
 import { versionIdFor } from "./artifact-graph.js";
 import { extractRequirementItems } from "./requirements.js";
-import type { AudiencePolicy } from "./project-workflow/contracts.js";
+import type { AudiencePolicy, Surface } from "./project-workflow/contracts.js";
 
 /** One ledger command as `main` recorded it on the ledger session, in order. */
 export type LegacyCommand = {
@@ -129,6 +129,8 @@ export type AdoptionStep = {
   readonly packages?: Readonly<Record<string, AdoptedReference>>;
   /** Stage 6: the requirement items minted before the plan is approved. */
   readonly requirementItems?: readonly { readonly kind: "FR" | "NFR" | "IR" | "AC"; readonly text: string }[];
+  /** Stage 3: the deliverable's surface the approval named, so the stages it skips stay skipped. */
+  readonly surface?: Surface;
 };
 
 export type AdoptionPlan = {
