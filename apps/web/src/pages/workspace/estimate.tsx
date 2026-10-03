@@ -12,6 +12,7 @@
  */
 import { useMemo } from "react";
 import { StateLabel } from "../../components.jsx";
+import { InlineMarkdown } from "../../markdown.jsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { parseStackRecord } from "@solutions-builder/app/stack";
@@ -21,9 +22,16 @@ import { stageName } from "../../stage-names.ts";
 type CostRow = { label: string; amount: string; basis: string };
 
 const HEADING_RE = /^##\s+(.+?)\s*$/;
-const BOLD_BULLET_RE = /^\*\*([^*]+)\*\*:?\s*(.+)$/;
-const PLAIN_BULLET_RE = /^([^:]+):\s*(.+)$/;
-const AMOUNT_RE = /\$[\d,.]+\s*[kKmM]?\b/;
+const BULLET_RE = /^\s*[-*+]\s+(.+)$/;
+// "**Label:** rest" or "**Label**: rest". A label holding its own asterisks is
+// not one this can read, so it is left out rather than shown half-parsed.
+const BOLD_LABEL_RE = /^\*\*([^*]+?):?\*\*:?\s+(.+)$/;
+const PLAIN_LABEL_RE = /^([^*:]+):\s+(.+)$/;
+// "- **<line>:** <amount> — <basis>", the shape the estimator is asked for.
+const BASIS_SEPARATOR_RE = /\s+[—–]\s+/;
+const LEADING_AMOUNT_RE = /^(\$[\d,.]+\s*[kKmM]?)\b[\s·—–-]*(.*)$/;
+// Longer than this with no separator, the rest is prose, not an amount.
+const BARE_AMOUNT_MAX = 60;
 
 /** The reply split into its `## Heading` sections, headings kept without `##`. */
 function sections(body: string): Map<string, string> {
@@ -48,47 +56,48 @@ function findSection(byHeading: Map<string, string>, pattern: RegExp): string | 
   return null;
 }
 
-/** Every `- **Label:** value` or `- Label: value` line in a section, as a raw (label, rest) pair. */
-function bulletPairs(section: string): { label: string; rest: string }[] {
-  const pairs: { label: string; rest: string }[] = [];
-  for (const raw of section.split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("-") && !line.startsWith("*")) continue;
-    const body = line.replace(/^[-*]\s*/, "");
-    const match = BOLD_BULLET_RE.exec(body) ?? PLAIN_BULLET_RE.exec(body);
-    if (!match) continue;
-    pairs.push({ label: match[1]!.trim(), rest: match[2]!.trim() });
+/** Every list item in a section, marker removed. Bold-led paragraphs are prose, not items. */
+function bullets(section: string): string[] {
+  return section.split("\n").flatMap((line) => {
+    const match = BULLET_RE.exec(line);
+    return match ? [match[1]!.trim()] : [];
+  });
+}
+
+/** A `**Label:** rest` or `Label: rest` item as its (label, rest) pair, or null. */
+function labelled(item: string): { label: string; rest: string } | null {
+  const match = BOLD_LABEL_RE.exec(item) ?? PLAIN_LABEL_RE.exec(item);
+  return match ? { label: match[1]!.trim(), rest: match[2]!.trim() } : null;
+}
+
+function costRow({ label, rest }: { label: string; rest: string }): CostRow | null {
+  const separator = BASIS_SEPARATOR_RE.exec(rest);
+  if (separator) {
+    return { label, amount: rest.slice(0, separator.index).trim(), basis: rest.slice(separator.index + separator[0].length).trim() };
   }
-  return pairs;
+  const leading = LEADING_AMOUNT_RE.exec(rest);
+  if (leading) return { label, amount: leading[1]!.trim(), basis: leading[2]!.trim() };
+  return rest.length <= BARE_AMOUNT_MAX ? { label, amount: rest, basis: "" } : null;
 }
 
 function parseCostRows(section: string | null): CostRow[] {
   if (!section) return [];
-  return bulletPairs(section).map(({ label, rest }) => {
-    const amount = AMOUNT_RE.exec(rest);
-    return {
-      label,
-      amount: amount ? amount[0] : rest,
-      basis: amount ? rest.slice(amount.index + amount[0].length).replace(/^[\s·—-]+/, "").trim() : "",
-    };
+  return bullets(section).flatMap((item) => {
+    const pair = labelled(item);
+    const row = pair ? costRow(pair) : null;
+    return row ? [row] : [];
   });
 }
 
-/** Scope items from `## Scope priced`: each bullet's label stands for a priced piece of work. */
+/** Scope items from `## Scope priced`: each bullet is a priced piece of work. */
 function parseScopeItems(section: string | null): string[] {
   if (!section) return [];
-  const pairs = bulletPairs(section);
-  if (pairs.length > 0) return pairs.map(({ label, rest }) => (rest ? `${label} — ${rest}` : label));
-  return section
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("-") || line.startsWith("*"))
-    .map((line) => line.replace(/^[-*]\s*/, "").replace(/\*\*/g, ""));
+  return bullets(section);
 }
 
 function parseEstimate(body: string): { costRows: CostRow[]; scopeItems: string[] } {
   const byHeading = sections(body);
-  const forecast = findSection(byHeading, /forecast/i);
+  const forecast = findSection(byHeading, /^forecast\b/i);
   const costAgainstForecast = findSection(byHeading, /cost against forecast/i);
   const scopePriced = findSection(byHeading, /scope priced/i);
   const costRows = [...parseCostRows(forecast), ...parseCostRows(costAgainstForecast)];
@@ -142,9 +151,13 @@ export function EstimateView({
           <TableBody>
             {costRows.map((row, index) => (
               <TableRow key={index}>
-                <TableCell>{row.label}</TableCell>
-                <TableCell>{row.amount}</TableCell>
-                <TableCell>{row.basis || "—"}</TableCell>
+                <TableCell>
+                  <InlineMarkdown source={row.label} />
+                </TableCell>
+                <TableCell>
+                  <InlineMarkdown source={row.amount} />
+                </TableCell>
+                <TableCell>{row.basis ? <InlineMarkdown source={row.basis} /> : "—"}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -154,7 +167,7 @@ export function EstimateView({
         <ul className="scope-checklist">
           {scopeItems.map((item, index) => (
             <li key={index}>
-              <input type="checkbox" checked readOnly /> {item}
+              <input type="checkbox" checked readOnly /> <InlineMarkdown source={item} />
             </li>
           ))}
         </ul>

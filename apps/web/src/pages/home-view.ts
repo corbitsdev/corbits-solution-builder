@@ -3,26 +3,12 @@
  * and the tests share one source.
  */
 
+import { stageName } from "../components.jsx";
+
 export const HOME_COMPOSER_PLACEHOLDER = "Describe the thing you want built…";
 export const HOME_EMPTY_TITLE = "Nothing yet";
 export const HOME_EMPTY_DESCRIPTION = "Describe the thing above — the discovery stage starts there.";
 export const HOME_NEEDS_DECISION = "Needs decision";
-
-/**
- * Card-foot labels only. Workspace/topbar keep the ledger's `STAGE_TITLES`;
- * these match mockups/index.html Title Case and must not leak there.
- */
-export const HOME_CARD_STAGE_NAMES = [
-  "Problem Discovery",
-  "Solution Shape",
-  "Proposal",
-  "GUI Design",
-  "Concept Approval",
-  "Build Plan",
-  "Cost Approval",
-  "Build & Test",
-  "Deliver",
-] as const;
 
 /** Ten characters is the create gate; the mockup has no hint line. */
 export function canStartProject(problem: string): boolean {
@@ -63,5 +49,5 @@ export function cardFootStage(stage: number | null, done: boolean, failed: boole
   if (failed) return "Status unavailable";
   if (done) return "Delivered";
   if (stage === null) return "Not started";
-  return HOME_CARD_STAGE_NAMES[stage - 1] ?? `Stage ${stage}`;
+  return stageName(stage);
 }
