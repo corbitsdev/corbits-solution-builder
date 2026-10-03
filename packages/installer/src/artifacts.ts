@@ -7,7 +7,7 @@
  * `content` on `Artifact` is the current version; `getArtifactVersion`
  * reads an older one.
  */
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 
 function tenantPathFor(scope: string, rest: string): string {
   return `/api/tenants/${scope}${rest}`;
@@ -91,8 +91,9 @@ export async function getArtifact(
       tenantPathFor(tenantId, `/artifacts/${artifactId}`),
     );
     return artifact;
-  } catch {
-    return null;
+  } catch (cause) {
+    if (cause instanceof ApiError && (cause.status === 404 || cause.status === 403)) return null;
+    throw cause;
   }
 }
 
@@ -109,8 +110,9 @@ export async function getArtifactVersion(
       tenantPathFor(tenantId, `/artifacts/${artifactId}/versions/${String(version)}`),
     );
     return artifact;
-  } catch {
-    return null;
+  } catch (cause) {
+    if (cause instanceof ApiError && (cause.status === 404 || cause.status === 403)) return null;
+    throw cause;
   }
 }
 
