@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-companions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The namer role that sits beside the stages.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

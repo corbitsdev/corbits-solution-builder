@@ -5,7 +5,7 @@
     "": {
       "name": "solutions-builder",
       "dependencies": {
-        "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
+        "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#0e0e17518ed3c49ebcfff8c2599d094e320250ab",
         "@corbits/codex-provider": "^0.1.2",
         "@corbits/embed-hub": "workspace:*",
         "@corbits/keychain": "workspace:*",
@@ -104,7 +104,7 @@
       "name": "@corbits/embed-hub",
       "version": "0.1.0",
       "dependencies": {
-        "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
+        "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#0e0e17518ed3c49ebcfff8c2599d094e320250ab",
         "@corbits/codex-provider": "^0.1.2",
         "@corbits/mailbox": "github:corbitsdev/corbits-mailbox#8289024",
         "@corbits/oauth-core": "^0.2.0",
@@ -162,8 +162,113 @@
       "name": "@solutions-builder/app",
       "version": "0.1.0",
       "dependencies": {
+        "@solutions-builder/specialist-architect": "workspace:*",
+        "@solutions-builder/specialist-brainstormer": "workspace:*",
+        "@solutions-builder/specialist-brief-evaluator": "workspace:*",
+        "@solutions-builder/specialist-build-supervisor": "workspace:*",
+        "@solutions-builder/specialist-companions": "workspace:*",
+        "@solutions-builder/specialist-constraints-mapper": "workspace:*",
+        "@solutions-builder/specialist-delivery-verifier": "workspace:*",
+        "@solutions-builder/specialist-estimator": "workspace:*",
+        "@solutions-builder/specialist-experience-designer": "workspace:*",
+        "@solutions-builder/specialist-plan-review": "workspace:*",
+        "@solutions-builder/specialist-presentation-creator": "workspace:*",
+        "@solutions-builder/specialist-product-guide": "workspace:*",
+        "@solutions-builder/specialist-proposer": "workspace:*",
         "@solutions-builder/specialist-runtime": "workspace:*",
+        "@solutions-builder/specialist-shared": "workspace:*",
         "arktype": "catalog:",
+      },
+    },
+    "packages/specialist-architect": {
+      "name": "@solutions-builder/specialist-architect",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-brainstormer": {
+      "name": "@solutions-builder/specialist-brainstormer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-brief-evaluator": {
+      "name": "@solutions-builder/specialist-brief-evaluator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-build-supervisor": {
+      "name": "@solutions-builder/specialist-build-supervisor",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-companions": {
+      "name": "@solutions-builder/specialist-companions",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-constraints-mapper": {
+      "name": "@solutions-builder/specialist-constraints-mapper",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-delivery-verifier": {
+      "name": "@solutions-builder/specialist-delivery-verifier",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-estimator": {
+      "name": "@solutions-builder/specialist-estimator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-experience-designer": {
+      "name": "@solutions-builder/specialist-experience-designer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-plan-review": {
+      "name": "@solutions-builder/specialist-plan-review",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-presentation-creator": {
+      "name": "@solutions-builder/specialist-presentation-creator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-product-guide": {
+      "name": "@solutions-builder/specialist-product-guide",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-proposer": {
+      "name": "@solutions-builder/specialist-proposer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
     "packages/specialist-runtime": {
@@ -173,6 +278,10 @@
         "arktype": "catalog:",
         "pptxgenjs": "4",
       },
+    },
+    "packages/specialist-shared": {
+      "name": "@solutions-builder/specialist-shared",
+      "version": "0.1.0",
     },
     "packages/tools-deck": {
       "name": "@solutions-builder/tools-deck",
@@ -433,7 +542,7 @@
 
     "@better-fetch/fetch": ["@better-fetch/fetch@1.3.2", "", {}, "sha512-Gs7n99b5tqUC6cQAPbV0uED3IraHB6xQbHLQ/C3l7ZFafHScOx9pQ+DYmP5blbLFShVWLqxNUlI9wi4xU/X+ow=="],
 
-    "@corbits/artifacts": ["@corbits/artifacts@github:corbitsdev/corbits-artifacts#031fc9e", { "dependencies": { "@hono/standard-validator": "^0.2.3" }, "peerDependencies": { "@intx/agent": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.2", "hono": "^4.12.32", "hono-openapi": "^1.2.0", "postgres": "^3.4.9" } }, "corbitsdev-corbits-artifacts-031fc9e", "sha512-ZonUDOnplYjZXgHhMjIUM65z65RpapxHcoxlsJUU6/vPhin1DCjKmGKcdBZmdpbvtXBPfAl3WvPU5hDD3iyldQ=="],
+    "@corbits/artifacts": ["@corbits/artifacts@github:corbitsdev/corbits-artifacts#0e0e175", { "dependencies": { "@hono/standard-validator": "^0.2.3" }, "peerDependencies": { "@intx/agent": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.2", "hono": "^4.12.32", "hono-openapi": "^1.2.0", "postgres": "^3.4.9" } }, "corbitsdev-corbits-artifacts-0e0e175", "sha512-DqVVgP/MxEYJzOg5EyMRpHAg2iV7BAeemTcLwWH58HqQDOo4h4gPD4sG1yzg/wAMZTLdcR8krp6EINVAXR66Cg=="],
 
     "@corbits/codex-provider": ["@corbits/codex-provider@0.1.2", "", { "dependencies": { "arktype": "^2.2.3" }, "peerDependencies": { "@corbits/oauth-core": "^0.2.0", "@corbits/openai-responses": "^0.2.0", "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-jIKDuydaAOF1xLC6iZgtSEAIcuaXtGGxsvFUm4ZBH30wDDVZDGIAokPHtROZGlbImQ9ElaoTShDfHSY2iP5kdQ=="],
 
@@ -757,7 +866,35 @@
 
     "@solutions-builder/installer": ["@solutions-builder/installer@workspace:packages/installer"],
 
+    "@solutions-builder/specialist-architect": ["@solutions-builder/specialist-architect@workspace:packages/specialist-architect"],
+
+    "@solutions-builder/specialist-brainstormer": ["@solutions-builder/specialist-brainstormer@workspace:packages/specialist-brainstormer"],
+
+    "@solutions-builder/specialist-brief-evaluator": ["@solutions-builder/specialist-brief-evaluator@workspace:packages/specialist-brief-evaluator"],
+
+    "@solutions-builder/specialist-build-supervisor": ["@solutions-builder/specialist-build-supervisor@workspace:packages/specialist-build-supervisor"],
+
+    "@solutions-builder/specialist-companions": ["@solutions-builder/specialist-companions@workspace:packages/specialist-companions"],
+
+    "@solutions-builder/specialist-constraints-mapper": ["@solutions-builder/specialist-constraints-mapper@workspace:packages/specialist-constraints-mapper"],
+
+    "@solutions-builder/specialist-delivery-verifier": ["@solutions-builder/specialist-delivery-verifier@workspace:packages/specialist-delivery-verifier"],
+
+    "@solutions-builder/specialist-estimator": ["@solutions-builder/specialist-estimator@workspace:packages/specialist-estimator"],
+
+    "@solutions-builder/specialist-experience-designer": ["@solutions-builder/specialist-experience-designer@workspace:packages/specialist-experience-designer"],
+
+    "@solutions-builder/specialist-plan-review": ["@solutions-builder/specialist-plan-review@workspace:packages/specialist-plan-review"],
+
+    "@solutions-builder/specialist-presentation-creator": ["@solutions-builder/specialist-presentation-creator@workspace:packages/specialist-presentation-creator"],
+
+    "@solutions-builder/specialist-product-guide": ["@solutions-builder/specialist-product-guide@workspace:packages/specialist-product-guide"],
+
+    "@solutions-builder/specialist-proposer": ["@solutions-builder/specialist-proposer@workspace:packages/specialist-proposer"],
+
     "@solutions-builder/specialist-runtime": ["@solutions-builder/specialist-runtime@workspace:packages/specialist-runtime"],
+
+    "@solutions-builder/specialist-shared": ["@solutions-builder/specialist-shared@workspace:packages/specialist-shared"],
 
     "@solutions-builder/tools-deck": ["@solutions-builder/tools-deck@workspace:packages/tools-deck"],
 
