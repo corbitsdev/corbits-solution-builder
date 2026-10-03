@@ -55,6 +55,7 @@ export function StageDocument({
   openQuestion,
   evaluation = null,
   advisory = null,
+  lead = null,
   draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
@@ -92,6 +93,9 @@ export function StageDocument({
    *  the brief evaluator's stance (#157). It never enables or blocks
    *  approval, and shows only while the bar does. */
   advisory?: ReactNode;
+  /** What the stage asks beside its document, such as stage 7's target and
+   *  cost summary: at the head of the document pane, above the document. */
+  lead?: ReactNode;
   /** Which version each draft reply became (#158): the conversation shows
    *  such a reply as one line naming its version, never as its text. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
@@ -613,6 +617,7 @@ export function StageDocument({
       }
     >
         <div className="stage-inner">
+          {lead}
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>

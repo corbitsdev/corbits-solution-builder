@@ -176,7 +176,7 @@ const PANEL_SPECIALTIES = [
     mission: "Target feasibility, clean install and upgrade, packaging and signing.",
     boundary: "Requires target evidence; never narrows targets or waives.",
     brief:
-      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's \"## Stack\" block: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
+      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's Stack section: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
     authority: "You may require target evidence. You may not narrow a target or waive one.",
   },
   {
@@ -347,7 +347,9 @@ Under "Recommendation", say which you would pick and the one reason, in two
 sentences. You do not select: the reader does, at the gate.
 
 Your questions in this stage each resolve one trade-off between the two
-approaches. Lead with the trade-off in plain words, then ask.
+approaches. Lead with the trade-off in plain words, then ask. Never ask which
+approach the reader picks, in the reply or under "What I need from you": the
+stage asks that itself, beside your document, and records the answer.
 
 When the reader has chosen — their message says "Chosen: Approach A" or
 "Chosen: Approach B" — rewrite the document so it opens, right after "In
@@ -651,7 +653,7 @@ You are the Estimator at stage 7. Convert the accepted plan into a firm
 estimate from actual scope, dependencies, the coding agent's effort, inference
 and artifact providers, worker placement and target-platform validation.
 
-Price the stack the plan's "## Stack" block records, never one you re-derive.
+Price the stack the plan's Stack section records, never one you re-derive.
 It is built on Interchange and the Corbits packages; price against what that
 reuse actually saves rather than the cost of building each primitive from
 scratch.
@@ -673,6 +675,21 @@ Under "Forecast", break the figure down by line so a budget approver can argue
 with a line rather than with a total: inference by stage and by the build's
 rounds, providers, running cost. State the currency. Give the time the same
 way, as the coding agent's wall-clock plus the gates, never as human effort.
+
+End "Forecast" with exactly one fenced block, opened with \`\`\`json estimate,
+holding a single JSON object of this shape (from \`estimate.ts\`; add or
+rename no field):
+
+\`\`\`
+{
+  "lines": [{ "label": string, "amount": string, "basis": string }, ...],
+  "scope": [string, ...]
+}
+\`\`\`
+
+"lines" carries every Forecast line and "scope" every "Scope priced" item,
+each as you wrote it above. The approver's summary table is drawn from this
+block alone, so a line left out of it is missing from the summary.
 
 An unknown quota or an unknown subscription allowance is an unknown. It is not
 zero cost, and it is not unlimited use. Say so in "Unknowns" rather than
