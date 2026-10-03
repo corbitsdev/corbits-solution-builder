@@ -7,6 +7,7 @@
  */
 import { keys } from "./queries/keys.ts";
 import { useQuery } from "@tanstack/react-query";
+import { Toaster, toast } from "sonner";
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
   api,
@@ -32,6 +33,7 @@ import { StageTour } from "./tour.jsx";
 import {
   BootScreen,
   NotificationsBell,
+  useTheme,
   type WorkflowStep,
 } from "@corbits/react-ui";
 import { subscribeInbox, type InboxState } from "./inbox.ts";
@@ -421,9 +423,9 @@ export function AppBar({
 }
 
 export function App() {
+  const { resolvedMode } = useTheme();
   const [view, setShownView] = useState<View>(initialView);
   const setView = (next: View) => {
-    setNotice(null);
     setError(null);
     setShownView(next);
   };
@@ -448,8 +450,6 @@ export function App() {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  // Where a download landed, said once (#323): the title menu's notices.
-  const [notice, setNotice] = useState<string | null>(null);
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
@@ -816,7 +816,7 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={setNotice}
+        onNotice={(message) => toast.success(message)}
         onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
@@ -824,6 +824,7 @@ export function App() {
         }}
       />
 
+      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -837,9 +838,6 @@ export function App() {
           </Banner>
         ) : null}
 
-        {notice ? (
-          <Banner tone="okay" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
-        ) : null}
 
         {view === "projects" ? (
           <Projects projects={projects} onOpen={openProject} onChanged={refresh} />

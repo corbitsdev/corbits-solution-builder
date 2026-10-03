@@ -18,6 +18,7 @@
  * and each render block a focused component (`workspace-chrome.tsx`). What
  * stays here is the wiring between them and the stage-specific composition.
  */
+import { toast } from "sonner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -594,14 +595,12 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
-  const [attachRefusal, setAttachRefusal] = useState<string | null>(null);
   const addMaterial = async (files: File[]) => {
-    setAttachRefusal(null);
     try {
       await api.attachMaterial(detail.project.id, files);
       void refreshWorkflow();
     } catch (cause) {
-      setAttachRefusal(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   };
   // A file attached once the stage has opened is mailed to its specialist
@@ -622,7 +621,6 @@ export function StageWorkspace({
   // Said where a refused attachment is said: the file is kept, and the
   // specialist has not been sent it.
   const attachNote =
-    attachRefusal ??
     (materialDispatch.error
       ? `The attached material is saved, and could not be sent to the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}: ${materialDispatch.error}`
       : null);
