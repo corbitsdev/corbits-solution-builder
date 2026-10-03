@@ -81,6 +81,25 @@ export function artifactRevisionRequest(args: { userInput: string; artifactId: s
   ].join("\n");
 }
 
+/**
+ * A person's message with what the app adds for the specialist. Whatever the
+ * app adds goes first and the person's own words go last, after the one
+ * marker every composed message ends with, so the chat can always tell them
+ * apart. With nothing to add, the words go alone.
+ */
+export function composedTurn(context: readonly string[], words: string): string {
+  const added = context.map((part) => part.trim()).filter((part) => part.length > 0);
+  if (added.length === 0) return words;
+  return [...added, "", REVISION_ASK, words.trim()].join("\n");
+}
+
+/** A composed message taken apart: the person's words, and what the app added. Null for a message the person typed alone. */
+export function personWordsIn(text: string): { readonly words: string; readonly added: string } | null {
+  const at = text.lastIndexOf(REVISION_ASK);
+  if (at === -1) return null;
+  return { words: text.slice(at + REVISION_ASK.length).trim(), added: text.slice(0, at).trim() };
+}
+
 /** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
 export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
   if (!text.startsWith(REVISION_LEAD)) return null;
@@ -114,7 +133,10 @@ export function withChoiceReminder(stage: number, userInput: string): string {
   const choice = choiceIn(stage, userInput);
   if (!choice) return userInput;
   const heading = `## ${choice.heading}`;
-  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
+  return composedTurn(
+    [`The choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`],
+    userInput,
+  );
 }
 
 /**
