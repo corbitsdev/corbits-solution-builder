@@ -65,7 +65,6 @@ import {
   createSidecarRouter,
   createWorkflowAllocationService,
   createWorkflowDispatchService,
-  resolveRoutableAddress,
   WORKSPACE_BUILTINS_REGISTRY,
   type AllocatedSidecarTarget,
   type SidecarLookups,
@@ -87,8 +86,6 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { mountProviderOAuth, type CallbackPageCopy } from "./oauth-mount.js";
-import { createSpendApi, createSpendStore } from "./spend.js";
-import { listenForUsage } from "./usage-listener.js";
 import {
   createHubMailboxAuthorizeSender,
   createHubPersistMailSkippingSessionless,
@@ -318,8 +315,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // Required by the orchestrator and `createApp`, but never populated: a
   // collector writes `inference_turn` rows against an `agent_session`, which
   // Interchange never creates for a workflow run. So no run has turn rows or
-  // a collector status, and the run health route reports `not_ready`; spend
-  // comes from `listenForUsage` below instead.
+  // a collector status, and the run health route reports `not_ready`.
   const eventCollectors = createEventCollectorRegistry({ db: db.db });
 
   const lookups: SidecarLookups = {
@@ -366,16 +362,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       sidecarCredentials.resolve(token),
     validateSidecarIdentity: sidecarCredentials.isCurrent,
     lookups,
-  });
-
-  // Spend is process memory, not a ledger row: nothing else in this revision
-  // of Interchange persists a call's tokens, so a restart starts the count
-  // over (the mounted route says so rather than implying continuity).
-  const spendStore = createSpendStore();
-  listenForUsage({
-    events: sidecarRouter.events,
-    resolveTenantId: async (address) => (await resolveRoutableAddress(db.db, address))?.tenantId ?? null,
-    record: (usage) => spendStore.record(usage),
   });
 
   createHubSessionOrchestrator({
@@ -791,10 +777,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     return c.json({ data: { ok: true } }, 201);
   });
   app.route("/api/tenants/:tenantId/workflow-artifact-tokens", workflowArtifactTokensApi);
-
-  // Read-only workspace inference spend, folded from `onUsage` above --
-  // see `spend.ts` for what it can and cannot answer.
-  app.route("/api/tenants/:tenantId/spend", createSpendApi(db.db, spendStore));
 
   // A second @corbits/mailbox mount, tenant-scoped, alongside the
   // single-workspace `/api/me/inbox*` one above: mail addressed to a run
