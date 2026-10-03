@@ -118,7 +118,7 @@ describe("composeSupervisorBrief", () => {
     endedAt: "2026-01-01T01:00:00.000Z",
     checkpointRef: null,
   };
-  const archive = { fileName: "build.tar.gz", sha256: "abc", sizeBytes: 1234 };
+  const archive = { fileName: "build.tar.gz", sha256: "abc", sizeBytes: 1234, files: ["src/index.ts"], fileCount: 1 };
 
   test("says the worker, how it ended, its final text, the archive and the checks, and claims no control it lacks", () => {
     const brief = composeSupervisorBrief({

@@ -70,7 +70,14 @@ export function buildEvidenceState(
 export type SupervisorBriefInput = {
   readonly attempt: number;
   readonly outcome: BridgeOutcome;
-  readonly archive: { readonly fileName: string; readonly sha256: string; readonly sizeBytes: number };
+  readonly archive: {
+    readonly fileName: string;
+    readonly sha256: string;
+    readonly sizeBytes: number;
+    /** Its files as its manifest lists them (the list may be capped), and their real total. */
+    readonly files: readonly string[];
+    readonly fileCount: number;
+  };
   /** Why no target was probed, when none was: the actual reason, from `probeDecision`. */
   readonly probeSkipped?: string | null;
   /** Stage 7's forecast, as the estimator wrote it (`forecastSection`); null when none could be read. */
@@ -182,6 +189,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## Evidence recorded`,
     `- Archive ${input.archive.fileName}, ${String(input.archive.sizeBytes)} bytes, sha256 ${input.archive.sha256}, recorded as attempt-${String(input.attempt)}.`,
+    `- The archive holds ${String(input.archive.fileCount)} file${input.archive.fileCount === 1 ? "" : "s"}${input.archive.files.length < input.archive.fileCount ? `, the first ${String(input.archive.files.length)} listed` : ""}: ${input.archive.files.join(", ")}. Any file count you give is this one; the worker's own may include files the archive leaves out.`,
     `- Deterministic checks: ${input.verification.complete ? "complete." : "incomplete. Each item below failed or was not run:"}`,
     ...input.verification.unverified.map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
     targets,
