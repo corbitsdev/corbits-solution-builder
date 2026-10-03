@@ -725,16 +725,9 @@ export function AudiencePackages({
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
-  // `allowed.approve` only gates on a review being open, not on quorum --
-  // the stage rule that actually enforces quorum only fires once an approve
-  // is attempted (CL-8687's `approveReason` doc comment). Left alone, that
-  // makes "Approve and continue" clickable before anyone has voted: the
-  // click round-trips to a refusal instead of ever doing what it looks like
-  // it does. This mirrors `quorumState`'s own `met` test (`blocked.length
-  // === 0 && proceeded >= required`) using the fields the workflow view
-  // already exposes, purely to hold the button until quorum is actually
-  // met -- it never changes what gets recorded (CL-8866).
-  const quorumMet = blockedBy.length === 0 && proceeded >= requiredQuorum;
+  // `allowed.approve` only gates on a review being open; the reducer's own
+  // quorum verdict holds the button until an approve could be committed.
+  const quorumMet = workflowView?.stage5Quorum?.met === true;
   const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
   const quorumReason = quorumMet
     ? null
