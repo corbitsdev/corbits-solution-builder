@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Textarea } from "@corbits/react-ui";
+import { toast } from "sonner";
 import { listSpecialistDeployments } from "@solutions-builder/installer";
 import { agentFor } from "@solutions-builder/app/kit";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
@@ -27,6 +28,7 @@ import { parseDeliveryVerification, type DeliveryVerification } from "../../deli
 import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
+import { downloadBuild } from "../graph.jsx";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
  *  awaiting review must refresh on its own, not just once at mount. */
@@ -48,12 +50,16 @@ export function extractHowToRun(body: string | null): string | null {
   return `${match[0]}\n${section}`.trim();
 }
 
+function findArchiveNode(nodes: ArtifactNode[], archiveRef: { artifactId: string; version: number } | null): ArtifactNode | null {
+  return archiveRef ? (nodes.find((node) => node.artifactId === archiveRef.artifactId && node.version === archiveRef.version) ?? null) : null;
+}
+
 /** The node that carries the per-file check results: the delivery manifest
  *  `publish_workspace` wrote beside the approved stage 8 archive, whose
  *  embedded `verification` is what the tool itself established (#129); or,
  *  failing that, a stage 9 `delivery_verification` record or manifest. */
 export function findVerificationNode(nodes: ArtifactNode[], archiveRef: { artifactId: string; version: number } | null): ArtifactNode | null {
-  const archive = archiveRef ? (nodes.find((node) => node.artifactId === archiveRef.artifactId && node.version === archiveRef.version) ?? null) : null;
+  const archive = findArchiveNode(nodes, archiveRef);
   const companion = archive ? manifestCompanionOf(nodes, archive) : null;
   if (companion) return companion;
   const active = nodes.filter((node) => node.stage === 9 && node.supersededByNodeId === null);
@@ -139,7 +145,7 @@ function DeliveryDecision({
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [delivered, setDelivered] = useState<PendingApproval | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "reject" | "download" | null>(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The last pending approval id seen this session, so a resolved delivery
@@ -213,6 +219,7 @@ function DeliveryDecision({
   }, [tenantId, projectId]);
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
+  const archive = findArchiveNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
 
   useEffect(() => {
@@ -276,6 +283,17 @@ function DeliveryDecision({
     }
   };
 
+  const download = async (node: ArtifactNode) => {
+    setBusy("download");
+    try {
+      await downloadBuild(tenantId, node);
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const deliveredAt = delivered?.resolvedAt ? new Date(delivered.resolvedAt).toLocaleString() : "just now";
   const meta = delivered
     ? `Final · ${VERIFIER} · delivered ${deliveredAt}`
@@ -287,6 +305,18 @@ function DeliveryDecision({
     <div className="doc" data-tour="document-body">
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
+      {archive ? (
+        <>
+          <div className="button-row">
+            <Button variant="primary" loading={busy === "download"} onClick={() => void download(archive)}>
+              Download the app (.tar.gz)
+            </Button>
+          </div>
+          <p className="inline-note">
+            Unpack it with <code>tar -xzf {archive.title}.tar.gz</code>, then follow its README.
+          </p>
+        </>
+      ) : null}
       {error ? <Banner tone="error" title={error} /> : null}
       {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
