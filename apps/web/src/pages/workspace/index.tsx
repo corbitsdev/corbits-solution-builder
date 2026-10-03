@@ -22,7 +22,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiFailure,
-  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type Provider,
@@ -62,7 +61,6 @@ import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
-import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
@@ -696,8 +694,9 @@ export function StageWorkspace({
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
-      // Another tab may already have sent these notes.
-      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      // One round per stage, read from the stage's own thread: notes sent on
+      // an earlier draft's subject, or by another tab, stand this down.
+      if ((await api.readStageThread(tenantId, [...agent.addresses])).some(isEvaluatorNotes)) return;
       await api.sendStageMail(tenantId, agentAddress, { body: revisionMail(ask), subject });
       await loadThread();
     },
