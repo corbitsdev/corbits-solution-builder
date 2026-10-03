@@ -10,7 +10,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
-import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
+import { newestRun, runStateOf, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
   archiveArtifact as installerArchiveArtifact,
@@ -57,6 +57,7 @@ import {
   type WorkflowGitPush,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
+  topLevelRunIds,
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";

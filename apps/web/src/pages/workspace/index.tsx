@@ -73,22 +73,11 @@ import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
-import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
+import { PanelReviewsCompanion, reviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
-
-/** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
-function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
-  const byReviewer = new Map<string, ArtifactNode>();
-  for (const node of nodes) {
-    if (node.kind !== "engineering_review" || node.stage !== 6 || node.supersededByNodeId !== null || !node.variant) continue;
-    const held = byReviewer.get(node.variant);
-    if (!held || node.version > held.version) byReviewer.set(node.variant, node);
-  }
-  return byReviewer;
-}
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
@@ -1058,7 +1047,7 @@ export function StageWorkspace({
                   .join("\n\n")
               : null
           }
-          reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
+          reviewNodes={reviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
         />
@@ -1077,7 +1066,7 @@ export function StageWorkspace({
               .filter((node) => node.kind === "product_requirements" && node.supersededByNodeId === null)
               .sort((a, b) => b.version - a.version)[0] ?? null
           }
-          reviewNodes={reviewNodesOf(detail.nodes)}
+          reviewNodes={reviewNodesOf(detail.nodes, 6)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
           onSendToArchitect={(body) => void send(body)}

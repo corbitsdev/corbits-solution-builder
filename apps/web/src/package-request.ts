@@ -26,7 +26,7 @@ export function packageAsk(name: string): string {
 }
 
 /** A role id as a person (or a model) reads it: `budget_approver` → "budget approver". */
-function roleLabel(role: string): string {
+export function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
 }
 

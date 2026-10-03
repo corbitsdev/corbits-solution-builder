@@ -51,7 +51,7 @@ type InboxMessage = {
 };
 type InboxPage = { readonly messages: readonly InboxMessage[]; readonly nextCursor?: string };
 
-function mailboxPath(tenantId: string): string {
+export function mailboxPath(tenantId: string): string {
   return `/api/tenants/${encodeURIComponent(tenantId)}/mailbox/me/inbox`;
 }
 
