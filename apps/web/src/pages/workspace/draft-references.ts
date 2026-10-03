@@ -40,9 +40,12 @@ export function draftReferences(
   messages: readonly ChatMessage[],
   versions: readonly ArtifactNode[],
   noun: string,
+  /** The document is an artifact, so a reply is short whatever it changed:
+   *  every reply is matched to the version saved after it. */
+  everyReply = false,
 ): ReadonlyMap<string, DraftRef> {
   const drafts = messages
-    .filter((message) => message.author === "agent" && isSubstantialDraft(message.body))
+    .filter((message) => message.author === "agent" && (everyReply || isSubstantialDraft(message.body)))
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   if (drafts.length === 0) return EMPTY;
   const heads = new Map(versions.flatMap((node) => (replyIdOf(node) ? [[replyIdOf(node)!, node] as const] : [])));
