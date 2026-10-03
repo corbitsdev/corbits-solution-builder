@@ -25,12 +25,26 @@ export function captureMailboxRequest(): MiddlewareHandler {
   return (c, next) => mailboxRequest.run(c as Context, next);
 }
 
-/** The text of a frame this package built: flat, so everything after the
- * header section is the body. */
-function frameBody(raw: Uint8Array): string {
+/**
+ * What a run is delivered for a frame the mailbox built: its subject as a
+ * one-line header block, then its body. The trigger route takes content
+ * only and leaves the delivered mail's subject unset
+ * (`vendor/interchange/packages/hub-api/src/workflow-run-trigger.ts`), so a
+ * tag the app puts in a subject, such as `[artifact:<id>:<version>]`,
+ * reaches the specialist only this way. The frame is flat and its header
+ * lines unfolded (`buildMailFrame`), so the header section is read line by line.
+ */
+function deliveredContent(raw: Uint8Array): string {
   const text = new TextDecoder().decode(raw);
   const split = text.indexOf("\r\n\r\n");
-  return split < 0 ? "" : text.slice(split + 4).trimEnd();
+  if (split < 0) return "";
+  const subject = text
+    .slice(0, split)
+    .split("\r\n")
+    .find((line) => line.toLowerCase().startsWith("subject:"))
+    ?.slice("subject:".length)
+    .trim();
+  return `Subject: ${subject ?? ""}\n\n${text.slice(split + 4).trimEnd()}`;
 }
 
 export type MailboxDeliverOpts = {
@@ -136,7 +150,7 @@ export function createMailboxDeliver(
         const value = c.req.header(name);
         if (value !== undefined) headers.set(name, value);
       }
-      const content = frameBody(message.raw);
+      const content = deliveredContent(message.raw);
       for (const runId of runs) {
         const path = `/api/tenants/${encodeURIComponent(tenantId)}/workflows/${encodeURIComponent(runId)}/mail`;
         const response = await opts.app.request(path, {
