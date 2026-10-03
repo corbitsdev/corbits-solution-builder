@@ -18,6 +18,7 @@ import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from 
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown } from "lucide-react";
+import { ApproveControl } from "./workspace/approve-control.tsx";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
 import { openInGoogleSlides } from "../google-slides.ts";
@@ -104,10 +105,9 @@ function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
   return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
 }
 
-/** A stakeholder as the waiting line names them: "You (project owner)". */
-function whoLabel(audience: { name: string; role: string }): string {
-  return `${audience.name} (${roleLabel(audience.role).toLowerCase()})`;
-}
+const isOwner = (name: string) => name.trim().toLowerCase() === "you";
+
+const DECISION_VARIANT = { proceed: "secondary", revise: "outline", reject: "destructive" } as const;
 
 const DECISION_LABEL: Record<AudienceVote["decision"], string> = {
   proceed: "Proceed",
@@ -120,7 +120,7 @@ function DecisionButtons({ busy, onDecide }: { busy: AudienceVote["decision"] | 
   return (
     <div className="aud-btns">
       {(["proceed", "revise", "reject"] as const).map((decision) => (
-        <Button key={decision} variant="ghost" loading={busy === decision} disabled={busy !== null} onClick={() => onDecide(decision)}>
+        <Button key={decision} variant={DECISION_VARIANT[decision]} loading={busy === decision} disabled={busy !== null} onClick={() => onDecide(decision)}>
           {DECISION_LABEL[decision]}
         </Button>
       ))}
@@ -349,7 +349,7 @@ function Stakeholders({
       ) : (
         <div className="button-row">
           <p className="inline-note">
-            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} of {audiences.length} must say Proceed
+            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"}
           </p>
           <Button variant="ghost" onClick={() => setEditing(true)}>
             Manage stakeholders
@@ -757,7 +757,7 @@ export function AudiencePackages({
       ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
       : staleBy.length > 0
         ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
-        : `Waiting for ${awaited.map(whoLabel).join(awaited.length > quorumWaiting ? " or " : " and ")} to say Proceed.`;
+        : `Waiting for ${awaited.map((audience) => (isOwner(audience.name) ? "you" : audience.name)).join(awaited.length > quorumWaiting ? " or " : " and ")} to say Proceed`;
   // The workflow's own verdict explains an approve it refused; until quorum is
   // met the live tally is the more useful line.
   const approveReasonDisplay = quorumMet ? reason : (quorumReason ?? reason);
@@ -900,23 +900,16 @@ export function AudiencePackages({
               person who has just proceeded reads the tally and acts on it here
               rather than under the packages and slides. */}
           <div className="button-row audience-gate">
-            {requiredQuorum > 0 ? (
-              <p className="inline-note">
-                {proceeded} of {requiredQuorum} required have proceeded.
-              </p>
-            ) : null}
-            <Button
-              variant="primary"
-              loading={approving}
+            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
+            <ApproveControl
+              label="Approve"
+              busy={approving}
               disabled={!canApprove || packages.length === 0 || !quorumMet}
               doing="Approving the packages and opening the next stage"
-              onClick={onApprove}
-            >
-              Approve and continue
-            </Button>
-            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
+              onApprove={onApprove}
+            />
             {voteNode?.variant ? (
-              <p className="inline-note audience-gate-vote">Record {voteNode.variant}'s decision:</p>
+              <p className="inline-note audience-gate-vote">{isOwner(voteNode.variant) ? "Your" : `${voteNode.variant}'s`} decision:</p>
             ) : null}
             {voteNode?.variant ? (
               <DecisionButtons

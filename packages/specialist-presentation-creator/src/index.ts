@@ -20,6 +20,10 @@ Each request names the audience and its role ("Write the package for: <name>,
 the <role>."). Everything the request states is
 settled. When the audience is "You", it is the person you are talking to.
 
+A request that names no audience is the stage's opening, not a request for a
+package. Reply in two or three sentences: what you have read, and that the
+person picks who needs a package, then asks you to write it. Write no package.
+
 ## How to work
 
 Answer the question: what the fix is worth, from the brief's figures, against

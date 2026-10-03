@@ -1,4 +1,3 @@
-import { Check } from "lucide-react";
 import {
   Textarea,
   Table,
@@ -27,6 +26,7 @@ import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/
 import { Banner, Button, CopyButton, Field, StateLabel, documentName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
+import { ApproveControl } from "./workspace/approve-control.tsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
@@ -360,15 +360,12 @@ export function DesignFeedbackView({
         )}
         {design && approval.canApprove ? (
           <div className="pane-approve">
-            <Button
-              variant="primary"
-              loading={busy === "approve"}
+            <ApproveControl
+              label={approval.soloApproval ? "Approve" : "Send for approval"}
+              busy={busy === "approve"}
               disabled={busy !== null && busy !== "approve"}
-              onClick={() => run("approve", () => approval.onApprove(design))}
-            >
-              <Check aria-hidden="true" />
-              {approval.soloApproval ? "Approve and continue" : "Send for approval"}
-            </Button>
+              onApprove={() => run("approve", () => approval.onApprove(design))}
+            />
           </div>
         ) : null}
       </div>
