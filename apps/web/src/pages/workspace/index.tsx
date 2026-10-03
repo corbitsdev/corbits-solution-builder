@@ -48,7 +48,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactSubject } from "./composed-mail.ts";
+import { artifactTag } from "./composed-mail.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
@@ -658,7 +658,7 @@ export function StageWorkspace({
       // instead of starting a second.
       await api.sendStageMail(tenantId, agentAddress, {
         body,
-        ...(work?.state === "ready" ? { subject: artifactSubject(work.artifact, body) } : {}),
+        ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
       });
       await loadThread();
     } catch (cause) {
