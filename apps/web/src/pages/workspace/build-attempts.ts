@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import { zonedTime } from "./delivery-opening.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -149,7 +150,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
-    `- Ran from ${outcome.startedAt} to ${outcome.endedAt}.`,
+    `- Ran from ${zonedTime(outcome.startedAt)} to ${zonedTime(outcome.endedAt)}.`,
     `- The interface gives a final text and an exit status and nothing else: no session, steering or checkpoint exists.`,
     ``,
     `### Final text`,

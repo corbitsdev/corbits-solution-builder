@@ -114,6 +114,15 @@ const StackRecordSchema = type({
   deferred: "string[]",
 });
 
+/**
+ * The record's shape as a specialist is told it (#617), kept in the
+ * Architect's package beside the prompt that quotes it. The ask the gate's
+ * banner sends (`stage-evidence.ts`) quotes it too, so what is asked for is
+ * what `StackRecordSchema` above accepts. A field added to the schema is
+ * added there; `stack.test.ts` holds the two together.
+ */
+export { STACK_BLOCK_SHAPE } from "@solutions-builder/specialist-architect";
+
 // "## Stack", or a model's harmless variants (#437): a deeper heading level,
 // trailing words such as "## Stack (frozen)", or "Stack record".
 const STACK_HEADING_RE = /^#{2,4}\s+Stack\b[^\n]*$/m;
