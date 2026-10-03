@@ -69,6 +69,32 @@ function saidIn(record: unknown): string {
   return content.map((block) => (block?.type === "text" && typeof block.text === "string" ? block.text : "")).join("");
 }
 
+/** One turn as the live pane says it: the worker's text, and each tool call by name and, where it named one, its `path`. */
+export type TurnSummary = {
+  readonly said: string;
+  readonly tools: readonly { readonly name: string; readonly path: string | null; readonly failed: boolean }[];
+};
+
+/** A turn report summarised, with each of `roots` (the attempt's directory) taken off the paths that start with it. */
+export function summarizeTurn(record: unknown, roots: readonly string[]): TurnSummary {
+  const relative = (text: string) => roots.reduce((out, root) => out.replaceAll(`${root}/`, ""), text);
+  const report = (record ?? {}) as TurnReport;
+  const failed = new Set(
+    (Array.isArray(report.toolResults) ? report.toolResults : []).filter((result) => result.isError === true).map((result) => result.callId),
+  );
+  return {
+    said: relative(saidIn(record)).trim(),
+    tools: (Array.isArray(report.toolCalls) ? report.toolCalls : []).map((call) => {
+      const path = (call.arguments as { path?: unknown } | null | undefined)?.path;
+      return {
+        name: call.name ?? "(unnamed tool)",
+        path: typeof path === "string" ? relative(path) : null,
+        failed: call.id !== undefined && failed.has(call.id),
+      };
+    }),
+  };
+}
+
 /** `texts` is each turn's own text, in order, as the worker reported it. */
 export type TurnTally = { turns: number; toolCalls: number; texts: string[] };
 

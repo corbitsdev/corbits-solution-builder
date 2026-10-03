@@ -19,7 +19,7 @@
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildTurn, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Input } from "@corbits/react-ui";
@@ -112,6 +112,32 @@ function evMark(tone: keyof typeof EV_TONE): string {
   return "";
 }
 
+/** Each turn as the worker reported it: what it said, and one line per tool call naming the tool and the path it gave. */
+function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
+  return (
+    <div aria-live="polite">
+      {turns.map((turn, index) =>
+        turn === null ? (
+          <p key={index} className="inline-note">
+            A turn report the host could not read.
+          </p>
+        ) : (
+          <div key={index}>
+            {turn.said ? <Markdown source={turn.said} /> : null}
+            {turn.tools.map((tool, call) => (
+              <p key={call} className="inline-note">
+                <code>{tool.name}</code>
+                {tool.path ? ` ${tool.path}` : ""}
+                {tool.failed ? " — failed" : ""}
+              </p>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
   if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
@@ -176,6 +202,7 @@ export function BuildPanel({
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [log, setLog] = useState("");
+  const [turns, setTurns] = useState<readonly (BuildTurn | null)[]>([]);
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
@@ -247,13 +274,16 @@ export function BuildPanel({
   useEffect(() => {
     if (!current) {
       setLog("");
+      setTurns([]);
       return;
     }
     let cancelled = false;
     const read = async () => {
       try {
         const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (!cancelled) setLog(result.log);
+        if (cancelled) return;
+        setLog(result.log);
+        setTurns(result.turns);
       } catch {
         // The next poll says.
       }
@@ -467,6 +497,18 @@ export function BuildPanel({
                       <summary>Full log</summary>
                       <pre ref={logRef} className="build-log">
                         {log || "The worker wrote nothing."}
+                      </pre>
+                    </details>
+                  </>
+                ) : turns.length > 0 ? (
+                  // The worker's own turn reports, said readably; the raw
+                  // stream they came from stays one click away.
+                  <>
+                    <WorkerTurns turns={turns} />
+                    <details className="build-log-fold">
+                      <summary>Full log</summary>
+                      <pre ref={logRef} className="build-log">
+                        {log}
                       </pre>
                     </details>
                   </>
