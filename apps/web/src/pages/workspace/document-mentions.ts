@@ -1,8 +1,10 @@
 /**
  * Documents that travel with a message (#345). Every specialist is its
- * own mail agent and sees only what it is sent, so when a person's message
- * names one of the stage's documents, the document's text is attached under
- * an "Attached" heading rather than left for the specialist to ask for.
+ * own mail agent and sees only what it is sent, so when a request to a
+ * companion names one of the stage's documents, the document's text is
+ * attached under an "Attached" heading rather than left for it to ask for.
+ * The stage's own conversation carries only the person's words; a document
+ * reaches it when the person attaches it (`attach-documents.tsx`).
  */
 export type StageDocument = {
   /** A stable key: `requirements`, `review:application`, … */
@@ -27,10 +29,10 @@ export function requirementsDocument(content: string): StageDocument {
 }
 
 /** One panel review, by its reviewer. */
-export function reviewDocument(reviewer: string, content: string, kind = "review"): StageDocument {
+export function reviewDocument(reviewer: string, content: string): StageDocument {
   const who = reviewer.toLowerCase();
   return {
-    key: `${kind}:${who}`,
+    key: `review:${who}`,
     label: `${reviewer} review`,
     aliases: [`${who} review`, `${who} reviewer`, `${who} reviewer's`, `${who} feedback`, `feedback from the ${who}`],
     content,
@@ -57,10 +59,5 @@ export function mentionedDocuments(body: string, documents: readonly StageDocume
 export function withAttachedDocuments(body: string, documents: readonly StageDocument[]): string {
   const attach = mentionedDocuments(body, documents).filter((doc) => doc.content.trim().length > 0 && !body.includes(doc.content.trim()));
   if (attach.length === 0) return body;
-  return [body.trimEnd(), ...attach.map((doc) => `---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`)].join("\n\n");
-}
-
-/** The whole document as a message of its own: what "Send to the architect" sends. */
-export function documentAsMessage(doc: StageDocument): string {
-  return `Here is the ${doc.label}, for your reference.\n\n---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`;
+  return [body, ...attach.map((doc) => `---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`)].join("\n\n");
 }

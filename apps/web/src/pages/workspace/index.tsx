@@ -19,6 +19,8 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
@@ -44,10 +46,12 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { artifactTag, taggedSubject } from "./composed-mail.ts";
+import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -75,7 +79,6 @@ import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
@@ -110,6 +113,13 @@ export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
  * one of the specialised panels (design, audiences, build) or the final
  * decisions stage. */
 const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
+
+/** A drafting stage's artifact, as last read: there is none yet, it was
+ *  read, or it exists and could not be read, which is shown, not hidden. */
+type WorkArtifact =
+  | { readonly state: "none" }
+  | { readonly state: "ready"; readonly artifact: { readonly id: string; readonly version: number; readonly content: string } }
+  | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
@@ -221,7 +231,13 @@ export function StageWorkspace({
   const agentAddress = agent.address;
   // Stable across renders — an inline arrow would re-subscribe the mailbox
   // stream every render since it is a dep of the thread effect.
-  const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
+  // A nudge is also a reply landing, by which time the specialist has
+  // written the stage's artifact.
+  const queryClient = useQueryClient();
+  const nudgeWorkflow = useCallback(() => {
+    void workflow.reload();
+    void queryClient.invalidateQueries({ queryKey: keys.stageWork.all });
+  }, [workflow.reload, queryClient]);
   const thread = useStageThread(tenantId, agentAddress, agent.addresses, nudgeWorkflow, setError);
   const loadThread = thread.reload;
 
@@ -285,9 +301,33 @@ export function StageWorkspace({
   // A stage 6 revision that dropped the plan's Stack block gets the last
   // valid one carried in (#437), so the gate's banner is for a plan that
   // never had one.
+  // A drafting stage with artifact tools keeps its document in an artifact
+  // the specialist writes; the host reads the newest one of the stage's kind
+  // rather than trusting what the reply says it wrote. It is read again when
+  // a reply lands, and polled while one is pending so the pane follows the
+  // specialist's writes. A stage with no artifact yet, such as a project
+  // drafted before the tools, keeps reading its draft from the mail.
+  const usesArtifact = stageUsesArtifactTools(stage as Stage);
+  const workKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const awaitingReply = foldedMessages.at(-1)?.author === "me";
+  const workQuery = useQuery({
+    queryKey: keys.stageWork.of(tenantId, workKind ?? ""),
+    queryFn: usesArtifact && workKind !== null ? () => api.stageWorkArtifact(tenantId, workKind) : skipToken,
+    refetchInterval: awaitingReply ? 5_000 : false,
+  });
+  const work = useMemo((): WorkArtifact | null => {
+    if (workQuery.error) return { state: "unreadable", message: workQuery.error.message };
+    if (workQuery.data === undefined) return null;
+    return workQuery.data ? { state: "ready", artifact: workQuery.data } : { state: "none" };
+  }, [workQuery.error, workQuery.data]);
+  const workDraft = useMemo(() => {
+    if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
+    if (work.state === "unreadable" || !latestSpecialistMessage) return null;
+    return { ...latestSpecialistMessage, body: work.artifact.content };
+  }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
   const draftMessage = useMemo(
-    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
-    [stage, foldedMessages, guidance.draft],
+    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
+    [stage, foldedMessages, workDraft],
   );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
@@ -311,7 +351,12 @@ export function StageWorkspace({
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
   useBusyWhile(!threadLoaded, "Loading the conversation");
-  const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
+  // Stage 4's design is the designer's artifact; a design sent as a reply is
+  // read only for a project drafted before the tools.
+  const latestDesign = useMemo(
+    () => (usesArtifact && work !== null && work.state !== "none" ? workDraft : latestDesignReply(foldedMessages)),
+    [usesArtifact, work, workDraft, foldedMessages],
+  );
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
@@ -338,12 +383,21 @@ export function StageWorkspace({
   // line naming it, on every document stage and on a reload alike, since
   // both the mail and the lineage are records.
   const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
+  // A reply that wrote the artifact is short; the version line it carries is
+  // still the artifact's, so the lineage is matched against the document.
+  const referenceMessages = useMemo(
+    () =>
+      work?.state === "ready" && latestSpecialistMessage
+        ? foldedMessages.map((message) => (message.id === latestSpecialistMessage.id ? { ...message, body: work.artifact.content } : message))
+        : foldedMessages,
+    [work, latestSpecialistMessage, foldedMessages],
+  );
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(foldedMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
         : undefined,
-    [stage, draftKind, foldedMessages, liveVersions],
+    [stage, draftKind, referenceMessages, liveVersions],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
@@ -584,35 +638,31 @@ export function StageWorkspace({
     }
   };
 
-  // The stage's companion documents (#345): named in a message, they go along with it.
-  const [stageDocuments, setStageDocuments] = useState<MentionedDocument[]>([]);
-  useEffect(() => {
-    setStageDocuments([]);
-  }, [stage, detail.project.id]);
-
-  const send = async (body: string) => {
-    if (!agentAddress || body.trim().length === 0) return;
+  /** Whether the message went; a refused one keeps its attachments in the composer. */
+  const send = async (body: string, attached: readonly AttachedDocument[] = []): Promise<boolean> => {
+    if (!agentAddress || body.trim().length === 0) return false;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
-    // the chat says so where the message would have been.
-    if (stage === 6 && requirementsRequest(body)) {
+    // the chat says so where the message would have been. One with
+    // documents attached was addressed to the architect, and goes there.
+    if (stage === 6 && attached.length === 0 && requirementsRequest(body)) {
       const at = new Date().toISOString();
       setRequirementsAsk({ body, at: Date.now() });
       setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
-      return;
+      return true;
     }
     setSending(true);
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
-      const turn = withAttachedDocuments(body, stageDocuments);
-      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
-      await api.sendStageMail(tenantId, agentAddress, { body: mail });
+      // The body is the person's words alone. The artifact holding the
+      // stage's document travels in the subject, so a specialist that never
+      // wrote it, such as one taking over after a model hand-off, revises it
+      // instead of starting a second; so does each document attached.
+      const tags = [...(work?.state === "ready" ? [artifactTag(work.artifact)] : []), ...(await attachedSubjectTags(tenantId, attached))];
+      await api.sendStageMail(tenantId, agentAddress, { body, ...taggedSubject(tags, body) });
       await loadThread();
+      return true;
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
         // The specialist's run has ended (#413): ask for it again, which
@@ -625,10 +675,11 @@ export function StageWorkspace({
           .ensureStageAgent(detail.project.id, stage)
           .then(() => agent.retry())
           .catch((again: unknown) => setError(again instanceof ApiFailure ? again.detail.message : String(again)));
-        return;
+        return false;
       }
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
+      return false;
     } finally {
       setSending(false);
     }
@@ -781,16 +832,22 @@ export function StageWorkspace({
       </div>
     ) : null;
 
+  const attachDocuments = attachableDocuments(artifacts.tabs);
+  const documentLabels = new Map(artifacts.tabs.flatMap((tab) => tab.versions.map((node) => [node.artifactId, tab.label] as const)));
   const conversation = (
     <StageConversation
       stage={stage}
       messages={foldedMessages}
       value={composer}
       onValueChange={setComposer}
-      onSend={() => {
+      onSend={(attached) => {
         const body = composer;
         setComposer("");
-        void send(body);
+        return send(body, attached);
+      }}
+      onAnswer={(answer) => {
+        setComposer("");
+        void send(answer);
       }}
       working={sending}
       disabled={!agentAddress}
@@ -805,6 +862,8 @@ export function StageWorkspace({
       onAttach={(files) => {
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
+      documents={attachDocuments}
+      documentLabels={documentLabels}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -834,6 +893,11 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
+      {work?.state === "unreadable" ? (
+        <Banner tone="error" title="The stage document could not be read">
+          {work.message} Approval waits until it can be read.
+        </Banner>
+      ) : null}
       {error ? (
         <Banner
           tone="error"
@@ -1042,6 +1106,8 @@ export function StageWorkspace({
           onAttach={(files) => {
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
+          documents={attachDocuments}
+          documentLabels={documentLabels}
         />
       ) : null}
 
@@ -1062,7 +1128,6 @@ export function StageWorkspace({
           }
           reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
         />
       ) : null}
 
@@ -1081,8 +1146,6 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
-          onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
@@ -1140,11 +1203,13 @@ export function StageWorkspace({
             advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
-            onRevise={(message, quotes) => {
+            onRevise={(message, quotes, _revise, attached) => {
               artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-              void send(quoted ? `${quoted}\n\n${message}` : message);
+              return send(quoted ? `${quoted}\n\n${message}` : message, attached);
             }}
+            documents={attachDocuments}
+            attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
             onAddMaterial={async (files) => {
               await api.attachMaterial(detail.project.id, files);
               void refreshWorkflow();

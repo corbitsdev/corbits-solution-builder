@@ -6,19 +6,14 @@
  * in when the draft lacks it. Pure, so the rule is testable without React.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
-import { ensureChoiceSection, splitRevision } from "@solutions-builder/app/stage-prompt";
-
-/** The person's words in a turn, whatever the app wrapped around them. */
-function askOf(message: ChatMessage): string {
-  return (splitRevision(message.body)?.ask ?? message.body).trim();
-}
+import { ensureChoiceSection } from "@solutions-builder/app/stage-prompt";
 
 export function repairedChoiceDraft(stage: number, messages: readonly ChatMessage[], draft: ChatMessage | null): ChatMessage | null {
   if (stage !== 3 || !draft) return draft;
   const at = messages.findIndex((message) => message.id === draft.id);
   const before = at === -1 ? messages : messages.slice(0, at);
-  const choice = [...before].reverse().find((message) => message.author === "me" && /^chosen:/i.test(askOf(message)));
+  const choice = [...before].reverse().find((message) => message.author === "me" && /^chosen:/i.test(message.body.trim()));
   if (!choice) return draft;
-  const repaired = ensureChoiceSection(3, askOf(choice), draft.body);
+  const repaired = ensureChoiceSection(3, choice.body, draft.body);
   return repaired === draft.body ? draft : { ...draft, body: repaired };
 }

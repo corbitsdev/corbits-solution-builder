@@ -43,6 +43,14 @@ describe("workspace guidance", () => {
     expect(conversationLead("Which customer group is first?")).toBe("Which customer group is first?");
   });
 
+  test("conversationLead keeps a full reply paragraph, not only a one-line status", () => {
+    const reply =
+      "I moved the union rule into Limits you set. One thing I'd push back on: your 20 minutes per job is retyping time, " +
+      "but the wrong parts and missed follow-ups you named cost a return visit each, which is likely the bigger number. " +
+      "I've made that the lead success measure; tell me if billing speed matters more to you.";
+    expect(conversationLead([reply, "", completeDraft].join("\n"))).toBe(reply);
+  });
+
   test("a stage-4 HTML mockup is a substantial draft, never dumped raw into chat", () => {
     const html = `<!doctype html>
 <html>

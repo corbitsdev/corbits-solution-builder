@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ATTACHED_HEADING, documentAsMessage, mentionedDocuments, requirementsDocument, reviewDocument, withAttachedDocuments } from "./document-mentions.ts";
+import { ATTACHED_HEADING, mentionedDocuments, requirementsDocument, reviewDocument, withAttachedDocuments } from "./document-mentions.ts";
 
 const prd = requirementsDocument("# Product requirements\n\nFR-1 …");
 const app = reviewDocument("Application", "## Verdict\n\nacceptable with conditions");
@@ -21,15 +21,11 @@ describe("mentionedDocuments", () => {
 describe("withAttachedDocuments", () => {
   test("appends each named document once under its heading, and leaves an unrelated message alone", () => {
     const out = withAttachedDocuments("Revise the PRD using the application review.", [prd, app, sec]);
-    expect(out.startsWith("Revise the PRD using the application review.\n\n---\n\n")).toBe(true);
+    expect(out.startsWith("Revise the PRD using the application review.\n\n---")).toBe(true);
     expect(out).toContain(`${ATTACHED_HEADING} Product requirements\n\n# Product requirements`);
     expect(out).toContain(`${ATTACHED_HEADING} Application review\n\n## Verdict`);
     expect(out).not.toContain("Security");
     expect(withAttachedDocuments("make the Gantt wider", [prd, app])).toBe("make the Gantt wider");
     expect(withAttachedDocuments(out, [prd, app, sec])).toBe(out);
-  });
-
-  test("a document sent on its own says what it is", () => {
-    expect(documentAsMessage(app)).toBe(`Here is the Application review, for your reference.\n\n---\n\n${ATTACHED_HEADING} Application review\n\n## Verdict\n\nacceptable with conditions`);
   });
 });

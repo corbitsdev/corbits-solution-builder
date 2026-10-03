@@ -1,18 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
-
-describe("withChoiceReminder records a stage-3 choice in the document", () => {
-  test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
-    const out = withChoiceReminder(3, "Chosen: Approach A (Extend the worker)");
-    expect(out).toContain("Chosen: Approach A (Extend the worker)");
-    expect(out).toContain("## Chosen approach: Extend the worker");
-  });
-
-  test("ordinary stage-3 replies and other stages pass through untouched", () => {
-    expect(withChoiceReminder(3, "Use Postgres.")).toBe("Use Postgres.");
-    expect(withChoiceReminder(2, "Chosen: Approach A (Extend the worker)")).toBe("Chosen: Approach A (Extend the worker)");
-  });
-});
+import { ensureChoiceSection } from "./stage-prompt.js";
 
 describe("ensureChoiceSection repairs a draft that ignored the reminder", () => {
   const draft = [
@@ -46,15 +33,5 @@ describe("ensureChoiceSection repairs a draft that ignored the reminder", () => 
   test("ordinary replies and other stages pass through untouched", () => {
     expect(ensureChoiceSection(3, "Use Postgres.", draft)).toBe(draft);
     expect(ensureChoiceSection(2, "Chosen: Approach A (Extend the worker)", draft)).toBe(draft);
-  });
-});
-
-describe("revisionRequest carries the current version, as alpha main's round did", () => {
-  test("the document, the revise instruction and the ask, in that order, and the split finds them again", () => {
-    const out = revisionRequest({ stage: 2, userInput: "Drop the mobile form.", currentDocument: "## In short\n- fine\n" });
-    expect(out.indexOf("## In short")).toBeLessThan(out.indexOf("Revise the current version above"));
-    expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
-    expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
-    expect(splitRevision("Drop the mobile form.")).toBeNull();
   });
 });

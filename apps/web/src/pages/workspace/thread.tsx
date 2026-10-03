@@ -1,15 +1,15 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
-import { FileText, Plus, Send } from "lucide-react";
+import { FileText, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
-import { splitRevision } from "@solutions-builder/app/stage-prompt";
+import { composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { AttachMenu, AttachedList, attachedIn, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
@@ -80,20 +80,6 @@ function MessageBody({ text }: { text: string }) {
       </>
     );
   }
-  // A revision turn carries the version it revises (#431); the chat shows
-  // the person's words and keeps the version behind a fold.
-  const revision = splitRevision(text);
-  if (revision) {
-    return (
-      <>
-        <Markdown source={revision.ask} />
-        <details className="bubble-fold">
-          <summary>The version this revises</summary>
-          <Markdown source={revision.document} />
-        </details>
-      </>
-    );
-  }
   const handoff = splitHandoff(text);
   if (handoff) {
     return (
@@ -142,14 +128,18 @@ export function StageConversation({
   rows = null,
   who = "Specialist",
   onAttach,
+  documents = EMPTY_DOCUMENTS,
+  documentLabels = EMPTY_LABELS,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  onAnswer,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
-  onSend: () => void;
+  /** Sends the composer's words, with the documents attached to them; false when it did not go. */
+  onSend: (attached: readonly AttachedDocument[]) => void | Promise<boolean>;
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
@@ -171,14 +161,19 @@ export function StageConversation({
   rows?: ReactNode;
   /** The specialist's name on its turns. */
   who?: string;
-  /** The paperclip: files join the project as material for the next draft. */
+  /** "Upload a file": files join the project as material for the next draft. */
   onAttach?: (files: FileList) => void;
+  documents?: readonly AttachedDocument[];
+  documentLabels?: ReadonlyMap<string, string>;
   /** Which version each draft reply became (#158): such a reply is one line
    *  naming its version, never the draft itself. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** Sends a tapped answer to the latest turn's question, as typing it would. */
+  onAnswer?: ((answer: string) => void) | undefined;
 }) {
+  const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -196,6 +191,7 @@ export function StageConversation({
     return eventMessages(list, events);
   }, [messages, pending, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
+  const [attached, setAttached] = useState<AttachedDocument[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
@@ -243,10 +239,14 @@ export function StageConversation({
                 </div>
               );
             }
+            const source = byId.get(message.id);
+            // The opening is what the specialist is sent to start the stage;
+            // the person never said it, and the document strip already shows
+            // what it carried.
+            if (source && isStageOpening(source)) return null;
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
-            const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
@@ -267,13 +267,20 @@ export function StageConversation({
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
-                  ) : draft ? (
-                    <>
-                      <DraftReference draft={draft} onOpen={onOpenVersion} />
-                      {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
-                    </>
+                  ) : !you ? (
+                    <SpecialistTurn
+                      text={text}
+                      note={null}
+                      draft={draft}
+                      onOpenVersion={onOpenVersion ?? (() => undefined)}
+                      onAnswer={message.id === lastAgentId && !pending ? onAnswer : undefined}
+                      onDraft={onValueChange}
+                    />
                   ) : (
-                    <MessageBody text={text} />
+                    <>
+                      <MessageBody text={text} />
+                      <AttachedList documents={attachedIn(source?.subject, documentLabels)} />
+                    </>
                   )}
                 </div>
               </div>
@@ -289,14 +296,32 @@ export function StageConversation({
           className={COMPOSER_BOX_CLASS}
           value={value}
           onValueChange={onValueChange}
-          onSend={onSend}
+          onSend={() => {
+            const sent = attached;
+            setAttached([]);
+            void (async () => {
+              if ((await onSend(sent)) !== false) return;
+              setAttached((current) => [...sent, ...current.filter((entry) => !sent.includes(entry))]);
+            })();
+          }}
           working={working || pending}
           {...(pending && onStop ? { onStop } : {})}
           {...(onSendHold ? { onSendHold } : {})}
-          {...(onAttach ? { onAttach } : {})}
-          attachIcon={<Plus className="size-4" aria-hidden="true" />}
+          attachments={attachmentChips(attached)}
+          onRemoveAttachment={(chip) => setAttached(attached.filter((entry) => entry.artifactId !== chip.id))}
           sendIcon={<Send className="size-4" aria-hidden="true" />}
-          leadingTools={mic}
+          leadingTools={
+            <>
+              <AttachMenu
+                documents={documents}
+                attached={attached}
+                onAttachDocument={(document) => setAttached([...attached, document])}
+                onUpload={onAttach}
+                disabled={disabled}
+              />
+              {mic}
+            </>
+          }
           disabled={disabled}
           placeholder={placeholder}
         />
@@ -311,6 +336,8 @@ export function StageConversation({
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
+const EMPTY_DOCUMENTS: readonly AttachedDocument[] = [];
+const EMPTY_LABELS: ReadonlyMap<string, string> = new Map();
 
 /**
  * A draft reply's line in the chat (#158): "Drafted v2 of the problem
@@ -403,8 +430,10 @@ export function SpecialistTurn({
   let questionIndex = -1;
   // A draft's lead -- the sentence or two before its first heading -- is
   // conversation and stays; the pointer that stands in when there is no
-  // lead is what the draft line already says.
-  const lead = draft ? conversationLead(text) : null;
+  // lead is what the draft line already says. A reply that wrote its
+  // document to an artifact is not a document, so its words stay.
+  const hideDocument = draft !== null && isSubstantialDraft(text);
+  const lead = hideDocument ? conversationLead(text) : null;
   return (
     <>
       {note ? (
@@ -421,7 +450,7 @@ export function SpecialistTurn({
       {draft ? <DraftReference draft={draft} onOpen={onOpenVersion} /> : null}
       {lead !== null && lead !== DRAFT_POINTER ? <Markdown source={lead} /> : null}
       {segments.map((segment, index) => {
-        if (segment.kind === "text") return draft ? null : <Markdown key={index} source={segment.markdown} />;
+        if (segment.kind === "text") return hideDocument ? null : <Markdown key={index} source={segment.markdown} />;
         const at = ++questionIndex;
         const picked = chosen.get(at);
         return (
@@ -443,6 +472,7 @@ export function SpecialistTurn({
                 ))}
               </div>
             ) : null}
+            {segment.options.length > 0 && onAnswer ? <p className="turn-option-hint">Or type your own answer below.</p> : null}
           </div>
         );
       })}

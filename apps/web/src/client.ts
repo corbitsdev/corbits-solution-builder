@@ -2066,14 +2066,35 @@ export const api = {
    * already return, so every reader downstream (inline preview, download)
    * stays on one code path.
    */
-  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
+  /**
+   * The document a drafting stage's specialist keeps with the artifact tools:
+   * the newest artifact of the stage's kind that a workflow run wrote in the
+   * project's tenant. Null when there is none yet. A read that fails throws,
+   * so the workspace can say the document is unavailable rather than fall
+   * back to an older draft.
+   */
+  stageWorkArtifact: async (
+    tenantId: string,
+    kind: string,
+  ): Promise<{ id: string; version: number; content: string } | null> => {
+    const transport = createHubTransport();
+    const written = (await listArtifacts(transport, tenantId, { kind }))
+      .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    if (!written) return null;
+    const artifact = await installerGetArtifact(transport, tenantId, written.id);
+    if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
+    return { id: artifact.id, version: artifact.version, content: artifact.content };
+  },
+  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string; version?: number }> => {
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
     const found = await findArtifact(createHubTransport(), tenantId, nodeId);
     if (!found) return { content: "" };
+    const { version } = found.artifact;
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
-    if (typeof uploadId !== "string") return { content: found.artifact.content };
-    return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
+    if (typeof uploadId !== "string") return { content: found.artifact.content, version };
+    return { content: await downloadUploadedArtifact(found.tenantId, nodeId), version };
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>
@@ -2246,11 +2267,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // No hub credential binding: a stage 8 deployed with one never
-        // produced a run, while every unbound stage does. Nothing needs it
-        // now — the build runs on the host and the archive is recorded by
-        // the build panel, not uploaded from a sidecar.
-        false,
+        // Every stage's own specialist carries the artifact tools and their
+        // hub credential: a drafting stage writes its document with them,
+        // and any stage reads the documents a person attaches.
+        true,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2286,7 +2306,7 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
-        false,
+        true,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);

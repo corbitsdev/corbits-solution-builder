@@ -55,6 +55,11 @@ export const keys = {
   },
   providers: ["providers"] as const,
   resolvedCatalog: ["resolvedCatalog"] as const,
+  /** The newest artifact a drafting stage's specialist wrote, by kind. */
+  stageWork: {
+    all: ["stageWork"] as const,
+    of: (tenantId: string, kind: string) => ["stageWork", tenantId, kind] as const,
+  },
   artifact: {
     all: ["artifact"] as const,
     of: (tenantId: string, id: string) => ["artifact", tenantId, id] as const,

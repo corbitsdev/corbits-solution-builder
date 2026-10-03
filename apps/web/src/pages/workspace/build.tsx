@@ -25,8 +25,10 @@ import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
-import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
+import { taggedSubject } from "./composed-mail.ts";
+import type { StageEvent } from "./stage-events.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -140,6 +142,8 @@ export function BuildPanel({
   onSendHold,
   popover = null,
   onAttach,
+  documents,
+  documentLabels,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -163,8 +167,10 @@ export function BuildPanel({
   /** Holding send raises the send-back picker. */
   onSendHold?: (draft: string) => void;
   popover?: ReactNode;
-  /** The paperclip: files join the project as material. */
+  /** "Upload a file": files join the project as material. */
   onAttach?: (files: FileList) => void;
+  documents?: readonly AttachedDocument[];
+  documentLabels?: ReadonlyMap<string, string>;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -273,13 +279,15 @@ export function BuildPanel({
     if (element) element.scrollTop = element.scrollHeight;
   }, [log]);
 
-  const run = async (label: string, work: () => Promise<void>) => {
+  const run = async (label: string, work: () => Promise<void>): Promise<boolean> => {
     setBusy(label);
     setError(null);
     try {
       await work();
+      return true;
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -361,12 +369,13 @@ export function BuildPanel({
             messages={messages}
             value={composer}
             onValueChange={setComposer}
-            onSend={() => {
+            onSend={(attached) => {
               const body = composer;
               setComposer("");
-              void run("message", async () => {
+              return run("message", async () => {
                 if (!address) return;
-                await api.sendStageMail(tenantId, address, { body });
+                const tags = await attachedSubjectTags(tenantId, attached);
+                await api.sendStageMail(tenantId, address, { body, ...taggedSubject(tags, body) });
                 await load();
               });
             }}
@@ -376,6 +385,8 @@ export function BuildPanel({
             who={agentFor(8).title}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
+            {...(documents ? { documents } : {})}
+            {...(documentLabels ? { documentLabels } : {})}
             popover={popover}
           />
         </>

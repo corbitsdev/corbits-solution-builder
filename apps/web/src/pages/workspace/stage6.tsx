@@ -10,7 +10,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
-import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
+import { requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -75,8 +75,6 @@ export function Stage6Panel({
   requirementsNode = null,
   reviewNodes = null,
   onDocumentsChanged,
-  onDocuments,
-  onSendToArchitect,
   requirementsAsk = null,
   onRequirementsDrafted,
   strip,
@@ -106,10 +104,6 @@ export function Stage6Panel({
   reviewNodes?: ReadonlyMap<string, ArtifactNode> | null;
   /** A document was recorded (#334): the project's artifact graph should be re-read. */
   onDocumentsChanged?: () => void;
-  /** The stage's documents as they stand (#345): what a message to the architect may attach. */
-  onDocuments?: (documents: StageDocument[]) => void;
-  /** "Send to the architect": the document as a message in the architect's thread (#345). */
-  onSendToArchitect?: (body: string) => void;
   /** A chat message the workspace routed to the requirements author (#407). */
   requirementsAsk?: { body: string; at: number } | null;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
@@ -327,12 +321,6 @@ export function Stage6Panel({
       return state?.status === "done" && state.reply ? [reviewDocument(role.label, state.reply)] : [];
     }),
   ];
-  const documentsKey = documents.map((doc) => `${doc.key}:${String(doc.content.length)}`).join("|");
-  useEffect(() => {
-    onDocuments?.(documents);
-    // Re-reported when a document arrives or changes, not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentsKey]);
 
   // Addressing a companion specialist directly (#345): the ask, with any
   // named documents attached, goes to that role's own thread; the reply
@@ -423,17 +411,6 @@ export function Stage6Panel({
             <>
               <CopyButton text={current.reply} />
               <DocumentExportMenu node={draftNode(draftKindOf(page), 6, currentPage.label)} tenantId={tenantId} content={current.reply} />
-              {onSendToArchitect ? (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    const doc = page === "requirements" ? requirementsDocument(current.reply!) : reviewDocument(currentPage.label.replace(/ review$/, ""), current.reply!);
-                    onSendToArchitect(documentAsMessage(doc));
-                  }}
-                >
-                  Send to the architect
-                </Button>
-              ) : null}
             </>
           ) : null}
         </div>
