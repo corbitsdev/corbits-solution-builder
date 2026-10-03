@@ -385,7 +385,7 @@ export function BuildPanel({
             popover={popover}
             rows={
               canApprove || evidence.reason ? (
-                <ApproveControl waiting={canApprove ? null : evidence.reason} busy={approving} onApprove={onApprove} />
+                <ApproveControl waiting={evidence.reason} busy={approving} onApprove={onApprove} />
               ) : null
             }
           />
