@@ -14,7 +14,6 @@ import { ApiError, type Transport } from "@intx/hub-client";
 import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
-  BUILD_STAGE,
   SPECIALIST_ENTRY_PATH,
   specialistDependencies,
   specialistEntrySource,
@@ -54,7 +53,7 @@ import {
 const SPECIALIST_DIR = "packages/specialist";
 const DIGEST_PATH = "closure.sha256";
 /** The offering this asset was last deployed against -- written alongside the
- *  rendered source so `stageSpecialistSource` can report what a specialist is
+ *  rendered source so `stageSpecialistSourcePin` can report what a specialist is
  *  actually running on, rather than the tenant's current catalog order.
  *  CL-8783 verdict: this pin is a reporting artifact only, NOT the deploy
  *  path -- the hub resolves the inference chain at deploy time from
@@ -62,7 +61,7 @@ const DIGEST_PATH = "closure.sha256";
  *  path), never from this file. Removing it is deferred to the full slice. */
 const SOURCE_PIN_PATH = `${SPECIALIST_DIR}/source.json`;
 
-function normalizedProjectId(projectId: string): string {
+export function normalizedProjectId(projectId: string): string {
   return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
@@ -71,8 +70,8 @@ function normalizedProjectId(projectId: string): string {
  *  deployed specialist's name byte-identical across this change. */
 const DEFAULT_ROLE_KEY = "primary";
 
-/** `sb-project-<projectId>-stage-<N>`, normalized the same way `lifecycleAssetName`
- *  is, with `-<roleKey>` appended for any role other than the primary
+/** `sb-project-<projectId>-stage-<N>`, the id normalized by `normalizedProjectId`,
+ *  with `-<roleKey>` appended for any role other than the primary
  *  per-stage agent (`DEFAULT_ROLE_KEY`) -- so a stage's other roles (a brief
  *  evaluator, a requirements author, a panel principal) each get their own
  *  asset without disturbing the primary agent's existing name. */
@@ -363,13 +362,11 @@ export async function stageSpecialistSourcePin(
 }
 
 /**
- * The asset a stage specialist deploys into: the same package-tree shape
- * `workflow-deploy.ts`'s `renderLifecycleSource` builds for the lifecycle --
- * a root workspace `package.json`, a member whose `interchange.workflow`
- * points at the rendered entry, and the vendored `@intx`/`@solutions-builder`
- * closures beside it -- but with `specialistEntrySource` as the entry and no
- * `actions.js`: a specialist has no `routeMessage` action to wire and no loop
- * body to carry it into.
+ * The asset a stage specialist deploys into: a root workspace
+ * `package.json`, a member whose `interchange.workflow` points at
+ * `specialistEntrySource`'s rendered entry, and the vendored
+ * `@intx`/`@solutions-builder` closures beside it. No `actions.js`: a
+ * specialist has no action handlers.
  */
 export async function renderSpecialistSource(
   closure: ClosureSource,
@@ -408,7 +405,7 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools }),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, artifactTools }),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -460,14 +457,13 @@ export async function specialistEntryIsCurrent(
   stage: Stage,
   offering: Parameters<typeof sourceFor>[2],
   artifactTools: boolean,
-  roleKey: string,
   role: AgentRole,
 ): Promise<boolean> {
   const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
   if (deployed === null) return true;
   const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
-  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools });
+  const rendered = specialistEntrySource({ stage, source, role, artifactTools });
   return rendered === deployed;
 }
 
@@ -591,7 +587,6 @@ async function ensureSpecialistDeploymentOnce(
       stage,
       leading,
       artifactTools,
-      roleKey,
       role,
     );
     if (current) {

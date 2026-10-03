@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { ensureProvider, WORKFLOW_ARTIFACTS_PROVIDER_NAME } from "./artifacts-credential.js";
+import { WORKFLOW_ARTIFACTS_PROVIDER_NAME } from "@solutions-builder/app/specialist-source";
+import { ensureProvider } from "./artifacts-credential.js";
 import type { HubProvider } from "./hub.js";
 
 type ProviderCatalog = Parameters<typeof ensureProvider>[0];

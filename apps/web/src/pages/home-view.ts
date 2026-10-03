@@ -9,7 +9,7 @@ export const HOME_EMPTY_DESCRIPTION = "Describe the thing above — the discover
 export const HOME_NEEDS_DECISION = "Needs decision";
 
 /**
- * Card-foot labels only. Workspace/topbar keep `STAGE_NAMES` in components.tsx;
+ * Card-foot labels only. Workspace/topbar keep the ledger's `STAGE_TITLES`;
  * these match mockups/index.html Title Case and must not leak there.
  */
 export const HOME_CARD_STAGE_NAMES = [

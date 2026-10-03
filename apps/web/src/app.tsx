@@ -21,6 +21,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
@@ -185,14 +186,11 @@ function StageStepper({
 }
 
 function stageSteps(stage: number): WorkflowStep[] {
-  return Array.from({ length: 9 }, (_, index) => {
-    const number = index + 1;
-    return {
-      number,
-      label: stageName(number),
-      status: number < stage ? "completed" : number === stage ? "current" : "pending",
-    };
-  });
+  return STAGES.map((number) => ({
+    number,
+    label: stageName(number),
+    status: number < stage ? "completed" : number === stage ? "current" : "pending",
+  }));
 }
 
 /**
@@ -459,9 +457,6 @@ export function App() {
   // reopen from the list hit the same silent failure with no way out.
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailAttempt, setDetailAttempt] = useState(0);
-  // Resolved once and threaded down as a prop: every artifact read goes
-  // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
-  const [tenantId, setTenantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
@@ -486,10 +481,9 @@ export function App() {
       // run never set `status` and the boot screen never went away. Until the
       // install, an uninstalled workspace is an empty one.
       const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
-      const [decisionsResult, projectsResult, tenantIdResult] = await Promise.all([
+      const [decisionsResult, projectsResult] = await Promise.all([
         api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
         api.projects().catch(emptyUntilInstalled({ projects: [] })),
-        api.workspaceTenantId().catch(() => null),
       ]);
       setStatus(statusResult);
       setDecisions(decisionsResult.decisions);
@@ -497,7 +491,6 @@ export function App() {
       setProviders(providersResult.providers);
       setApiKeyProviders(providersResult.apiKeyProviders);
       setOauthCandidates(providersResult.oauthCandidates);
-      setTenantId(tenantIdResult);
       setOffline(false);
     } catch (cause) {
       // A 401/403 means the session cookie no longer holds (e.g. the host

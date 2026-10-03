@@ -16,15 +16,8 @@
  * and re-registers it against the new anchor run.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
+import { WORKFLOW_ARTIFACTS_PROVIDER_NAME, workflowArtifactsCredentialName } from "@solutions-builder/app/specialist-source";
 import { catalogFor, registerWorkflowArtifactToken, type HubProvider } from "./hub.js";
-
-export const WORKFLOW_ARTIFACTS_PROVIDER_NAME = "sb-workflow-artifacts";
-
-/** Mirrors `specialist-source.ts`'s: fixed per role (#41 step 5), one
- *  credential per role in each project's own tenant. */
-export function workflowArtifactsCredentialName(roleId: string): string {
-  return `workflow-artifacts:${roleId}`;
-}
 
 function mintToken(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");

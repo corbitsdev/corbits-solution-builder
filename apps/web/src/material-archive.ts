@@ -1,8 +1,7 @@
 /**
  * A zip archive handed over as source material is not kept as itself: it is
- * the files inside it, each attached under its path within the archive. The
- * rules are main's (`apps/hub/src/source-material.ts` there), applied in the
- * browser here since this lane attaches material from the client: folders,
+ * the files inside it, each attached under its path within the archive.
+ * Material is attached from the client, so the rules apply here: folders,
  * what macOS adds when zipping (`__MACOSX/`, `._` resource forks,
  * `.DS_Store`, `Thumbs.db`) and any file of a kind the specialists cannot
  * read are left out; an archive inside an archive is opened too, up to

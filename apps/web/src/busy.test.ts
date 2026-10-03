@@ -8,7 +8,6 @@ import {
   nextDeadline,
   stepIndicator,
   subscribeBusy,
-  trackBusy,
   type IndicatorState,
 } from "./busy.ts";
 
@@ -24,13 +23,6 @@ describe("the busy count", () => {
     releaseA();
     expect(busyCount()).toBe(1);
     releaseB();
-    expect(busyCount()).toBe(0);
-  });
-
-  test("a tracked promise is released whether it resolves or rejects", async () => {
-    await expect(trackBusy(Promise.resolve("ok"))).resolves.toBe("ok");
-    expect(busyCount()).toBe(0);
-    await expect(trackBusy(Promise.reject(new Error("no")))).rejects.toThrow("no");
     expect(busyCount()).toBe(0);
   });
 

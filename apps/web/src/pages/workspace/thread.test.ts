@@ -34,7 +34,6 @@ const DESIGN = `<!doctype html>
 function render(messages: ChatMessage[]): string {
   return renderToStaticMarkup(
     createElement(StageConversation, {
-      stage: 5,
       messages,
       value: "",
       onValueChange: () => undefined,
@@ -71,7 +70,6 @@ describe("StageConversation message bodies", () => {
   test("a draft reply with a known version is one line naming it, and the pointer is not repeated", () => {
     const html = renderToStaticMarkup(
       createElement(StageConversation, {
-        stage: 1,
         messages: [{ id: "m1", author: "agent", body: BRIEF, at: "2026-09-23T00:00:00.000Z" }],
         value: "",
         onValueChange: () => undefined,
