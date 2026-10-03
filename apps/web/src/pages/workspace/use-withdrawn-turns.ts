@@ -5,7 +5,9 @@
  * thread, so a reply Stop hid can never surface as the latest turn, the
  * draft, or the open question.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import {
@@ -29,6 +31,8 @@ export type WithdrawnTurnsState = {
   /** Withdraws the pending turn and hands its body back to the composer via
    *  `restoreDraft` — abort restores the draft, it does not discard it. */
   readonly stop: () => Promise<void>;
+  /** The marker could not be read: a withdrawn turn may show again. */
+  readonly error: string | null;
 };
 
 export function useWithdrawnTurns(
@@ -44,23 +48,17 @@ export function useWithdrawnTurns(
     () => nodes.find((node) => node.kind === WITHDRAWN_TURNS_KIND) ?? null,
     [nodes],
   );
-  const [marks, setMarks] = useState<WithdrawnMark[]>([]);
-  useEffect(() => {
-    if (!withdrawnNode) {
-      setMarks([]);
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, withdrawnNode.id)
-      .then((result) => {
-        if (!cancelled) setMarks(parseWithdrawnTurns(result.content));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [withdrawnNode?.id, tenantId]);
+  const read = useQuery({
+    queryKey: keys.artifact.of(tenantId, withdrawnNode?.id ?? ""),
+    queryFn: withdrawnNode ? async () => (await api.artifactContent(tenantId, withdrawnNode.id)).content : skipToken,
+    staleTime: Infinity,
+  });
+  // Withdrawn in this session, before the marker artifact's re-read shows them.
+  const [added, setAdded] = useState<WithdrawnMark[]>([]);
+  const marks = useMemo(() => {
+    const recorded = read.data ? parseWithdrawnTurns(read.data) : [];
+    return [...recorded, ...added.filter((mark) => !recorded.some((entry) => entry.messageId === mark.messageId))];
+  }, [read.data, added]);
 
   const ids = useMemo(
     () => new Set(marks.filter((mark) => mark.stage === stage).map((mark) => mark.messageId)),
@@ -75,11 +73,11 @@ export function useWithdrawnTurns(
     restoreDraft(withdrawn.body);
     try {
       await api.withdrawTurn(projectId, tenantId, { messageId: withdrawn.id, stage });
-      setMarks((current) => [...current, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);
+      setAdded((current) => [...current, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);
     } catch (cause) {
       onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   };
 
-  return { messages, ids, pending, marks, stop };
+  return { messages, ids, pending, marks, stop, error: read.error?.message ?? null };
 }

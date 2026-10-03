@@ -347,10 +347,6 @@ export function StageWorkspace({
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
     return { ...latestSpecialistMessage, body: work.artifact.content };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
-  const workUnreadable = work?.state === "unreadable" ? work.message : null;
-  useEffect(() => {
-    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
-  }, [workUnreadable]);
   // A draft that lives in the mail is repaired here, before the pane or the
   // gate reads it, and that repaired text is what approval records: a stage
   // 3 choice absorbed anywhere but under "## Chosen approach" is written in
@@ -1068,7 +1064,7 @@ export function StageWorkspace({
           title={
             workflow.startError
               ? `The project workflow could not be started: ${workflow.startError}`
-              : "The project workflow could not be read."
+              : `The project workflow could not be read: ${workflow.viewError}`
           }
           action={{ label: "Try again", onClick: workflow.retryOpening }}
         />
@@ -1230,6 +1226,7 @@ export function StageWorkspace({
       {autoSwitchTo ? <OnMount action={() => void modelSwitch.switchTo(autoSwitchTo.offeringId)} /> : null}
 
       {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
+      {withdrawn.error ? <Banner tone="error" title="The stopped turns could not be read">{withdrawn.error}</Banner> : null}
       {modelHandoff.error ? (
         <Banner tone="error" title="The new specialist could not be told about the prior conversation">
           {modelHandoff.error}

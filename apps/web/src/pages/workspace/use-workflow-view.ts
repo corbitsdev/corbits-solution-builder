@@ -20,6 +20,7 @@ export type WorkflowViewState = {
   /** The workflow failed to start or load — drive the failure state, never a guessed stage. */
   readonly openingFailed: boolean;
   readonly startError: string | null;
+  readonly viewError: string | null;
   /** The workflow was moved onto new code, and the new rules refused an
    *  earlier decision (#51): what was refused, in the workflow's own words.
    *  Null when nothing was refused, or no replay happened. */
@@ -48,7 +49,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const queryClient = useQueryClient();
   const [startError, setStartError] = useState<string | null>(null);
   const [replayNotice, setReplayNotice] = useState<{ title: string; detail: string } | null>(null);
-  const [viewFailed, setViewFailed] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
@@ -82,7 +83,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
 
   const retryOpening = useCallback(() => {
     setStartError(null);
-    setViewFailed(false);
+    setViewError(null);
     setAttempt((value) => value + 1);
   }, []);
 
@@ -104,7 +105,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     let cancelled = false;
     setStartError(null);
     setReplayNotice(null);
-    setViewFailed(false);
+    setViewError(null);
     (async () => {
       try {
         const ensured = await api.ensureProjectWorkflow(projectId);
@@ -124,8 +125,8 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
           next = await api.projectWorkflowView(projectId);
         }
         if (next && next.stage < 1) throw new Error("the project workflow did not start");
-      } catch {
-        if (!cancelled) setViewFailed(true);
+      } catch (cause) {
+        if (!cancelled) setViewError(describeFailure(cause));
         return;
       }
       if (!cancelled && next) queryClient.setQueryData(keys.workflowView.of(projectId), next);
@@ -138,8 +139,9 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   return {
     view,
     resolved: view !== null,
-    openingFailed: startError !== null || viewFailed,
+    openingFailed: startError !== null || viewError !== null,
     startError,
+    viewError,
     replayNotice,
     retryOpening,
     refreshingAfterAction,
