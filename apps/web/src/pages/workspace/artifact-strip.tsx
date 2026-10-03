@@ -21,7 +21,6 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ArtifactTab } from "./use-project-artifacts.ts";
-import { localTime } from "../../local-time.ts";
 
 /** Tab glyphs follow the artifact kind, not the name. */
 const KIND_ICON: Record<string, ReactNode> = {
@@ -220,7 +219,7 @@ export function VersionStrip({
         ›
       </button>
       <span className="version-note">
-        {localTime(active.createdAt)}
+        {new Date(active.createdAt).toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
         {active.supersededByNodeId ? " · superseded" : ""}
       </span>
     </div>
