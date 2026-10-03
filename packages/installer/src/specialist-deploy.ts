@@ -329,9 +329,9 @@ export async function stageSpecialistStatus(
  * tenant's current catalog order (which can have moved since). Null when the
  * asset does not exist yet, or predates this pin file.
  *
- * CL-8783 verdict: read-only reporting. The hub never reads this file when
- * deploying -- the inference chain comes from the deploy's `sourceOfferingIds`
- * via `resolveSourcesByOfferingIds` -- so this stays until the full slice
+ * CL-8783 verdict: the hub never reads this file when deploying -- the
+ * inference chain comes from the deploy's `sourceOfferingIds` via
+ * `resolveSourcesByOfferingIds` -- so this stays until the full slice
  * replaces pin reporting with declared `modelRequirements`.
  */
 export async function stageSpecialistSourcePin(
@@ -344,7 +344,11 @@ export async function stageSpecialistSourcePin(
   const home = await projectHome(transport, projectId);
   const located = (await specialistAssetsIn(transport, home)).find((entry) => entry.asset.name === assetName);
   if (!located) return null;
-  const raw = await readWorkflowSourceBlob(transport, located.tenantId, located.asset.id, SOURCE_PIN_PATH);
+  return readSourcePin(transport, located.tenantId, located.asset.id);
+}
+
+async function readSourcePin(transport: Transport, tenantId: string, assetId: string): Promise<InferenceSourcePin | null> {
+  const raw = await readWorkflowSourceBlob(transport, tenantId, assetId, SOURCE_PIN_PATH);
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -433,17 +437,20 @@ export async function renderSpecialistSource(
 
 /**
  * The offering a live deployment leads with: the one the switch that chose
- * it named, while that record still points at it; otherwise the catalog's
- * first, which is what an ordinary deploy led with.
+ * it named, while that record still points at it; otherwise the one serving
+ * the model it was deployed on. Never the catalog's first: the primary can
+ * have moved since, and a running stage keeps its model until the person
+ * switches it. Undefined when no connected offering serves it any more.
  */
 export function leadingOffering<T extends { readonly id: string }>(
   recorded: { readonly deploymentId: string; readonly offeringId: string } | null,
   deploymentId: string,
   offerings: readonly T[],
-): T {
+  runs: (offering: T) => boolean,
+): T | undefined {
   const switched =
     recorded?.deploymentId === deploymentId ? offerings.find((offering) => offering.id === recorded.offeringId) : undefined;
-  return switched ?? offerings[0]!;
+  return switched ?? offerings.find(runs);
 }
 
 /**
@@ -579,22 +586,32 @@ async function ensureSpecialistDeploymentOnce(
     // specialist was already up, and stayed unreached until a model switch
     // happened to redeploy it. So the entry it runs is compared against a
     // fresh render on the model it leads with -- the switch it was chosen
-    // by, else the catalog's first -- and when the two differ it is
+    // by, else the one it was deployed on -- and when the two differ it is
     // redeployed onto that same model, recorded as a switch so mail follows
-    // the new deployment rather than `pickDeployment`'s oldest.
-    const recorded = await readStageSwitch(transport, projectId, stage);
-    const leading = leadingOffering(recorded, existing.deployment.id, catalogOfferings);
-    const current = await specialistEntryIsCurrent(
-      transport,
-      existing.tenantId,
-      existing.assetId,
-      stage,
-      leading,
-      artifactTools,
-      roleKey,
-      role,
-    );
-    if (current) {
+    // the new deployment rather than `pickDeployment`'s oldest. When its
+    // provider has been removed there is no such model to redeploy onto, and
+    // moving it onto the primary is the person's choice, not this call's.
+    const [recorded, pinned] = await Promise.all([
+      readStageSwitch(transport, projectId, stage),
+      readSourcePin(transport, existing.tenantId, existing.assetId),
+    ]);
+    const leading = leadingOffering(recorded, existing.deployment.id, catalogOfferings, (offering) => {
+      const pin = pinFor(catalog, offering);
+      return pin !== undefined && pin.provider === pinned?.provider && pin.model === pinned.model;
+    });
+    if (
+      leading === undefined ||
+      (await specialistEntryIsCurrent(
+        transport,
+        existing.tenantId,
+        existing.assetId,
+        stage,
+        leading,
+        artifactTools,
+        roleKey,
+        role,
+      ))
+    ) {
       return {
         deploymentId: existing.deployment.id,
         address: `${existing.deployment.id}@${existing.domain}`,

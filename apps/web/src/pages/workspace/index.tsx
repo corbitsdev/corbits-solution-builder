@@ -73,7 +73,7 @@ import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
-import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
+import { currentInference, inferenceOptions, inferenceRemoved } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
@@ -463,8 +463,7 @@ export function StageWorkspace({
     }).data ?? null;
 
   // The Inference picker: Settings' provider-and-model rows, in Settings'
-  // order (`inference-options.ts`). Fetched once the specialist exists and
-  // again after a pick, since a pick reorders those rows.
+  // order (`inference-options.ts`). Fetched once the specialist exists.
   const inferenceProviders =
     useQuery({
       queryKey: keys.providers,
@@ -473,17 +472,9 @@ export function StageWorkspace({
     }).data ?? null;
   const inferenceChoices = inferenceOptions(inferenceProviders ?? []);
   const runningInference = currentInference(activeModel, inferenceChoices);
+  const runningRemoved = inferenceRemoved(activeModel, inferenceProviders);
 
   const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
-  // Choosing an inference is the same as dragging its row to the top in
-  // Settings -- it becomes the default -- and this stage switches onto it.
-  const pickInference = async (option: InferenceOption) => {
-    if (!inferenceProviders) return;
-    await api.reorderProviders(orderLeadingWith(inferenceProviders, option.providerRowId));
-    void queryClient.invalidateQueries({ queryKey: keys.providers });
-    queryClient.setQueryData(keys.activeModel.of(), { providerLabel: option.providerLabel, canonicalName: option.model });
-    await modelSwitch.switchTo(option.offeringId);
-  };
 
   // The owner's ask: opening a project whose current stage is running a
   // model other than the workspace's current default should offer, not
@@ -1006,15 +997,16 @@ export function StageWorkspace({
           {/* The select is the one place the running model is named: it
               shows the running row, or, when no Settings row matches it,
               the running model itself as the unchosen first option. */}
+          {runningRemoved ? <span className="inline-note">Provider removed, choose another.</span> : null}
           <select
             id="stage-inference"
             aria-label="Switch this stage's inference"
-            title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
+            title="The provider and model rows from Settings, in their order. Choosing one switches this stage to it; the primary in Settings is unchanged."
             disabled={modelSwitch.switching || inferenceProviders === null}
             value={runningInference?.providerRowId ?? ""}
             onChange={(event) => {
               const option = inferenceChoices.find((entry) => entry.providerRowId === event.target.value);
-              if (option) void pickInference(option);
+              if (option) void modelSwitch.switchTo(option.offeringId);
             }}
           >
             <option value="" disabled>
@@ -1040,7 +1032,7 @@ export function StageWorkspace({
       {modelNudgeVisible && workspaceDefaultModel && defaultOffering ? (
         <div className="model-nudge" role="status">
           <span className="inline-note">
-            Your default model is now {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
+            Your primary model is now {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
             Switch this stage to it?
           </span>
           <div className="model-nudge-actions">
