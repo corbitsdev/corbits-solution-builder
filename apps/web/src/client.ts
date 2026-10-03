@@ -9,6 +9,7 @@ import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
@@ -56,6 +57,7 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readDesignerSettings,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
@@ -1158,6 +1160,20 @@ async function localizedRole(transport: ReturnType<typeof createHubTransport>, w
   return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
 }
 
+/**
+ * A stage's role as its specialist is deployed: localized, and for the
+ * experience designer, with the workspace's designer settings (surface,
+ * design language) read at deploy time the same way. A changed setting makes
+ * the rendered entry differ from the deployed one, so the next
+ * `ensureSpecialistDeployment` redeploys it.
+ */
+async function stageRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<AgentRole> {
+  const role = await localizedRole(transport, workspaceTenantId, agentFor(stage));
+  if (stage !== 4) return role;
+  const settings = await readDesignerSettings(transport, workspaceTenantId);
+  return { ...role, system: `${role.system}\n\n${designerGuidance(settings)}` };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   /** The build lane: the chosen worker, whether it is on this host, and how to get it when not. */
@@ -2252,7 +2268,7 @@ export const api = {
         // the build panel, not uploaded from a sidecar.
         false,
         undefined,
-        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
@@ -2287,6 +2303,8 @@ export const api = {
         specialistHubOrigin(),
         offeringId,
         false,
+        undefined,
+        await stageRole(transport, workspaceTenantId, stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
