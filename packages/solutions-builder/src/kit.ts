@@ -676,6 +676,21 @@ with a line rather than with a total: inference by stage and by the build's
 rounds, providers, running cost. State the currency. Give the time the same
 way, as the coding agent's wall-clock plus the gates, never as human effort.
 
+End "Forecast" with exactly one fenced block, opened with \`\`\`json estimate,
+holding a single JSON object of this shape (from \`estimate.ts\`; add or
+rename no field):
+
+\`\`\`
+{
+  "lines": [{ "label": string, "amount": string, "basis": string }, ...],
+  "scope": [string, ...]
+}
+\`\`\`
+
+"lines" carries every Forecast line and "scope" every "Scope priced" item,
+each as you wrote it above. The approver's summary table is drawn from this
+block alone, so a line left out of it is missing from the summary.
+
 An unknown quota or an unknown subscription allowance is an unknown. It is not
 zero cost, and it is not unlimited use. Say so in "Unknowns" rather than
 quietly assuming either.
