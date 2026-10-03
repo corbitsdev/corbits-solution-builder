@@ -15,6 +15,7 @@
  * importing it, so the web bundle never pulls in `node:child_process`/
  * `node:fs` runtime code.
  */
+import { missingHostChecks } from "../../delivery-verification.ts";
 import { localTime } from "../../local-time.ts";
 
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
@@ -45,6 +46,52 @@ export type DeliveryManifestContent = {
   verification?: DeliveryVerificationContent;
 };
 
+type HostCheck = { readonly status: string; readonly detail: string };
+
+/** The host's own run of an attempt, apart from anything the worker claimed: its run of the tests and each target it started, with its transcript. */
+export type HostRun = {
+  readonly tests: HostCheck;
+  readonly app: readonly (HostCheck & { readonly target: string; readonly transcript: string | null })[];
+};
+
+const isHostCheck = (item: { category: string; path: string }): boolean => item.category === "tests" || item.path === "target" || item.path.startsWith("target:");
+
+/** The host's run as the manifest recorded it; null when the checks did not run on the host. A check the record lacks is failed (`missingHostChecks`). */
+export function hostRunOf(verification: DeliveryVerificationContent | undefined): HostRun | null {
+  if (verification?.ranOn !== "host") return null;
+  const items = [...verification.items, ...missingHostChecks(verification)];
+  const tests = items.find((item) => item.category === "tests")!;
+  const app = items
+    .filter((item) => item.path === "target" || item.path.startsWith("target:"))
+    .map((item) => {
+      const target = item.path.replace(/^target:?/, "");
+      return { target, status: item.status, detail: item.detail ?? "", transcript: verification.targets.find((entry) => entry.target === target)?.transcript ?? null };
+    });
+  return { tests: { status: tests.status, detail: tests.detail ?? "" }, app };
+}
+
+const HOST_STATUS: Record<string, string> = { verified: "passed", failed: "failed" };
+
+function fenced(text: string): string[] {
+  return text.trim().length > 0 ? ["```", text.trim(), "```"] : [];
+}
+
+/** The host's run said as the host's, never as the worker's: each check's outcome with its output. */
+export function hostRunLines(run: HostRun | null): string[] {
+  if (!run) return ["The host did not run this attempt's tests or start its app; nothing here was run by the host."];
+  const [testsLine = "", ...testsOutput] = run.tests.detail.split("\n");
+  return [
+    "Run by the host on this computer, from the attempt's directory. These are the host's results, not the worker's claims.",
+    "",
+    `- Tests: ${HOST_STATUS[run.tests.status] ?? `not run (${run.tests.status})`} — ${testsLine}`,
+    ...fenced(testsOutput.join("\n")),
+    ...run.app.flatMap((app) => [
+      `- App${app.target ? ` (${app.target})` : ""}: ${app.status === "verified" ? "started and answered" : (HOST_STATUS[app.status] ?? `not run (${app.status})`)}${app.transcript ? "" : ` — ${app.detail}`}`,
+      ...fenced(app.transcript ?? ""),
+    ]),
+  ];
+}
+
 /** The verification as the verifier reads it: every item the tool checked
  *  with its status, and each target's transcript. Never summarised into a
  *  pass; a failed or missing item is listed as such. */
@@ -52,13 +99,17 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   if (!verification || verification.checkedBy !== "tool") {
     return ["Verification recorded with the archive: none. Nothing about this archive was checked by a tool; treat every check as not run."];
   }
-  const verified = verification.items.filter((item) => item.status === "verified").length;
+  const missing = missingHostChecks(verification);
+  const counted = [...verification.items, ...missing];
+  const verified = counted.filter((item) => item.status === "verified").length;
+  const failed = [...verification.report.failed, ...missing.map((item) => item.path)];
+  const host = hostRunOf(verification);
   const lines = [
-    `Verification recorded with the archive at ${localTime(verification.checkedAt)} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
-      verification.report.complete ? "no required item failed" : `required items not verified: ${verification.report.failed.join(", ")}`
+    `Verification recorded with the archive at ${localTime(verification.checkedAt)} (checked by the tool, not by a model): ${String(verified)} of ${String(counted.length)} checks verified, the host's own run included; ${
+      failed.length === 0 ? "no required item failed" : `required items not verified: ${failed.join(", ")}`
     }.`,
   ];
-  for (const item of verification.items) {
+  for (const item of host ? verification.items.filter((entry) => !isHostCheck(entry)) : verification.items) {
     lines.push(`- ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`);
   }
   lines.push(
@@ -68,6 +119,10 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   );
   if (verification.archiveExtras > 0) {
     lines.push(`- ${String(verification.archiveExtras)} file(s) in the archive are not listed in the manifest and were not checked.`);
+  }
+  if (host) {
+    lines.push("", "What the host ran itself:", ...hostRunLines(host));
+    return lines;
   }
   if (verification.targets.length === 0) {
     lines.push("- No web or api target was started or probed.");
@@ -137,6 +192,6 @@ export function deliveryOpeningLine(
     lines.push(`- ${file.path} — ${String(file.sizeBytes)} bytes — sha256 ${file.sha256}`);
   }
   lines.push("", ...verificationLines(content.verification));
-  lines.push("", "What the build supervisor reported:", buildStatusBody);
+  lines.push("", "What the build supervisor reported:", "(Its reading of the worker's own claims. The host's results are the ones above; never give one as the other.)", buildStatusBody);
   return lines.join("\n");
 }

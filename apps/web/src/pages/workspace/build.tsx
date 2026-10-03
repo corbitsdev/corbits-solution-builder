@@ -43,6 +43,9 @@ import { localTime } from "../../local-time.ts";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
+import { hostRunLines, hostRunOf, parseDeliveryManifest, type DeliveryVerificationContent } from "./delivery-opening.ts";
+import { manifestCompanionOf } from "./stage9-opening.ts";
+import { parseDeliveryVerification } from "../../delivery-verification.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -108,6 +111,32 @@ function BuildClock({ since, until }: { since: string | null; until: string | nu
     <span className="elapsed-clock" role="timer" aria-live="off">
       {clock(seconds)}
     </span>
+  );
+}
+
+/** The host's own run of the recorded attempt, read from the archive's manifest: its tests and its app, each with its output, apart from what the worker claimed. */
+function HostRunSection({ archive, nodes, tenantId }: { archive: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
+  const manifestId = manifestCompanionOf(nodes, archive)?.id ?? null;
+  const manifest = useQuery({
+    queryKey: keys.artifact.of(tenantId, manifestId ?? ""),
+    queryFn: async () => (await api.artifactContent(tenantId, manifestId!)).content,
+    enabled: manifestId !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  if (manifestId === null) return <p className="inline-note">No manifest was recorded with this archive, so nothing the host ran can be shown.</p>;
+  if (manifest.isError) return <p className="inline-note">The archive's manifest could not be read, so what the host ran is unknown.</p>;
+  if (manifest.data === undefined) return <p className="inline-note">Reading what the host ran…</p>;
+  const verification = parseDeliveryManifest(manifest.data)?.verification;
+  const { summary, rows } = parseDeliveryVerification(verification);
+  return (
+    <>
+      <h2>What the host ran itself</h2>
+      <p className="inline-note">
+        {summary.passed} of {rows.length} check{rows.length === 1 ? "" : "s"} verified{summary.failed > 0 ? `, ${String(summary.failed)} failed` : ""}.
+      </p>
+      <Markdown source={hostRunLines(hostRunOf(verification)).join("\n")} />
+    </>
   );
 }
 
@@ -343,6 +372,7 @@ export function BuildPanel({
           probeSkipped: probe.skipped,
           forecast,
           verification: packaged.verification,
+          host: hostRunOf(packaged.manifest["verification"] as DeliveryVerificationContent | undefined),
         }),
       });
       await Promise.all([reloadThread(), refreshAttempts()]);
@@ -546,7 +576,12 @@ export function BuildPanel({
             ) : (
               <p className="inline-note">No attempt has been started. The worker builds in its own directory on this computer, from the frozen plan, requirements, design and stack.</p>
             )}
-            {archive ? <BuildFile node={archive} nodes={detail.nodes} tenantId={tenantId} /> : null}
+            {archive ? (
+              <>
+                <BuildFile node={archive} nodes={detail.nodes} tenantId={tenantId} />
+                <HostRunSection archive={archive} nodes={detail.nodes} tenantId={tenantId} />
+              </>
+            ) : null}
             {status ? (
               <>
                 <h2>Build status — {agentFor(8).title}</h2>

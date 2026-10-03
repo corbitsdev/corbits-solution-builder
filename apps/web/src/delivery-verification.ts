@@ -100,6 +100,24 @@ function parseRow(raw: unknown, problems: string[]): VerificationRow | null {
   return { path, ...(kind ? { kind } : {}), ...(sha256 ? { sha256 } : {}), ...(sizeBytes !== undefined ? { sizeBytes } : {}), status, ...(note ? { note } : {}) };
 }
 
+export type MissingHostCheck = { category: string; path: string; required: true; status: "failed"; detail: string };
+
+/**
+ * The host's own checks a verification it ran must carry: its run of the
+ * attempt's tests and its start of the app. One the record lacks is failed,
+ * never left out, so a count of checks can never read clean without them.
+ */
+export function missingHostChecks(verification: unknown): MissingHostCheck[] {
+  if (!isRecord(verification) || verification["ranOn"] !== "host" || !Array.isArray(verification["items"])) return [];
+  const items = verification["items"].filter(isRecord);
+  const ranTests = items.some((item) => item["category"] === "tests");
+  const startedApp = items.some((item) => typeof item["path"] === "string" && item["path"].startsWith("target:"));
+  return [
+    ...(ranTests ? [] : [{ category: "tests", path: "tests", required: true as const, status: "failed" as const, detail: "the host has no record of running the tests" }]),
+    ...(startedApp ? [] : [{ category: "receipts", path: "target", required: true as const, status: "failed" as const, detail: "the host has no record of starting the app" }]),
+  ];
+}
+
 /** Never throws: malformed or missing input is reported in `problems`, never surfaced as a passing check. */
 export function parseDeliveryVerification(input: unknown): DeliveryVerification {
   const problems: string[] = [];
@@ -111,7 +129,8 @@ export function parseDeliveryVerification(input: unknown): DeliveryVerification 
     if (!rawItems) {
       return { rows: [], summary: { passed: 0, failed: 0, unverified: 0 }, problems: ["verification could not be read"] };
     }
-    const rows = rawItems.map((raw) => parseRow(raw, problems)).filter((row): row is VerificationRow => row !== null);
+    const host = missingHostChecks(isRecord(input) && isRecord(input["verification"]) ? input["verification"] : input);
+    const rows = [...rawItems, ...host].map((raw) => parseRow(raw, problems)).filter((row): row is VerificationRow => row !== null);
     const summary = rows.reduce(
       (acc, row) => {
         acc[row.status] += 1;

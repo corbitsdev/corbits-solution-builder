@@ -21,6 +21,7 @@ import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
 import { appSubject } from "./composed-mail.ts";
+import { hostRunLines, type HostRun } from "./delivery-opening.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -85,9 +86,11 @@ export type SupervisorBriefInput = {
   readonly verification: {
     readonly complete: boolean;
     /** The required items the host's checks did not verify, each with its detail. */
-    readonly unverified: readonly { path: string; status: string; detail?: string }[];
+    readonly unverified: readonly { category?: string; path: string; status: string; detail?: string }[];
     readonly targets: readonly { target: string; ranSuccessfully: boolean; transcript: string }[];
   };
+  /** The host's own run of the attempt's tests and app (`hostRunOf`); null when it ran none. */
+  readonly host?: HostRun | null;
 };
 
 /** Where the package step's target probes ran: on the host, with the attempt's declared command or the one the person typed. */
@@ -179,6 +182,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
     ``,
     `## What the worker reported`,
+    `Everything in this section is the worker's own claim; the host checked none of it.`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
     `- Ran from ${localTime(outcome.startedAt)} to ${localTime(outcome.endedAt)}.`,
     `- The interface gives a final text and an exit status and nothing else: no session, steering or checkpoint exists.`,
@@ -187,12 +191,17 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     finalText.trim().length > 0 ? finalText.trim() : "(the worker wrote nothing to stdout)",
     ...(outcome.stderrTail.trim().length > 0 ? [``, `### Last lines of stderr`, outcome.stderrTail.trim()] : []),
     ``,
+    `## What the host ran itself`,
+    ...hostRunLines(input.host ?? null),
+    ``,
     `## Evidence recorded`,
     `- Archive ${input.archive.fileName}, ${String(input.archive.sizeBytes)} bytes, sha256 ${input.archive.sha256}, recorded as attempt-${String(input.attempt)}.`,
     `- The archive holds ${String(input.archive.fileCount)} file${input.archive.fileCount === 1 ? "" : "s"}${input.archive.files.length < input.archive.fileCount ? `, the first ${String(input.archive.files.length)} listed` : ""}: ${input.archive.files.join(", ")}. Any file count you give is this one; the worker's own may include files the archive leaves out.`,
     `- Deterministic checks: ${input.verification.complete ? "complete." : "incomplete. Each item below failed or was not run:"}`,
-    ...input.verification.unverified.map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
-    targets,
+    ...input.verification.unverified
+      .filter((item) => !input.host || (item.category !== "tests" && !item.path.startsWith("target:")))
+      .map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
+    ...(input.host ? [] : [targets]),
     ``,
     `## Forecast from the cost approval`,
     input.forecast?.trim()
