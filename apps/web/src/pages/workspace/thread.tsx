@@ -379,6 +379,7 @@ export function SpecialistTurn({
   onAnswer,
   busy = false,
   onDraft,
+  onChoice,
 }: {
   text: string;
   note: TurnNote | null;
@@ -399,6 +400,9 @@ export function SpecialistTurn({
    *  message box should hold, so the person sees them gather and can add
    *  to them (#142). Absent, a partial set is sent as it stands. */
   onDraft?: ((draft: string) => void) | undefined;
+  /** A tapped answer to a `json choice` question: recorded as the
+   *  workflow's `choice` decision, beside the answer sent as text. */
+  onChoice?: ((key: string, value: string) => void) | undefined;
 }) {
   // Every question the turn asks is set apart with its own options -- a
   // turn that lists two under "What I need from you" has asked two, and
@@ -411,6 +415,8 @@ export function SpecialistTurn({
   // one being answered and its chips go.
   const [chosen, setChosen] = useState<ReadonlyMap<number, string>>(() => new Map());
   const choose = (questionIndex: number, option: string) => {
+    const asked = questions[questionIndex];
+    if (asked?.choice) onChoice?.(asked.choice.key, asked.choice.values[asked.options.indexOf(option)]!);
     const next = new Map(chosen);
     next.set(questionIndex, option);
     setChosen(next);

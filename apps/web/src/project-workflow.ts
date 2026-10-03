@@ -12,6 +12,8 @@ import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
 import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
 import {
   approveReason,
+  CHOICES,
+  missingChoice,
   quorumState,
   type ApproveReason,
   type AudiencePackageRef,
@@ -70,6 +72,11 @@ export type ProjectWorkflowView = {
   readonly surface: Surface | null;
   /** Stages that surface makes not applicable. */
   readonly skipped: readonly StageNumber[];
+  /** Each stage's recorded `choice` answers. */
+  readonly choices: ProjectState["choices"];
+  /** The question of the first choice the current stage still requires
+   *  (`missingChoice`); null once every one is answered. */
+  readonly waitingOn: string | null;
   /** The `name` step's reply, once it has completed with one; null before
    *  then, and for good when it failed. */
   readonly generatedTitle: string | null;
@@ -91,6 +98,7 @@ const EMPTY_STATE: ProjectState = {
   audiencePackages: {},
   surface: null,
   skipped: [],
+  choices: {},
 };
 
 function decodeInlineOutput(ref: unknown): unknown {
@@ -185,6 +193,7 @@ export function projectWorkflowViewOf(state: ProjectState, generatedTitle: strin
   // carries no map at all; read as empty, every vote it holds is stale
   // rather than the fold failing (#50).
   const audiencePackages: Readonly<Record<string, AudiencePackageRef>> = state.audiencePackages ?? {};
+  const missing = missingChoice(state);
   return {
     stage: state.stage,
     done: state.done,
@@ -204,9 +213,11 @@ export function projectWorkflowViewOf(state: ProjectState, generatedTitle: strin
     audienceDecisions: state.audienceDecisions,
     audiencePackages,
     stage5Quorum: state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions, audiencePackages) : null,
-    // A run deployed before surfaces were recorded carries neither field.
+    // A run deployed before surfaces and choices were recorded carries none of these.
     surface: state.surface ?? null,
     skipped: state.skipped ?? [],
+    choices: state.choices ?? {},
+    waitingOn: missing ? CHOICES[missing].question : null,
     generatedTitle,
   };
 }

@@ -500,6 +500,41 @@ export async function sendBack(deps: StageApprovalDeps, input: SendBackInput): P
   return pollUntil(input.projectId, deps, input.stage, ourDecisionIds);
 }
 
+export type RecordChoiceInput = {
+  readonly projectId: string;
+  readonly stage: number;
+  readonly key: string;
+  readonly value: string;
+};
+
+/**
+ * Records the answer to a `json choice` question as the loop's own
+ * `project.decision` `choice` signal, then polls until the workflow shows
+ * the decision accepted, or a refusal for it lands.
+ */
+export async function recordChoice(deps: StageApprovalDeps, input: RecordChoiceInput): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+  const decisionId = `dec-${crypto.randomUUID()}`;
+  const sent = await safeDecide(deps, input.projectId, {
+    kind: "choice",
+    decisionId,
+    projectId: input.projectId,
+    stage: input.stage,
+    key: input.key,
+    value: input.value,
+    at: deps.now(),
+  });
+  if (!sent.ok) return sent;
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  for (;;) {
+    const view = await deps.view(input.projectId);
+    const ours = view?.decisions.find((d) => d.decisionId === decisionId);
+    if (ours) return ours.accepted ? { ok: true } : { ok: false, reason: ours.reason ?? "refused" };
+    if (Date.now() >= deadline) return { ok: false, reason: "timed_out" };
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
 export type RecordAudienceVoteInput = {
   readonly projectId: string;
   readonly stage: number;

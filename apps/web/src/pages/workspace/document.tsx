@@ -16,7 +16,7 @@ import {
 import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { approachName, sectionsIn } from "@solutions-builder/app/document";
+import { approachName, sectionsIn, withoutChoiceBlocks } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
@@ -64,7 +64,8 @@ export function StageDocument({
   onSubmit,
   soloApproval,
   canSubmit,
-  targetPending = false,
+  waitingOn = null,
+  onChoice,
   busy,
   draftOpen = true,
   newer = null,
@@ -108,8 +109,11 @@ export function StageDocument({
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
-  /** Stage 3 target is not picked yet: approving waits, and so does choosing an approach. */
-  targetPending?: boolean;
+  /** The question a required choice still waits on (`missingChoice`):
+   *  the approve control says so and stays disabled until it is answered. */
+  waitingOn?: string | null;
+  /** Records a tapped `json choice` answer as the workflow's decision. */
+  onChoice?: ((key: string, value: string) => void) | undefined;
   busy: string | null;
   /** The draft pane beside the conversation; the header's toggle. */
   draftOpen?: boolean;
@@ -461,6 +465,7 @@ export function StageDocument({
                       : undefined
                   }
                   busy={busy !== null}
+                  onChoice={message.id === lastTurnId ? onChoice : undefined}
                   // With several questions asked, the answers gather in the
                   // box until the last is tapped (#142), where the person
                   // can read them together and add to them.
@@ -506,7 +511,7 @@ export function StageDocument({
           {composerLead}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
-          {canSubmit && !targetPending && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
+          {canSubmit && !waitingOn && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
             <p className="composer-cue">
               Nothing more to ask. Approve it, or say what should change and it will redraft.
             </p>
@@ -515,7 +520,6 @@ export function StageDocument({
             <div className="stage-action composer-approve composer-choose">
               <span className="composer-approve-lead">
                 <span>Which approach?</span>
-                {targetPending ? <span className="composer-note">Pick how it will be used first.</span> : null}
               </span>
               <span className="composer-choices">
                 {approaches.map((section) => {
@@ -525,7 +529,7 @@ export function StageDocument({
                     <Button
                       key={section.heading}
                       variant="primary"
-                      disabled={busy !== null || targetPending}
+                      disabled={busy !== null}
                       onClick={() =>
                         onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
                       }
@@ -553,10 +557,10 @@ export function StageDocument({
                 Make it the active version
               </Button>
             </div>
-          ) : canSubmit && !targetPending ? (
+          ) : canSubmit ? (
             <div className="stage-action composer-approve">
               <span className="composer-approve-lead">
-                <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
+                <span>{waitingOn ? `Waiting on: ${waitingOn}` : soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
                 {advisory}
               </span>
               <span
@@ -567,6 +571,7 @@ export function StageDocument({
                 <Button
                   variant="ghost"
                   loading={busy === "submit"}
+                  disabled={waitingOn !== null}
                   onClick={() => {
                     // Quoted passages are for the stage being sent for
                     // approval; once it is, nothing is left to restore.
@@ -740,7 +745,9 @@ export function StageDocument({
  * comparison is one glance rather than a scroll. The same markdown, grouped by
  * heading; anything that is not an approach renders in order as before.
  */
-export function DocumentBody({ source, sideBySide }: { source: string; sideBySide: boolean }) {
+export function DocumentBody({ source: written, sideBySide }: { source: string; sideBySide: boolean }) {
+  // A `json choice` block is asked in the conversation, not read here.
+  const source = withoutChoiceBlocks(written);
   if (!sideBySide) return <Markdown source={source} />;
   const sections = sectionsIn(source);
   const first = sections.findIndex((section) => approachName(section.heading) !== null);

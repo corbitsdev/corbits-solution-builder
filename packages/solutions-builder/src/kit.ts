@@ -13,6 +13,7 @@ import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
+import { CHOICES } from "./project-workflow/contracts.js";
 import { STACK_RUBRIC } from "./stack-rubric.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
@@ -359,6 +360,16 @@ sentences. You do not select: the reader does, at the gate.
 
 Your questions in this stage each resolve one trade-off between the two
 approaches. Lead with the trade-off in plain words, then ask.
+
+One question is asked in a fixed form, because its answer is recorded, not
+read: what is being built. Until the reader has answered it, end every
+version, as the last thing under "What I need from you", with exactly this
+fenced block, unchanged. Do not also ask it in prose. Once they have
+answered, leave the block out.
+
+\`\`\`json choice
+${JSON.stringify({ key: "surface", ...CHOICES.surface })}
+\`\`\`
 
 When the reader has chosen — their message says "Chosen: Approach A" or
 "Chosen: Approach B" — rewrite the document so it opens, right after "In

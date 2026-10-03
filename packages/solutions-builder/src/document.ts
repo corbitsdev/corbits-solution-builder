@@ -162,3 +162,51 @@ export function briefVerdictIn(text: string): { ready: boolean; notes: string[] 
 
   return { ready, notes };
 }
+
+/** A question with a fixed set of answers, tagged at the sender: a fenced
+ *  `json choice` block holding `{ key, question, options }`. The answer is
+ *  recorded as a workflow `choice` decision, never read back out of prose. */
+export interface ChoiceBlock {
+  readonly key: string;
+  readonly question: string;
+  readonly options: readonly string[];
+  /** Where the block sits in the text, fences included. */
+  readonly start: number;
+  readonly end: number;
+}
+
+const CHOICE_BLOCK_RE = /```json[ \t]+choice[ \t]*\r?\n([\s\S]*?)```/g;
+
+function choiceOf(json: string): Omit<ChoiceBlock, "start" | "end"> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+  const { key, question, options } = value as Record<string, unknown>;
+  if (typeof key !== "string" || typeof question !== "string" || !Array.isArray(options)) return null;
+  if (options.length === 0 || !options.every((option) => typeof option === "string")) return null;
+  return { key, question, options };
+}
+
+/** Every well-formed `json choice` block in a turn, in order. A block that
+ *  does not parse stays text: shown as written, never guessed at. */
+export function choiceBlocksIn(text: string): ChoiceBlock[] {
+  return [...text.matchAll(CHOICE_BLOCK_RE)].flatMap((match) => {
+    const choice = choiceOf(match[1]!);
+    return choice ? [{ ...choice, start: match.index, end: match.index + match[0].length }] : [];
+  });
+}
+
+/** The text with its choice blocks taken out: what the document pane shows. */
+export function withoutChoiceBlocks(text: string): string {
+  let out = "";
+  let at = 0;
+  for (const block of choiceBlocksIn(text)) {
+    out += text.slice(at, block.start);
+    at = block.end;
+  }
+  return out + text.slice(at);
+}

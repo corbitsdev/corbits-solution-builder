@@ -8,7 +8,7 @@ export type StageNumber = number;
  *  -- the workflow never reads that document itself. It carries no
  *  reviewId/artifactId: it is not a review decision, just the one place ids
  *  become authoritative before the Architect runs. */
-export type DecisionKind = "open_review" | "approve" | "send_back" | "mint_requirements" | "audience";
+export type DecisionKind = "open_review" | "approve" | "send_back" | "mint_requirements" | "audience" | "choice";
 export type ReviewStatus = "open" | "approved" | "stale";
 
 export interface ReviewState {
@@ -53,6 +53,8 @@ export interface DecisionRecord {
   readonly audience?: string;
   readonly outcome?: AudienceVote["decision"];
   readonly note?: string;
+  /** `choice` decisions only: which question, and the answer picked. */
+  readonly choice?: ChoiceAnswer;
 }
 
 /** A reference to one stakeholder's package: the artifact, its version and
@@ -111,14 +113,34 @@ export interface Stage6Evidence {
   readonly stack: StackRecord;
 }
 
-/** What is being built, as the person names it when approving the solution
- *  proposal: the build targets a person can pick. */
+/** What is being built, as the person answers it at the solution proposal:
+ *  the build targets a person can pick. */
 export const SURFACES = ["cli", "web", "api", "desktop"] as const satisfies readonly Exclude<TargetModality, "other">[];
 export type Surface = (typeof SURFACES)[number];
 
-/** Stage 3 approve evidence: the deliverable's surface. */
-export interface Stage3Evidence {
-  readonly surface: Surface;
+/** A question a specialist asks with a fixed set of answers, tagged at the
+ *  sender (a `json choice` block) so the answer is recorded as a `choice`
+ *  decision rather than read back out of prose. */
+export const CHOICES = {
+  surface: { question: "What are we building?", options: SURFACES },
+} as const satisfies Readonly<Record<string, { readonly question: string; readonly options: readonly string[] }>>;
+export type ChoiceKey = keyof typeof CHOICES;
+
+/** The choices a stage cannot be approved without. */
+export const REQUIRED_CHOICES: Readonly<Record<StageNumber, readonly ChoiceKey[]>> = { 3: ["surface"] };
+
+export interface ChoiceAnswer {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** The first choice the current stage requires that has no answer yet. A
+ *  state with no `choices` at all is carried by a run deployed before they
+ *  were recorded: that run cannot record one, so it waits on none. */
+export function missingChoice(state: ProjectState): ChoiceKey | null {
+  if (!("choices" in state)) return null;
+  const answered = state.choices[state.stage] ?? {};
+  return (REQUIRED_CHOICES[state.stage] ?? []).find((key) => answered[key] === undefined) ?? null;
 }
 
 /** GUI design draws screens. A command-line tool and a service other
@@ -217,6 +239,9 @@ export interface ProjectState {
   /** Stages the recorded surface makes not applicable: passed over on
    *  approval and never a send-back target. Cleared with `surface`. */
   readonly skipped: readonly StageNumber[];
+  /** Each stage's recorded `choice` answers, keyed by choice. A send-back
+   *  clears the target stage's and every later one's. */
+  readonly choices: Readonly<Record<StageNumber, Readonly<Record<string, string>>>>;
 }
 
 interface DecisionCommon {
@@ -281,7 +306,13 @@ export interface MintRequirementsPayload extends DecisionCommon {
   readonly items: readonly { readonly kind: RequirementKind; readonly text: string; readonly id?: string }[];
 }
 
-export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload | AudiencePayload;
+export interface ChoicePayload extends DecisionCommon {
+  readonly kind: "choice";
+  readonly key: string;
+  readonly value: string;
+}
+
+export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload | AudiencePayload | ChoicePayload;
 
 export type RefusalCode =
   | "duplicate"
@@ -304,7 +335,8 @@ export type RefusalCode =
   | "stack_unknown_requirement"
   | "not_audience_stage"
   | "unknown_audience"
-  | "surface_missing";
+  | "invalid_choice"
+  | "choice_missing";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -420,6 +452,11 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
     };
   }
 
+  if (value.kind === "choice") {
+    if (typeof value.key !== "string" || typeof value.value !== "string") return null;
+    return { ...common, kind: "choice", key: value.key, value: value.value };
+  }
+
   return null;
 }
 
@@ -441,6 +478,7 @@ export interface ApplyDecisionInput {
   readonly audiencePackages: Readonly<Record<string, AudiencePackageRef>>;
   readonly surface: Surface | null;
   readonly skipped: readonly StageNumber[];
+  readonly choices: Readonly<Record<StageNumber, Readonly<Record<string, string>>>>;
 }
 
 /** Structural check for `OpenReviewPayload["policy"]` at stage 5. */
@@ -550,19 +588,15 @@ function isStackRecordShape(value: unknown): value is StackRecord {
   return Array.isArray(value.deferred) && value.deferred.every((d) => typeof d === "string");
 }
 
-/** Structural check for `ApprovePayload["evidence"]` at stage 3. */
-export function isStage3Evidence(value: unknown): value is Stage3Evidence {
-  return isRecord(value) && SURFACES.includes(value.surface as Surface);
-}
-
 /**
- * Stage 3: an approval names what is being built. One with no `evidence`
- * at all was recorded before surfaces were asked, replayed onto a fresh run
- * (#51) or adopted from a legacy project: it stands as accepted, with no
- * surface and nothing skipped, so its project walks every stage as it did.
+ * Stage 3: what is being built has been answered. An approval with no
+ * `evidence` at all was recorded before the question was asked, replayed
+ * onto a fresh run (#51) or adopted from a legacy project: it stands as
+ * accepted, with no surface and nothing skipped, so its project walks every
+ * stage as it did.
  */
-const stage3Rule: StageRule = (_state, payload) =>
-  payload.evidence === undefined || isStage3Evidence(payload.evidence) ? null : "surface_missing";
+const stage3Rule: StageRule = (state, payload) =>
+  payload.evidence === undefined || missingChoice(state) === null ? null : "choice_missing";
 
 /** Structural check for `ApprovePayload["evidence"]` at stage 6. */
 export function isStage6Evidence(value: unknown): value is Stage6Evidence {
@@ -635,7 +669,7 @@ const stage6Rule: StageRule = (state, payload) => {
 /**
  * Seam for stage-specific approval rules, consulted after every
  * structural/reference check on an `approve` decision passes and before the
- * reducer commits the approval: stage 3's surface, stage 5's stakeholder
+ * reducer commits the approval: stage 3's required choices, stage 5's stakeholder
  * quorum, stage 6's Stack section (#55) and stage 7's cost/target freeze
  * (CL-8690/CL-8691).
  */
@@ -657,9 +691,15 @@ export function approveReason(state: ProjectState): ApproveReason | null {
   if (state.done) return "already_done";
   const openReview = state.reviews[state.stage]?.status === "open" ? state.reviews[state.stage] : undefined;
   if (!openReview) return "no_open_review";
+  // Unlike a rule's evidence, a required choice is the workflow's own state,
+  // so it is read now; a refusal for it is history once it is answered.
+  if (missingChoice(state) !== null) return "choice_missing";
   const refusal = [...state.decisions]
     .reverse()
-    .find((d) => !d.accepted && d.kind === "approve" && d.stage === state.stage && d.reviewId === openReview.reviewId);
+    .find(
+      (d) =>
+        !d.accepted && d.kind === "approve" && d.stage === state.stage && d.reviewId === openReview.reviewId && d.reason !== "choice_missing",
+    );
   return (refusal?.reason as ApproveReason | undefined) ?? null;
 }
 
@@ -686,7 +726,8 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
   not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
-  surface_missing: "Choose what is being built before approving.",
+  invalid_choice: "That answer is not one the question offers.",
+  choice_missing: "Answer what is being built before approving.",
 };
 
 /** `approveReason`'s code, in plain language -- the one place stage 5's
@@ -724,6 +765,7 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
     audiencePackages: input.audiencePackages,
     surface: input.surface,
     skipped: input.skipped,
+    choices: input.choices,
   };
 }
 
@@ -750,6 +792,7 @@ function refused(
     ...(payload.kind === "audience"
       ? { audience: payload.audience, outcome: payload.decision, ...(payload.note ? { note: payload.note } : {}) }
       : {}),
+    ...(payload.kind === "choice" ? { choice: { key: payload.key, value: payload.value } } : {}),
     ...extra,
   };
   return { ...state, decisions: [...state.decisions, record] };
@@ -864,6 +907,25 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     return { ...state, audienceDecisions, decisions: [...state.decisions, record] };
   }
 
+  if (payload.kind === "choice") {
+    const required: readonly string[] = REQUIRED_CHOICES[state.stage] ?? [];
+    const offered: readonly string[] = required.includes(payload.key) ? CHOICES[payload.key as ChoiceKey].options : [];
+    if (!offered.includes(payload.value)) {
+      return refused(state, payload, principalId, "invalid_choice");
+    }
+    const choices = { ...state.choices, [state.stage]: { ...state.choices[state.stage], [payload.key]: payload.value } };
+    const record: DecisionRecord = {
+      decisionId: payload.decisionId,
+      kind: "choice",
+      stage: payload.stage,
+      accepted: true,
+      principalId,
+      at: payload.at,
+      choice: { key: payload.key, value: payload.value },
+    };
+    return { ...state, choices, decisions: [...state.decisions, record] };
+  }
+
   if (payload.kind === "open_review") {
     const reviews: Record<StageNumber, ReviewState | undefined> = { ...state.reviews };
     const previous = reviews[state.stage];
@@ -923,7 +985,8 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     };
     const quorum =
       state.stage === 5 && state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages) : null;
-    const surface = state.stage === 3 ? (isStage3Evidence(payload.evidence) ? payload.evidence.surface : null) : state.surface;
+    const answered = state.choices[3]?.surface;
+    const surface = state.stage === 3 ? (SURFACES.find((s) => s === answered) ?? null) : state.surface;
     const skipped = state.stage === 3 ? (surface ? NOT_APPLICABLE[surface] : []) : state.skipped;
     const freeze: Freeze | null =
       state.stage === 7 && isStage7Evidence(payload.evidence)
@@ -988,6 +1051,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   // Reopening the proposal reopens what is being built.
   const surface = targetStage <= 3 ? null : state.surface;
   const skipped = targetStage <= 3 ? [] : state.skipped;
+  const choices = Object.fromEntries(Object.entries(state.choices).filter(([answeredAt]) => Number(answeredAt) < targetStage));
   return {
     ...state,
     stage: targetStage,
@@ -1000,6 +1064,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     audiencePackages,
     surface,
     skipped,
+    choices,
   };
 }
 
@@ -1046,11 +1111,12 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
   const authorizedPrincipals: Record<StageNumber, readonly string[]> = {};
   for (const s of payload.stages) authorizedPrincipals[s.stage] = s.authorizedPrincipalIds;
   if (isProjectStateSnapshot(payload.snapshot) && payload.snapshot.projectId === payload.projectId) {
-    // A snapshot written before surfaces were recorded carries neither field.
+    // A snapshot written before surfaces and choices were recorded carries none of them.
     return {
       ...payload.snapshot,
       surface: payload.snapshot.surface ?? null,
       skipped: payload.snapshot.skipped ?? [],
+      choices: payload.snapshot.choices ?? {},
       authorizedPrincipals,
       stageOrder: payload.stages.map((s) => s.stage),
     };
@@ -1071,5 +1137,6 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     audiencePackages: {},
     surface: null,
     skipped: [],
+    choices: {},
   };
 }

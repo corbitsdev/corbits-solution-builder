@@ -11,6 +11,9 @@
  * choice as written, less the list marker, so the specialist reads back
  * exactly what it offered.
  */
+import { choiceBlocksIn } from "@solutions-builder/app/document";
+import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
+
 export type Choices = {
   /** Everything before the question, still markdown. */
   before: string;
@@ -92,7 +95,42 @@ export function choicesIn(text: string): Choices | null {
  *  markdown, and each question with the options offered for it. */
 export type TurnSegment =
   | { readonly kind: "text"; readonly markdown: string }
-  | { readonly kind: "question"; readonly question: string; readonly options: readonly string[] };
+  | {
+      readonly kind: "question";
+      readonly question: string;
+      readonly options: readonly string[];
+      /** Set for a `json choice` block: what a tap records, each value
+       *  beside the option it is shown as. */
+      readonly choice?: { readonly key: string; readonly values: readonly string[] };
+    };
+
+/** How a choice's value reads on its chip. */
+function choiceLabel(key: string, value: string): string {
+  if (key === "surface") return SELECTABLE_TARGETS.find((option) => option.target === value)?.label ?? value;
+  return value;
+}
+
+/**
+ * Every question a turn asks, each with its own options, in the order asked:
+ * a `json choice` block is one, tagged by the specialist, and the prose
+ * around it is read as `proseSegmentsIn` reads any turn.
+ */
+export function segmentsIn(text: string): TurnSegment[] {
+  const segments: TurnSegment[] = [];
+  let at = 0;
+  for (const block of choiceBlocksIn(text)) {
+    segments.push(...proseSegmentsIn(text.slice(at, block.start)));
+    segments.push({
+      kind: "question",
+      question: block.question,
+      options: block.options.map((value) => choiceLabel(block.key, value)),
+      choice: { key: block.key, values: block.options },
+    });
+    at = block.end;
+  }
+  segments.push(...proseSegmentsIn(text.slice(at)));
+  return segments;
+}
 
 /**
  * Every question a turn asks, each with its own options, in the order asked.
@@ -105,7 +143,7 @@ export type TurnSegment =
  * closing it, and what lies between is kept as prose. A closing paragraph
  * that only asks, with no options, is a question too.
  */
-export function segmentsIn(text: string): TurnSegment[] {
+function proseSegmentsIn(text: string): TurnSegment[] {
   const lines = text.split("\n");
   const blank = (at: number) => (lines[at] ?? "").trim() === "";
   const segments: TurnSegment[] = [];

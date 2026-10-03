@@ -113,8 +113,6 @@ export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
  * decisions stage. */
 const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 
-const SURFACE_NOTE = "Choose what the finished build is. A command or a service has no screens, so GUI design is skipped for it.";
-
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
 
@@ -520,6 +518,7 @@ export function StageWorkspace({
     sendBack,
     setSendReason,
     mintRequirements,
+    recordChoice,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
 
@@ -1172,7 +1171,8 @@ export function StageWorkspace({
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
-            targetPending={stage === 3 && chosenTarget === null}
+            waitingOn={workflowView?.waitingOn ?? null}
+            onChoice={(key, value) => void recordChoice(key, value)}
             busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
             newer={artifacts.newerVersion}
@@ -1203,13 +1203,7 @@ export function StageWorkspace({
                 <EstimateView body={artifacts.activeContent} freeze={workflowView?.freeze ?? null} />
               ) : null
             }
-            composerLead={
-              stage === 3 ? (
-                <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} />
-              ) : stage === 7 ? (
-                <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
-              ) : null
-            }
+            composerLead={stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           />
       ) : null}
 

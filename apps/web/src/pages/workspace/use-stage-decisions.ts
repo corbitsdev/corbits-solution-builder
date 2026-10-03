@@ -17,6 +17,7 @@ import {
   mintRequirements as mintRequirementsDecision,
   packageRefsOf,
   packagesEqual,
+  recordChoice as recordChoiceDecision,
   reviewableArtifact,
   sendBack as sendBackDecision,
   type StageApprovalDeps,
@@ -81,7 +82,7 @@ export type StageDecisions = {
    *  this sends the workflow's own stage-9 `approve` — without it `done`
    *  never fires and the project never finishes. */
   readonly acceptDelivery: () => Promise<void>;
-  /** Stage 3's surface, or stage 7's target (the recorded surface until the person picks another). */
+  /** Stage 7's target: the surface stage 3 recorded until the person picks another. */
   readonly chosenTarget: string | null;
   readonly setChosenTarget: (target: string | null) => void;
   readonly sendTarget: number | null;
@@ -102,6 +103,9 @@ export type StageDecisions = {
    *  minted (this call, another tab, a retry) resolves without surfacing an
    *  error. */
   readonly mintRequirements: (markdown: string, recorded?: boolean) => Promise<void>;
+  /** Records the answer to a `json choice` question as the workflow's
+   *  `choice` decision; a refusal shows as the stage's error. */
+  readonly recordChoice: (key: string, value: string) => Promise<void>;
 };
 
 export function useStageDecisions({
@@ -145,7 +149,7 @@ export function useStageDecisions({
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
   const [pickedTarget, setChosenTargetState] = useState<string | null>(null);
-  // Stage 3 asks what is being built; stage 7 starts from that answer.
+  // Stage 3 records what is being built; stage 7 starts from that answer.
   const chosenTarget = pickedTarget ?? (stage === 7 ? (workflowView?.surface ?? null) : null);
   const [sendTarget, setSendTarget] = useState<number | null>(null);
   const [sendReason, setSendReason] = useState("");
@@ -365,7 +369,7 @@ export function useStageDecisions({
    */
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
-    if ((stage === 3 || stage === 7) && !chosenTarget) return;
+    if (stage === 7 && !chosenTarget) return;
     // The workflow's own `stage6Rule` refuses a plan without a usable Stack
     // section (#55); this runs the same check first so the person reads
     // what is wrong in the plan's own terms before the approval is sent.
@@ -565,6 +569,16 @@ export function useStageDecisions({
     [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView, onRequirementsReminted],
   );
 
+  const recordChoice = async (key: string, value: string) => {
+    try {
+      const result = await recordChoiceDecision(stageApprovalDeps, { projectId: detail.project.id, stage, key, value });
+      if (!result.ok) onError(`That answer was not recorded: ${stageRefusalMessage(result.reason)}`);
+      await refreshWorkflow();
+    } catch (cause) {
+      onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+
   return {
     approveAllowed: workflowView?.allowed.approve ?? false,
     approving,
@@ -581,5 +595,6 @@ export function useStageDecisions({
     sendingBack,
     sendBack,
     mintRequirements,
+    recordChoice,
   };
 }
