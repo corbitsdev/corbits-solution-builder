@@ -952,7 +952,7 @@ export function StageWorkspace({
               advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
               lead={
                 stage === 3 ? (
-                  <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} verification={false} />
+                  <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} />
                 ) : stage === 7 ? (
                   <>
                     <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
