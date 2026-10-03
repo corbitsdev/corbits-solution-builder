@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { mailTenantFor, resetTenantCache } from "./project-tenants.ts";
 
@@ -38,7 +38,7 @@ function fakeHub(byTenant: Record<string, Row[]>): Transport & { reads: string[]
       if (method === "GET" && one) {
         const found = (byTenant[one[1]!] ?? []).find((entry) => entry.id === one[2]);
         if (found) return { artifact: found } as T;
-        throw Object.assign(new Error("not found"), { status: 404 });
+        throw new ApiError(404, "not_found", "Artifact not found");
       }
       throw new Error(`unexpected ${method} ${path}`);
     },

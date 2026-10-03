@@ -142,6 +142,7 @@ export function BuildPanel({
   onSendHold,
   popover = null,
   onAttach,
+  attachNote = null,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -167,6 +168,7 @@ export function BuildPanel({
   popover?: ReactNode;
   /** The paperclip: files join the project as material. */
   onAttach?: (files: FileList) => void;
+  attachNote?: string | null;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -325,7 +327,7 @@ export function BuildPanel({
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
-          archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes },
+          archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes, fileCount: packaged.manifest.fileCount },
           probeSkipped: probe.skipped,
           forecast,
           verification: packaged.verification,
@@ -360,6 +362,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
+            rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
             messages={messages}
             value={composer}
             onValueChange={setComposer}

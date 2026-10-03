@@ -468,9 +468,18 @@ export async function resolveWorkspace(): Promise<Workspace | null> {
  * route that keeps per-project files on disk asks this before it creates
  * anything under that id.
  */
-export async function projectTenantExists(projectId: string): Promise<boolean> {
+export async function projectTenantExists(projectId: string, requestCookie?: string | null): Promise<boolean> {
+  // The person's own session, from the request that asked: this process only
+  // holds a session when a script signed it in, so judging by it alone
+  // refused every project in the app.
+  const path = `/api/tenants/${encodeURIComponent(projectId)}`;
+  if (hubMode() === "embedded" && requestCookie) {
+    const response = await hubFetch(path, { headers: { cookie: requestCookie } });
+    void response.body?.cancel();
+    return response.ok;
+  }
   if (hubMode() === "embedded" && !currentSession()) return false;
-  const response = await hubApi(`/api/tenants/${encodeURIComponent(projectId)}`);
+  const response = await hubApi(path);
   if (response.ok) {
     void response.body?.cancel();
     return true;

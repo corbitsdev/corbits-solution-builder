@@ -19,6 +19,7 @@
  */
 import { designHandoff } from "../../design-handoff.ts";
 import { useEffect, useRef, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   api,
   ApiFailure,
@@ -36,7 +37,9 @@ import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
-import { composeApprovedChain } from "./approved-chain.ts";
+import { approvedChainQuery } from "./approved-chain.ts";
+import { queryClient } from "../../queries/client.ts";
+import { keys } from "../../queries/keys.ts";
 import { precedingStage } from "@solutions-builder/app/project-workflow/contracts";
 
 export type OpeningDispatch = {
@@ -45,9 +48,10 @@ export type OpeningDispatch = {
   readonly retry: () => void;
   /** `approve()` hands the just-approved draft to the next stage's thread. */
   readonly queueOpening: (stage: number, body: string) => void;
-  /** Stage 6's own opening material -- stage 5's approved review, the same
-   *  content the Architect's opening would carry -- fetched independently of
-   *  whether requirements have been minted yet. `Stage6Panel` asks the
+  /** Stage 6's own opening material -- the approved record and stage 5's
+   *  approved review, the same content the Architect's opening carries --
+   *  fetched independently of whether requirements have been minted yet.
+   *  `Stage6Panel` asks the
    *  requirements author from this, never from the person's last chat
    *  message (empty on a fresh stage 6, on reload and in session alike, so
    *  minting could never start without the person typing first). Null off
@@ -135,25 +139,20 @@ export function useOpeningDispatch({
     return { artifactId: review.artifactId, version: review.version };
   })();
 
-  const [stage6Material, setStage6Material] = useState<string | null>(null);
-  useEffect(() => {
-    if (stage !== 6 || !previousApproved) {
-      setStage6Material(null);
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, previousApproved.artifactId)
-      .then((result) => {
-        if (!cancelled) setStage6Material(result.content || null);
-      })
-      .catch(() => {
-        if (!cancelled) setStage6Material(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stage, previousApproved, tenantId]);
+  const stage5Approved = stage === 6 ? previousApproved : null;
+  const stage6Chain = useQuery({ ...approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage, skipped: workflowView?.skipped ?? [] }), enabled: stage5Approved !== null });
+  const stage5Package = useQuery({
+    queryKey: keys.artifact.of(tenantId, stage5Approved?.artifactId ?? ""),
+    queryFn: stage5Approved ? () => api.artifactContent(tenantId, stage5Approved.artifactId) : skipToken,
+  });
+  // Nothing until the whole record is read: a partial input would ask the
+  // requirements author once without the record and again with it.
+  const stage6Material =
+    stage5Approved && stage6Chain.isSuccess && stage5Package.data?.content
+      ? stage6Chain.data
+        ? `${stage6Chain.data}\n\n${stage5Package.data.content}`
+        : stage5Package.data.content
+      : null;
 
   useEffect(() => {
     if (!agentAddress) return;
@@ -185,13 +184,7 @@ export function useOpeningDispatch({
           // Every approved artifact before this stage, and the person's
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
-          const chain = await composeApprovedChain({
-            tenantId,
-            nodes: detail.nodes,
-            reviews: workflowView?.reviews ?? {},
-            stage,
-            skipped: workflowView?.skipped ?? [],
-          });
+          const chain = await queryClient.fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage, skipped: workflowView?.skipped ?? [] }));
           // The workspace's language is in the specialist's own instructions
           // (`localizedRole`, client.ts), where a changed setting redeploys
           // it; the mail carries the record and the stage's lead, nothing else.

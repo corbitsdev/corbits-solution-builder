@@ -5,8 +5,8 @@
  * Name and created date come off the project's own tenant row
  * (`listProjectRecords`, folded from the caller's own memberships over
  * `GET /api/me/principals`, the same as workbench). Where each stands is the
- * project workflow's own stage (CL-8687/CL-8721) -- `displayStage` reads it
- * per card, never derived from the artifact graph. `needsDecision` is "a
+ * project workflow's own stage (CL-8687/CL-8721) -- each card reads it
+ * itself, never derived from the artifact graph. `needsDecision` is "a
  * stock hub approval is pending on one of this project's stage specialists"
  * and `turn` stays `"idle"` — telling whether the specialist is mid-draft
  * would mean polling every project's mailbox on every list refresh, which
@@ -54,49 +54,6 @@ function openingArtifactId(
     if (sb?.projectId === projectId && sb.variant === OPENING_VARIANT) return artifact.id;
   }
   return null;
-}
-
-const workflowStageCache = new Map<string, { stage: number; done: boolean; skipped: readonly number[]; at: number }>();
-// 5s — the same cadence `app.tsx`'s own `refresh()` polls the project list
-// at, so a card remounted (returning from the workspace after an approval)
-// never reads a cached stage that is already stale by the time the list
-// itself refreshes.
-const WORKFLOW_STAGE_CACHE_MS = 5_000;
-
-/**
- * A project card's displayed stage (CL-8687): the project workflow's own
- * `stage`, read-only -- never deploys the workflow just to show a card, and
- * never a guessed stage when the read fails. Cached per project for
- * `WORKFLOW_STAGE_CACHE_MS` so a list of many cards costs at most one read
- * per project per refresh window, not one per render. `displayDone` reads
- * the same cache entry, so a caller that calls this first gets `done` for
- * free (CL-8723: stage 9's `approve` decision is what actually finishes a
- * project — the card should say so, not just "Stage 9 of 9"). Returns null
- * when the workflow could not be read -- the caller shows "Status
- * unavailable" with a Retry, never a stage number.
- */
-export async function displayStage(
-  projectId: string,
-  readView: (projectId: string) => Promise<{ stage: number; done: boolean; skipped: readonly number[] } | null>,
-): Promise<number | null> {
-  const cached = workflowStageCache.get(projectId);
-  if (cached && Date.now() - cached.at < WORKFLOW_STAGE_CACHE_MS) return cached.stage;
-  const view = await readView(projectId).catch(() => null);
-  if (!view) return null;
-  workflowStageCache.set(projectId, { stage: view.stage, done: view.done, skipped: view.skipped, at: Date.now() });
-  return view.stage;
-}
-
-/** Whether the project workflow has finished, per the last `displayStage`
- *  read for this project — false until `displayStage` has run at least
- *  once, which every caller does before this (`ProjectCard`'s own effect). */
-export function displayDone(projectId: string): boolean {
-  return workflowStageCache.get(projectId)?.done ?? false;
-}
-
-/** The stages the project's surface made not applicable, per the same read as `displayDone`. */
-export function displaySkipped(projectId: string): readonly number[] {
-  return workflowStageCache.get(projectId)?.skipped ?? [];
 }
 
 const turnCache = new Map<string, { label: string | null; at: number }>();
@@ -152,7 +109,7 @@ export async function displayTurn(
  * Every project tenant under the workspace. `stage` is always null here --
  * the project workflow is the only authority on it, and reading every
  * project's workflow just to list cards would mean one read per project on
- * every list refresh; `displayStage` reads it per card instead.
+ * every list refresh; each card reads it instead.
  * `description` is the first non-empty line of the opening problem
  * (`source_material` / `__opening__`): one tenant-wide list, then one
  * `getArtifact` per card that has one — same extra-read pattern as

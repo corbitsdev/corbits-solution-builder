@@ -12,6 +12,7 @@
  * Nothing here builds evidence for it any more.
  */
 import type { ArtifactNode, Remediation } from "./client.ts";
+import { stageName } from "./components.jsx";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import { approveReasonText, type ApproveReason, type Stage6Evidence, type Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import {
@@ -19,6 +20,7 @@ import {
   parseStackRecord,
   type StackCitationProblem,
   type StackRecord,
+  STACK_BLOCK_SHAPE,
 } from "@solutions-builder/app/stack";
 
 /** The "stack" is the architect's technical decision -- runtime, storage,
@@ -27,7 +29,7 @@ import {
  *  stage 7, and the copy never calls it a "stack decision": a person has
  *  only ever seen the build plan and its Stack section. */
 const STACK_MISSING_MESSAGE =
-  "The approved build plan (stage 6) has no Stack section, so there is nothing to freeze. Send the project back to stage 6 and ask the architect to re-issue the plan with one.";
+  "The approved build plan has no Stack section, so there is nothing to freeze. Send the project back to Build plan and ask the architect to re-issue the plan with one.";
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
@@ -38,7 +40,7 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   stack_missing: STACK_MISSING_MESSAGE,
   stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
-  not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
+  not_audience_stage: "Stakeholder decisions are recorded at Concept approval only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
@@ -168,10 +170,15 @@ export function stage6RefusalMessage(reason: string): string {
  * What the banner's action sends the architect when a plan version has no
  * usable Stack (#325): a redraft after an answer tends to say the stack is
  * "unchanged" or "as approved" under the heading instead of repeating the
- * JSON block, and each version is read on its own.
+ * JSON block, and each version is read on its own. The ask carries the
+ * record's shape (#617): an architect that never wrote a valid block has
+ * nothing to repeat, and asked only for "the JSON record" it invents one.
  */
-export const STACK_RESEND_ASK =
-  "Please resend the whole build plan with the \"## Stack\" section carrying its fenced ```json stack block in full: the exact JSON record, even though nothing in it changed. The block is read by machine from each version on its own, so a version that only says the stack is unchanged has no stack.";
+export const STACK_RESEND_ASK = [
+  "Please resend the whole build plan with the \"## Stack\" section carrying its fenced ```json stack block in full: the exact JSON record, even though nothing in it changed. The block is read by machine from each version on its own, so a version that only says the stack is unchanged has no stack.",
+  "The block holds a single JSON object of this shape. Do not add, rename or leave out a field; \"hubPlacement\" alone is left out, when the mode is not \"hub\". Every \"cites\" array is non-empty and names only ids from the requirements block.",
+  `\`\`\`\n${STACK_BLOCK_SHAPE}\n\`\`\``,
+].join("\n\n");
 
 export function stage6StackRemediation(): Remediation {
   return { kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK };
@@ -206,7 +213,7 @@ export type Stage7Problem = { readonly message: string; readonly remediation?: R
  *  the send-back picker, seeded with the reason, aimed at stage 6. Stage 6
  *  is read-only once approved, so re-issuing the plan is the only fix. */
 function sendBackToStage6(reason: string): Remediation {
-  return { kind: "send_back", label: "Send back to stage 6…", targetStage: 6, reason };
+  return { kind: "send_back", label: "Send back to Build plan…", targetStage: 6, reason };
 }
 
 /**
@@ -241,7 +248,7 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
   if (problems.length === 0) return null;
   const detail = citationDetail(problems);
   return {
-    message: `The approved build plan's Stack section has uncited or unknown requirement ids (${detail}), so it cannot be frozen. Send the project back to stage 6 and ask the architect to fix the citations.`,
+    message: `The approved build plan's Stack section has uncited or unknown requirement ids (${detail}), so it cannot be frozen. Send the project back to Build plan and ask the architect to fix the citations.`,
     remediation: sendBackToStage6(`The build plan's Stack section has citation problems: ${detail}. Please fix them.`),
   };
 }
@@ -252,6 +259,6 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
  *  a caller reading `workflowView.freeze` back (no `stack` needed here)
  *  does not have to carry the rest of `Stage7Evidence` just to call it. */
 export function frozenSummaryLine(evidence: Pick<Stage7Evidence, "target" | "frozen">): string {
-  const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `stage ${String(ref.stage)} v${String(ref.version)}`);
+  const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `${stageName(ref.stage)} v${String(ref.version)}`);
   return `Frozen for this build: target ${evidence.target}; ${refs.join(", ")}.`;
 }
