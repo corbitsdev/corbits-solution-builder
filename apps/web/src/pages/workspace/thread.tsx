@@ -250,10 +250,17 @@ export function StageConversation({
             // not as the person's words or a document pasted in the thread.
             const asked = you ? /^Write the package for: ([^,\n]+)/.exec(text) : null;
             const wrote = !you && stage === 5 ? /^#{2,3}\s+Audience:\s*(.+)$/m.exec(text) : null;
-            if (asked || wrote) {
+            // Stage 8's record of an attempt is the app briefing the
+            // supervisor; the attempt itself is in the evidence pane.
+            const briefed = you ? /^Build attempt (\d+) has ended and its work is recorded\./.exec(text) : null;
+            if (asked || wrote || briefed) {
               return (
                 <div key={message.id} className="event conv-event">
-                  {asked ? `Asked for the package for ${asked[1]!.trim()}` : `Wrote the package for ${wrote![1]!.trim()}`}
+                  {briefed
+                    ? `Recorded attempt ${briefed[1]!} for the build supervisor`
+                    : asked
+                      ? `Asked for the package for ${asked[1]!.trim()}`
+                      : `Wrote the package for ${wrote![1]!.trim()}`}
                 </div>
               );
             }
