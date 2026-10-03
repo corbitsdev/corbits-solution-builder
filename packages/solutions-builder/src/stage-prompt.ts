@@ -73,18 +73,7 @@ export function splitRevision(text: string): { readonly document: string; readon
   return { document: (cut === -1 ? inner : inner.slice(0, cut)).trim(), ask: text.slice(at + REVISION_ASK.length).trim() };
 }
 
-/**
- * A stage-3 choice the revised document must record, not relitigate. The
- * workspace shows the choice buttons instead of approval until a
- * `## Chosen approach` section exists, so a draft that absorbs the choice
- * anywhere else leaves the person choosing again. Anything that is not a
- * stage-3 choice passes through untouched.
- *
- * The reminder below is only a prompt: when the model ignores it,
- * `ensureChoiceSection` writes the section deterministically after the
- * draft lands, so approval is never stuck behind a missed instruction.
- */
-/** A stage-3 choice the person's message made, taken apart for the prompt and the repair alike. */
+/** A stage-3 choice the person's message made, taken apart for the repair. */
 function choiceIn(stage: number, userInput: string): { heading: string; letter: string; name: string | null } | null {
   if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return null;
   const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
@@ -92,17 +81,12 @@ function choiceIn(stage: number, userInput: string): { heading: string; letter: 
   return { heading: `Chosen approach: ${match[2]!.trim()}`, letter: match[1]!.toUpperCase(), name: match[2]!.trim() };
 }
 
-export function withChoiceReminder(stage: number, userInput: string): string {
-  const choice = choiceIn(stage, userInput);
-  if (!choice) return userInput;
-  const heading = `## ${choice.heading}`;
-  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
-}
-
 /**
- * The deterministic fallback for a model that ignored the reminder above: a
- * stage-3 draft written after the person chose, but with no
- * `## Chosen approach` section, gains one naming the choice. The section
+ * The deterministic fallback for a proposer that ignored its instruction to
+ * record the choice (#430): the workspace offers the choice buttons instead
+ * of approval until a `## Chosen approach` section exists. A stage-3 draft
+ * written after the person chose, but with no such section, gains one
+ * naming the choice. The section
  * records the decision — the comparison under Side by side still carries the
  * trade-offs — so the workspace offers approval instead of asking again. A
  * compliant draft, and anything that is not a stage-3 choice, passes through
