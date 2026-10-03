@@ -11,6 +11,7 @@
  */
 import type { ChatMessage } from "../../stage-mail.ts";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
+import { stageName } from "../../stage-names.ts";
 
 export type ComposedFold = {
   /** The one line the chat shows; null when nothing folds and only `lead` shows. */
@@ -66,7 +67,7 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
   // Stage 1 opens with the person's own words, shown as they wrote them.
   if (opening && Number(opening[1]) > 1) {
-    return { summary: `What stage ${opening[1]!} opened with`, body: withoutSendBackRef(message.body), lead: null };
+    return { summary: `What ${stageName(Number(opening[1]))} opened with`, body: withoutSendBackRef(message.body), lead: null };
   }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);

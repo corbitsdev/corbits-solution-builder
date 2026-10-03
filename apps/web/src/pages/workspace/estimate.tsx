@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { parseStackRecord } from "@solutions-builder/app/stack";
 import { HowItRuns } from "./how-it-runs.tsx";
+import { stageName } from "../../stage-names.ts";
 
 type CostRow = { label: string; amount: string; basis: string };
 
@@ -124,7 +125,7 @@ export function EstimateView({
         <ul className="scope-checklist">
           {freeze.frozen.map((ref) => (
             <li key={ref.stage}>
-              Stage {ref.stage} frozen at version {ref.version}
+              {stageName(ref.stage)} frozen at version {ref.version}
             </li>
           ))}
         </ul>

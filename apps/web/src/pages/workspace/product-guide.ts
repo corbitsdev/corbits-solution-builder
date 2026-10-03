@@ -19,6 +19,7 @@ import { quorumState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "../../client.js";
 import type { GuideGuidance } from "../../components.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.js";
+import { stageName } from "../../stage-names.ts";
 
 /** One live artifact version, as the guide reads it. */
 export type GuideVersion = {
@@ -76,7 +77,7 @@ export function deterministicGuidance(context: GuideContext): GuideGuidance {
     missing.push("No decision has been recorded for this stage yet.");
   }
   return {
-    summary: `${context.projectTitle} is at stage ${context.stage}. ${step.detail}`,
+    summary: `${context.projectTitle} is at ${stageName(context.stage)}. ${step.detail}`,
     readiness: missing.length === 0 ? "ready" : "not_ready",
     missing,
     options: [{ label: step.title, detail: step.detail }],
@@ -185,7 +186,7 @@ function decisionLines(view: ProjectWorkflowView | null): string {
     .map((decision) => {
       const who = decision.audience ? ` by ${decision.audience}` : "";
       const outcome = decision.outcome ? ` → ${decision.outcome}` : "";
-      return `stage ${decision.stage} ${decision.kind}${who}${outcome}`;
+      return `${stageName(decision.stage)} ${decision.kind}${who}${outcome}`;
     })
     .join("; ")}`;
 }
@@ -196,13 +197,13 @@ export function guidancePrompt(context: GuideContext, versions: readonly GuideVe
   const quorum = quorumOf(context.view, context.stage);
   return [
     `Project: ${context.projectTitle}`,
-    `Current stage: ${context.stage} of 9. Run state: ${stateOf(context.view) ?? "not started"}.`,
+    `Current stage: ${stageName(context.stage)}. Run state: ${stateOf(context.view) ?? "not started"}.`,
     quorum ? `Stakeholder quorum: ${quorum.recorded} of ${quorum.needed} have proceeded; ${quorum.blocked} blocking.` : "",
     "",
     versions.length === 0
       ? "No versions have been produced yet."
       : versions
-          .map((version) => `--- VERSION ${version.id} — ${version.title} (stage ${version.stage}) ---\n${version.content}`)
+          .map((version) => `--- VERSION ${version.id} — ${version.title} (${stageName(version.stage)}) ---\n${version.content}`)
           .join("\n\n"),
     "",
     decisionLines(context.view),

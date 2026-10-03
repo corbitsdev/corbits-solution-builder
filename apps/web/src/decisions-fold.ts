@@ -35,6 +35,7 @@ import { createHubTransport } from "./hub.ts";
 import { DELIVER_TOOL_NAME, pendingApprovals, type PendingApproval } from "./pending-approvals.ts";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
+import { stageName } from "./stage-names.ts";
 
 /** What the exact command/arguments a non-delivery tool call carries, shown so the person sees exactly what they'd be approving. */
 function toolCommand(approval: PendingApproval): string {
@@ -49,7 +50,7 @@ function toDecision(approval: PendingApproval, projectId: string, stage: number)
     projectId,
     runId: approval.runId,
     stage,
-    title: isDelivery ? "Delivery awaits a decision" : `Stage ${stage} specialist asks to run a tool`,
+    title: isDelivery ? "Delivery awaits a decision" : `${stageName(stage)} asks to run a tool`,
     consequence: isDelivery
       ? (CONSEQUENCE[stage] ?? "A human decision is required to continue.")
       : `Runs \`${approval.toolDefinition?.name ?? "a tool"}\`: ${toolCommand(approval)}`,
@@ -94,7 +95,7 @@ export function stageApprovalDecision(
     projectId,
     runId,
     stage,
-    title: `Stage ${stage} is waiting on a decision`,
+    title: `${stageName(stage)} is waiting on a decision`,
     consequence: CONSEQUENCE[stage] ?? "A human decision is required to continue.",
     blockers: null,
     requiredAuthority: requiredAuthorityFor(stage),

@@ -29,6 +29,7 @@ import {
 } from "@solutions-builder/app/legacy-adoption";
 import { BUNDLE_FORMAT } from "./project-export.ts";
 import { conversationWrite, type ImportWrite } from "./project-import.ts";
+import { stageName } from "./stage-names.ts";
 
 export const LEGACY_BUNDLE_VERSION = 1;
 
@@ -299,7 +300,7 @@ export function legacyAdoptionPlan(bundle: LegacyBundle, newProjectId: string, i
   for (const step of plan.steps) {
     const artifactId = ids.get(step.ref.artifactId);
     if (!artifactId) {
-      notes.push(`Stage ${String(step.stage)}'s approval names an artifact the bundle does not carry; replay stops before it.`);
+      notes.push(`The ${stageName(step.stage)} approval names an artifact the bundle does not carry; replay stops before it.`);
       break;
     }
     steps.push({ ...step, ref: { ...step.ref, artifactId } });

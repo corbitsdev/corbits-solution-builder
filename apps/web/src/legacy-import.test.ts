@@ -162,7 +162,7 @@ describe("legacyImportPlan", () => {
     const plan = legacyImportPlan(bundle(), "proj_new");
     expect(plan.conversations).toHaveLength(1);
     const write = plan.conversations[0]!;
-    expect(write.title).toBe("Stage 1 conversation (imported)");
+    expect(write.title).toBe("Problem discovery conversation (imported)");
     expect(write.sb).toMatchObject({ projectId: "proj_new", kind: IMPORTED_CONVERSATION_KIND, stage: 1 });
     expect(write.content).toContain("**Specialist** — 2026-09-17T21:51:33.000Z\n\nWhat is the deadline?");
     expect(write.content).toContain("**You** — 2026-09-17T21:52:00.000Z\n\nEnd of quarter.");
@@ -183,7 +183,7 @@ describe("legacyAdoptionPlan", () => {
   test("stops before an approval naming an artifact the bundle does not carry", () => {
     const plan = legacyAdoptionPlan(bundle(), "proj_new", new Map([["brief", "art_1"]]));
     expect(plan.steps.map((step) => step.stage)).toEqual([1]);
-    expect(plan.notes).toEqual(["Stage 2's approval names an artifact the bundle does not carry; replay stops before it."]);
+    expect(plan.notes).toEqual(["The Solution shape approval names an artifact the bundle does not carry; replay stops before it."]);
   });
 });
 
@@ -200,7 +200,7 @@ describe("importLegacyProject", () => {
     expect(brief.versions[1]!.sb).toMatchObject({ projectId: "new:Snooker Match (imported)", kind: "problem_brief", sourceVersionIds: [] });
     const constraints = artifacts.get("art_2")!;
     expect(constraints.versions[0]!.sb).toMatchObject({ kind: "solution_constraints", stage: 2, sourceVersionIds: ["art_1@2"] });
-    expect(artifacts.get("art_3")!.title).toBe("Stage 1 conversation (imported)");
+    expect(artifacts.get("art_3")!.title).toBe("Problem discovery conversation (imported)");
 
     expect(result.plan.steps.map((step) => step.ref)).toEqual([
       { artifactId: "art_1", version: 2, sha256: "hash_brief_2" },
