@@ -30,6 +30,7 @@ import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Input } from "@corbits/react-ui";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { Banner, Button, StateLabel } from "../../components.jsx";
+import { ApproveControl } from "./approve-control.tsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import { StageConversation } from "./thread.jsx";
@@ -433,9 +434,7 @@ export function BuildPanel({
                 </>
               )}
               {canApprove ? (
-                <Button variant="primary" loading={approving} disabled={!address} onClick={onApprove}>
-                  Approve and continue
-                </Button>
+                <ApproveControl label="Approve" busy={approving} disabled={!address} onApprove={onApprove} />
               ) : null}
             </div>
             {attempts.length > 0 ? (
