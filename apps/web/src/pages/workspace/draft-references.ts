@@ -64,6 +64,8 @@ export function draftReferences(
         return at >= from && at < until;
       }) ??
       null;
+    // A short reply that produced no version wrote nothing, so it names none.
+    if (everyReply && node === null) return;
     refs.set(draft.id, { version: node?.version ?? null, nodeId: node?.id ?? null, noun });
   });
   return refs;
