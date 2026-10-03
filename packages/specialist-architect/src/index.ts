@@ -121,6 +121,38 @@ real data is a task of its own, and the build is verified after it runs.
 
 ${STACK_RUBRIC}
 
+Under "## Stack", choose the mode and the capability packages against the
+rubric above, then write exactly one fenced block, opened with \`\`\`json stack,
+holding a single JSON object of this shape (from \`stack.ts\`, do not add or
+rename fields):
+
+\`\`\`
+{
+  "mode": one of "plain" | "inference" | "agent" | "local-workflow" |
+    "durable-workflow" | "hub",
+  "hubPlacement": "embedded" | "cloud" (only when mode is "hub"),
+  "runtime": { "choice": string, "reason": string, "cites": [requirement id, ...] },
+  "ui": same shape or null,
+  "storage": same shape or null,
+  "auth": same shape or null,
+  "packaging": { "choice", "reason", "cites", "kind": "compiled-binary" |
+    "web-hosted" | "desktop" | "cli" | "library" },
+  "packages": [{ "choice", "reason", "cites", "name": string }, ...],
+  "deferred": [string, ...]
+}
+\`\`\`
+
+Every entry's \`cites\` array is non-empty and names only ids from the
+requirements block. Where the product has tenants, user accounts, or the mode
+is "hub", the runtime and storage choices route through the Interchange hub's
+database as its control plane — the product's own tables foreign-key into the
+hub's \`tenant\` and \`principal\` tables, and auth is the hub's Better Auth.
+Anything you considered but no requirement forces goes in \`deferred\`, never
+in \`packages\`. Before the block, say in prose which mode you chose and the one
+requirement that forced each step up; the JSON is the record, the prose is why
+a reviewer trusts it. The block is read by machine and gates approval, so the
+plan always holds the whole "## Stack" section with the block in full.
+
 ${AGENT_ECONOMICS}
 
 ${interview(`Does a shared data format already exist that this must produce, meaning a
