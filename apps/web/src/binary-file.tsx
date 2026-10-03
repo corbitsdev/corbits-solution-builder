@@ -7,8 +7,9 @@
  * use is what the file is, how big it is, and the download.
  */
 import { useState } from "react";
+import { toast } from "sonner";
 import { api, ApiFailure, type ArtifactNode } from "./client.ts";
-import { Banner, Button, downloadArtifact } from "./components.tsx";
+import { Button, downloadArtifact } from "./components.tsx";
 
 /** Whether a document's content is a `data:` URL: bytes, never prose. */
 export function isDataUrl(content: string): boolean {
@@ -57,18 +58,19 @@ export function formatBinarySize(sizeBytes: number | undefined): string | null {
 
 /** The file card: what it is, how big, and the one thing to do with it. */
 export function BinaryFile({ node, tenantId, content }: { node: ArtifactNode; tenantId: string; content: string | null }) {
-  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [busy, setBusy] = useState(false);
   const mediaType = (content && dataUrlMediaType(content)) || node.mediaType || null;
   const { label, extension } = describeBinary(mediaType);
   const size = formatBinarySize(node.sizeBytes);
   const download = async () => {
-    setState({ busy: true, error: null });
+    setBusy(true);
     try {
       const bytes = content && isDataUrl(content) ? content : (await api.artifactContent(tenantId, node.id)).content;
       downloadArtifact(bytes, binaryFileName(node.title, extension));
-      setState({ busy: false, error: null });
     } catch (cause) {
-      setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) });
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -78,11 +80,10 @@ export function BinaryFile({ node, tenantId, content }: { node: ArtifactNode; te
         {size ? ` · ${size}` : ""}. A file, not a page: save it and open it in the app that reads it.
       </p>
       <div className="button-row">
-        <Button variant="primary" loading={state.busy} onClick={() => void download()}>
+        <Button variant="primary" loading={busy} onClick={() => void download()}>
           Download {extension ? `(.${extension})` : "file"}
         </Button>
       </div>
-      {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
 }
