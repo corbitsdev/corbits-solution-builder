@@ -4,7 +4,7 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
+import { composedMailFold, type ComposedFold } from "./composed-mail.ts";
 import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -107,6 +107,21 @@ function MessageBody({ text }: { text: string }) {
     );
   }
   return <Markdown source={text} />;
+}
+
+/** A mail the app composed in the person's name: its one line, and what it carried behind a disclosure. */
+export function ComposedMail({ fold }: { fold: ComposedFold }) {
+  return (
+    <>
+      {fold.lead ? <Markdown source={fold.lead} /> : null}
+      {fold.summary ? (
+        <details className="bubble-fold">
+          <summary>{fold.summary}</summary>
+          <MessageBody text={fold.body} />
+        </details>
+      ) : null}
+    </>
+  );
 }
 
 function messageText(message: UiChatMessage): string {
@@ -253,15 +268,7 @@ export function StageConversation({
                 <span className="who conv-who">{you ? "You" : who}</span>
                 <div className="bubble">
                   {composed ? (
-                    <>
-                      {composed.lead ? <Markdown source={composed.lead} /> : null}
-                      {composed.summary ? (
-                        <details className="bubble-fold">
-                          <summary>{composed.summary}</summary>
-                          <MessageBody text={composed.body} />
-                        </details>
-                      ) : null}
-                    </>
+                    <ComposedMail fold={composed} />
                   ) : you && withdrawnIds.has(message.id) ? (
                     <div className="turn-withdrawn">
                       <MessageBody text={text} />
