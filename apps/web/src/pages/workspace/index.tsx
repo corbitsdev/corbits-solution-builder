@@ -411,9 +411,14 @@ export function StageWorkspace({
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(
+            usesArtifact ? foldedMessages : referenceMessages,
+            liveVersions ?? [],
+            documentName(draftKind).toLowerCase(),
+            usesArtifact && work?.state === "ready",
+          )
         : undefined,
-    [stage, draftKind, referenceMessages, liveVersions],
+    [stage, draftKind, referenceMessages, foldedMessages, liveVersions, usesArtifact, work],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
