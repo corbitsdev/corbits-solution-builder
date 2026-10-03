@@ -99,6 +99,12 @@ export function hubIsMounted(): boolean {
   return mounted !== null;
 }
 
+/** The embedded hub places `tenantId`'s dead deployments again; see `MountedHub.sidecars.recoverDeployments`. Nothing when the hub is not mounted. */
+export async function recoverTenantDeployments(tenantId: string, deploymentIds: readonly string[]): Promise<string[]> {
+  if (!mounted) return [];
+  return mounted.sidecars.recoverDeployments(tenantId, deploymentIds);
+}
+
 export async function mountHub(): Promise<MountedHub> {
   if (mounted) return mounted;
 

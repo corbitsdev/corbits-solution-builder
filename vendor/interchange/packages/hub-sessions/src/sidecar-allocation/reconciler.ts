@@ -15,6 +15,7 @@ import { DEFAULT_SIDECAR_ALLOCATION_CONCURRENCY } from "../reconciliation-schedu
 import {
   DestroySidecarResult,
   EnsureSidecarResult,
+  type ReplacementRecoveryDecision,
   type SidecarProvisioner,
 } from "./contracts";
 import type { SidecarPluginRegistry } from "./plugin-registry";
@@ -77,9 +78,14 @@ export type SidecarAllocationReconcilerDeps = {
    * Replace an allocated worker after its reconnect grace expires. Disabled by
    * default because Hub recovery does not restore arbitrary sidecar or
    * isolation-container filesystem state, so automatic continuation could run
-   * without state the previous worker produced.
+   * without state the previous worker produced. A provisioner that knows
+   * better answers for its own workers through `recoverLostWorker`, and may
+   * `defer` the question: the allocation stays `allocated`, parked for
+   * `deferredRecoveryMs` or until woken.
    */
   readonly enableAutomaticReplacementRecovery?: boolean;
+  /** How long a provisioner's `defer` parks an allocation before it is asked again. */
+  readonly deferredRecoveryMs?: number;
   readonly leaseDurationMs?: number;
   readonly connectTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
@@ -121,6 +127,7 @@ class ReconciliationLeaseLostError extends Error {
 
 const DEFAULT_LEASE_DURATION_MS = 60_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 120_000;
+const DEFAULT_DEFERRED_RECOVERY_MS = 60_000;
 const MAX_RETRY_BACKOFF_ATTEMPT = 5;
 
 function randomHex(bytes: number): string {
@@ -162,6 +169,7 @@ export function createSidecarAllocationReconciler({
   onInitializationRecovery,
   onReady,
   enableAutomaticReplacementRecovery = false,
+  deferredRecoveryMs = DEFAULT_DEFERRED_RECOVERY_MS,
   leaseDurationMs = DEFAULT_LEASE_DURATION_MS,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
   operationTimeoutMs = DEFAULT_SIDECAR_OPERATION_TIMEOUT_MS,
@@ -348,13 +356,35 @@ export function createSidecarAllocationReconciler({
             : {}),
         }
       : {};
+    // Only an `allocated` worker is ever a recovery question: a
+    // `provisioning` one never finished its first start and is replaced
+    // regardless, as before. Its provisioner answers first, when it can.
+    const asked =
+      allocation.status === "allocated"
+        ? provisionerFor(allocation)?.recoverLostWorker?.({
+            allocationId: allocation.id,
+            tenantId: allocation.tenantId,
+            anchorRunId: allocation.anchorRunId,
+            generation: allocation.generation,
+          })
+        : undefined;
+    const decision: ReplacementRecoveryDecision =
+      allocation.status !== "allocated"
+        ? "replace"
+        : (asked ?? (enableAutomaticReplacementRecovery ? "replace" : "release"));
+    if (decision === "defer") {
+      await allocationStore.parkReconciliation(allocation.id, leaseId, {
+        kind: "retry-after-error",
+        notBefore: new Date(now().getTime() + deferredRecoveryMs),
+      });
+      return;
+    }
     let shouldRetryInitialization = false;
     await queueReconciliationStep(
       { allocationId: allocation.id, generation: allocation.generation },
       async () => {
         const updated =
-          allocation.status === "allocated" &&
-          !enableAutomaticReplacementRecovery
+          decision === "release"
             ? await allocationStore.beginUnrecoverableRelease({
                 ...initializationCheck,
                 allocationId: allocation.id,
@@ -373,9 +403,15 @@ export function createSidecarAllocationReconciler({
                     : "provisioning",
                 expectedGeneration: allocation.generation,
                 expectedLeaseId: leaseId,
-                nextAttemptAt: retryAt(
-                  allocation.ensureAttempts + allocation.destroyAttempts,
-                ),
+                // A replacement the provisioner asked for is wanted now; the
+                // backoff is for a provisioner that keeps failing, not one
+                // that answered.
+                nextAttemptAt:
+                  asked === "replace"
+                    ? now()
+                    : retryAt(
+                        allocation.ensureAttempts + allocation.destroyAttempts,
+                      ),
                 failureCode: code,
                 failureMessage: message,
                 now: now(),

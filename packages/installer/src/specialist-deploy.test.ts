@@ -65,8 +65,8 @@ describe("ensureSpecialistDeployment reuse", () => {
     const block = source.slice(source.indexOf("const liveExisting = async"), source.indexOf("const existing = switchToOfferingId"));
     // CL-9680: both checks carry the host's start, so a deployment from
     // before it is stalled at once rather than waited on.
-    expect(block).toContain('await deploymentUsability(transport, tenantId, own.id, own.id, wait, sidecar.sidecarsLostBefore)) === "usable"');
-    expect(block).toContain('await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable"');
+    expect(block).toContain('await deploymentUsabilityFor(transport, tenantId, own.id, own.id, wait, sidecar)) === "usable"');
+    expect(block).toContain('await deploymentUsabilityFor(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar)) !== "usable"');
     expect(block).not.toContain("deploymentIsLive(");
   });
 

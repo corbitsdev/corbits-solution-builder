@@ -36,7 +36,7 @@ import {
 } from "./workflow-closure.js";
 import {
   deploymentPlaceableHere,
-  deploymentUsability,
+  deploymentUsabilityFor,
   ensureWorkflowAsset,
   pinFor,
   pushWorkflowSourceTree,
@@ -539,17 +539,17 @@ async function ensureSpecialistDeploymentOnce(
   // `<deploymentId>@<domain>`). One the hub is still restoring is waited for
   // within the recovery bounds; one whose run is terminal answers every
   // mail 409, so a fresh deployment takes its place. One from before this
-  // host started is not waited for at all (CL-9680): the host that was
-  // placing it is gone.
+  // host started is not waited for (CL-9680) -- unless the host can place
+  // it again (CL-9700), in which case it is, and the run resumes.
   const liveExisting = async (): Promise<{ deployment: HubDeployment; tenantId: string; assetId: string; domain: string } | null> => {
     const own = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar);
-    if (own && (await deploymentUsability(transport, tenantId, own.id, own.id, wait, sidecar.sidecarsLostBefore)) === "usable") {
+    if (own && (await deploymentUsabilityFor(transport, tenantId, own.id, own.id, wait, sidecar)) === "usable") {
       return { deployment: own, tenantId, assetId, domain: tenant.domain! };
     }
     const legacy = (await specialistDeploymentsIn(transport, home, assetName)).find((entry) => entry.tenantId === home.legacyTenantId);
     if (!legacy) return null;
     const pick = await resolveLiveDeployment(transport, projectId, stage, legacy.deployments, sidecar);
-    if (!pick || (await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable") return null;
+    if (!pick || (await deploymentUsabilityFor(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar)) !== "usable") return null;
     return { deployment: pick, tenantId: legacy.tenantId, assetId: legacy.asset.id, domain: legacy.domain };
   };
   const existing = switchToOfferingId ? null : await liveExisting();

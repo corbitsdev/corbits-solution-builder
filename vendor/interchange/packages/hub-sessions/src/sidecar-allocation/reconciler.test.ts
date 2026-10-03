@@ -756,6 +756,66 @@ describe("createSidecarAllocationReconciler", () => {
     });
   });
 
+  test("the provisioner decides what becomes of its lost worker: defer parks it instead of releasing or replacing it", async () => {
+    const allocated = allocation({
+      status: "allocated",
+      generation: 1,
+      sidecarId: "sc-current",
+      ensureAcceptedGeneration: 1,
+      connectDeadline: NOW,
+      reconciliationLeaseId: "lease-1",
+    });
+    let parked: Parameters<AllocationStore["parkReconciliation"]>[2] | undefined;
+    const decisions: string[] = [];
+    const store = fakeStore({
+      claimNextReconcilable: async () => allocated,
+      parkReconciliation: async (_allocationId, _leaseId, policy) => {
+        parked = policy;
+        return true;
+      },
+    });
+    const provisioner = testProvisioner({
+      recoverLostWorker: (worker) => {
+        decisions.push(worker.tenantId);
+        return "defer";
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, provisioner, ready: false, waitError: new Error("connect timeout") }),
+      deferredRecoveryMs: 60_000,
+    });
+
+    await reconciler.reconcileNext();
+
+    expect(decisions).toEqual([allocated.tenantId]);
+    expect(parked).toEqual({ kind: "retry-after-error", notBefore: new Date(NOW.getTime() + 60_000) });
+  });
+
+  test("a provisioner answering replace replaces, exactly as `true` does, with recovery otherwise off", async () => {
+    const allocated = allocation({
+      status: "allocated",
+      generation: 1,
+      sidecarId: "sc-current",
+      ensureAcceptedGeneration: 1,
+      connectDeadline: NOW,
+      reconciliationLeaseId: "lease-1",
+    });
+    let replaced = false;
+    const store = fakeStore({
+      claimNextReconcilable: async () => allocated,
+      beginReplacement: async () => {
+        replaced = true;
+        return null;
+      },
+    });
+    const provisioner = testProvisioner({ recoverLostWorker: () => "replace" });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, provisioner, ready: false, waitError: new Error("connect timeout") }),
+    });
+    await reconciler.reconcileNext();
+    expect(replaced).toBe(true);
+  });
+
   test("retries when identity validation fails inside the connection wait", async () => {
     const allocated = allocation({
       status: "allocated",

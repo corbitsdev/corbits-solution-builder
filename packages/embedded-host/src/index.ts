@@ -28,6 +28,7 @@ export {
   hub,
   hubIsMounted,
   mountHub,
+  recoverTenantDeployments,
   embeddedHubOrigin,
   canPlaceSidecars,
   sidecarFacts,

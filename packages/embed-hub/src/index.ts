@@ -199,6 +199,16 @@ export type MountedHub = {
   readonly sidecars: {
     fence(allocationId: string, generation: number): void;
     connected(): string[];
+    /**
+     * Places the named dead deployments of `tenantId` again (CL-9700): their
+     * allocations' connect grace is ended now and their reconciliation woken,
+     * so the reconciler replaces each dead sidecar with a new one running the
+     * same frozen bundle and resuming the same run. The tenant's other dead
+     * workers are left to their own connect deadline and released then, as
+     * before. Returns the ids it is placing, so a caller can wait for them
+     * before reading or mailing them.
+     */
+    recoverDeployments(tenantId: string, deploymentIds: readonly string[]): Promise<string[]>;
   };
   /**
    * The sidecar router's event emitter, re-emitting frames such as
@@ -403,6 +413,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       export: "createResponsesAdapter",
     },
   ]);
+  // Per tenant whose project has been opened since boot: the anchor runs
+  // (deployments) the page asked to have placed again. Process-provisioned
+  // sidecars die with the host. Replacing every one at boot started ~600 MB
+  // of sidecar per live deployment before anything was opened (CL-9540);
+  // releasing them made every open a full redeploy and a replay of the
+  // project's decisions (#192, #237, CL-9700). So a dead worker of a tenant
+  // nobody has opened is deferred; of an opened one, replaced if the page
+  // asked for it (the frozen bundle lands on a new sidecar with no probe and
+  // the run resumes) and released otherwise, as every dead worker was before.
+  const recoverable = new Map<string, Set<string>>();
   const provisionerFor = (role: ProcessProvisionerRole) =>
     createProcessProvisioner({
       role,
@@ -410,6 +430,11 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       runtimePath: options.sidecarRuntime,
       sidecarEntryPath: options.sidecarEntry,
       hubWebSocketUrl: options.hubWebSocketUrl,
+      recoverLostWorker: (worker) => {
+        const wanted = recoverable.get(worker.tenantId);
+        if (wanted === undefined) return "defer";
+        return wanted.has(worker.anchorRunId) ? "replace" : "release";
+      },
     });
   const deploymentProvisioner = provisionerFor("deployment");
   const bindingFingerprint = deploymentProvisioner.bindingFingerprint;
@@ -452,11 +477,8 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
     connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
-    // Process-provisioned sidecars die with the host. Left unreplaced, a
-    // deployment is placed again only when a project is opened, and the
-    // installer supersedes its ended run with a fresh one that replays the
-    // project's decisions (#192, #237). Replacing every one at boot started
-    // ~600 MB of sidecar per live deployment before anything was opened.
+    // The process provisioner answers for its own lost workers
+    // (`recoverLostWorker`, above); this stays off for any worker it does not.
     enableAutomaticReplacementRecovery: false,
     onReady: async (allocation: SidecarAllocation, reconciliation) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
@@ -825,6 +847,40 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),
       connected: () => socketRouter.getConnectedSidecars(),
+      recoverDeployments: async (tenantId, deploymentIds) => {
+        const wanted = recoverable.get(tenantId) ?? new Set<string>();
+        for (const id of deploymentIds) wanted.add(id);
+        recoverable.set(tenantId, wanted);
+        const placing: string[] = [];
+        const now = new Date();
+        for (const allocation of await sidecarAllocationStore.listActive()) {
+          if (allocation.tenantId !== tenantId || allocation.status !== "allocated") continue;
+          // Only the wanted rows are touched. The tenant's other dead workers
+          // reach their own connect deadline and are released then (the
+          // policy above): woken early, each would hold a reconciler slot
+          // for the whole wait and queue the wanted placement behind it.
+          if (!deploymentIds.includes(allocation.anchorRunId)) continue;
+          {
+            // The worker is known dead (the caller checked it is unplaced and
+            // from before this host started), so its connect grace ends now
+            // rather than at the deadline boot gave it; the reconciler then
+            // replaces it on its next pass.
+            const ended = await sidecarAllocationStore.markConnectionLost({ allocationId: allocation.id, generation: allocation.generation, connectDeadline: now, now });
+            if (ended === null) {
+              // The row is not one whose grace can be ended (its last ensure
+              // was never accepted, or it moved meanwhile); the reconciler
+              // reaches it at its own deadline instead. Said, so a slow
+              // recovery can be read off the log rather than guessed at.
+              console.info(
+                `recover: ${allocation.anchorRunId} keeps its own connect deadline (status ${allocation.status}, generation ${String(allocation.generation)}, accepted ${String(allocation.ensureAcceptedGeneration)}, deadline ${allocation.connectDeadline?.toISOString() ?? "none"})`,
+              );
+            }
+            placing.push(allocation.anchorRunId);
+            await sidecarAllocationStore.wakeReconciliation(allocation.id, allocation.generation);
+          }
+        }
+        return placing;
+      },
     },
     events: sidecarRouter.events,
     sidecarBindingFingerprint: bindingFingerprint,
