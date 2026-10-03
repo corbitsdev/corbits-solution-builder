@@ -70,7 +70,7 @@ export type VerificationSummary = {
   complete: boolean;
   /** Paths of required items that are not `verified`. */
   failed: string[];
-  /** Those items in full: what was checked, its status and the tool's detail. */
+  /** Every item not `verified`, required or not, in full: what was checked, its status and the tool's detail. */
   unverified: VerificationItem[];
   targets: { target: string; ranSuccessfully: boolean; transcript: string }[];
 };
@@ -179,7 +179,7 @@ export async function verifyAndRecord(
   return {
     complete: verification.report.complete,
     failed: verification.report.failed,
-    unverified: verification.items.filter((item) => item.required && item.status !== "verified"),
+    unverified: verification.items.filter((item) => item.status !== "verified"),
     targets: verification.targets.map((target) => ({ target: target.target, ranSuccessfully: target.ranSuccessfully, transcript: target.transcript })),
   };
 }
