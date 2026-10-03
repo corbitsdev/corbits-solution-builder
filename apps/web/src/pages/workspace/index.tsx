@@ -52,7 +52,7 @@ import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { Flame } from "lucide-react";
+import { ArrowLeft, Flame, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -795,8 +795,18 @@ export function StageWorkspace({
   // (a design is a page in a sandbox, a file is a file), headed by which
   // stage it belongs to, with the two things a person can do from here --
   // go back to this stage's work, or send the project back to change it.
+  // A stage whose pane is a panel of its own (the design, the packages, the
+  // build, the delivery) shows only its own lineage's newest version there,
+  // so a tab or a version chip naming anything else read as doing nothing:
+  // the reader shows it instead, as it does another stage's.
+  const panelCannotShow =
+    artifacts.selected !== null &&
+    artifacts.activeNode !== null &&
+    artifacts.selected.stage === stage &&
+    !DOCUMENT_STAGES.has(stage) &&
+    (artifacts.selected.kind !== STAGE_DRAFT_KIND[stage] || artifacts.activeNode.id !== artifacts.selected.versions.at(-1)?.id);
   const reader =
-    artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode ? (
+    artifacts.selected !== null && (artifacts.selected.stage !== stage || panelCannotShow) && artifacts.activeNode ? (
       <div className="stage-inner">
         <div className="doc reader-doc">
           <div className="docmeta">
@@ -816,11 +826,19 @@ export function StageWorkspace({
                 // The same way out every stage document has (#242): Markdown, or the print layer's PDF.
                 <DocumentExportMenu node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
               ) : null}
-              <Button variant="ghost" onClick={() => artifacts.select(null)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  artifacts.select(null);
+                  artifacts.selectVersion(null);
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
                 Back to {stageName(stage)}
               </Button>
               {artifacts.activeNode.stage < stage ? (
                 <Button variant="ghost" disabled={decisions.sendingBack} onClick={() => setReaderSendBack((open) => !open)}>
+                  <Undo2 aria-hidden="true" />
                   Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
