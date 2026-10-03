@@ -49,6 +49,8 @@ export type ProcessProvisionerOptions = {
   readonly hubWebSocketUrl: string;
   readonly runner?: SidecarProcessRunner;
   readonly terminationGraceMs?: number;
+  /** What becomes of a worker that died with a previous host; see `SidecarProvisioner.recoverLostWorker`. */
+  readonly recoverLostWorker?: SidecarProvisioner["recoverLostWorker"];
 };
 
 const PID_FILE = "sidecar.pid";
@@ -224,6 +226,7 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     capabilities: CAPABILITIES,
     ensure: (request) => serialize(request.allocationId, () => ensure(request)),
     destroy: (request) => serialize(request.allocationId, () => destroy(request)),
+    ...(options.recoverLostWorker ? { recoverLostWorker: options.recoverLostWorker } : {}),
   };
 }
 

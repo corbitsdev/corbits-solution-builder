@@ -278,7 +278,46 @@ export async function sourceFor(
  * the instant it started: a deployment created before then and not placed
  * now never will be, and is not waited on.
  */
-export type SidecarCapability = { canPlaceSidecars: boolean; sidecarsLostBefore?: string };
+export type SidecarCapability = {
+  canPlaceSidecars: boolean;
+  sidecarsLostBefore?: string;
+  /** Asks the host to place the named dead deployments of `tenantId` again
+   *  (CL-9700); answers the ids it is placing. Absent when the host cannot
+   *  (a remote hub), and a dead deployment is then replaced by a fresh one. */
+  recover?: RecoverDeployments;
+};
+
+export type RecoverDeployments = (tenantId: string, deploymentIds: readonly string[]) => Promise<readonly string[]>;
+
+/**
+ * `deploymentUsability`, with one step before it (CL-9700): a live deployment
+ * this host will never place on its own -- unplaced, from before the host
+ * started -- is handed to the host to place again when it can, and waited
+ * for within the same bounds. Placed, it is usable like any other and its
+ * run resumes; not placed, it is stalled or ended exactly as before, and the
+ * caller deploys afresh.
+ */
+export async function deploymentUsabilityFor(
+  transport: Transport,
+  tenantId: string,
+  deploymentId: string,
+  runId: string,
+  wait: PlacementWait,
+  sidecar: SidecarCapability,
+): Promise<DeploymentUsability> {
+  if (sidecar.recover !== undefined && sidecar.sidecarsLostBefore !== undefined) {
+    const found = (await workflowsFor(transport, tenantId).deployments()).find((entry: HubDeployment) => entry.id === deploymentId);
+    if (isLive(found) && !deploymentPlaceableHere(found, sidecar)) {
+      const placing = await sidecar.recover(tenantId, [deploymentId]).catch(() => [] as readonly string[]);
+      if (placing.includes(deploymentId)) {
+        const placement = await waitForDeploymentPlacement(transport, tenantId, deploymentId, wait);
+        if (placement.outcome === "placed") return (await runHasEnded(transport, tenantId, deploymentId, runId)) ? "ended" : "usable";
+        return placement.outcome === "ended" ? "ended" : "stalled";
+      }
+    }
+  }
+  return deploymentUsability(transport, tenantId, deploymentId, runId, wait, sidecar.sidecarsLostBefore);
+}
 
 /**
  * Pushes `tree` onto `main` of the tenant's `<assetKind>/<assetName>` asset

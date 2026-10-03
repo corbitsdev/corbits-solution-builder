@@ -1,18 +1,21 @@
 import type { Hono } from "hono";
 import {
   credentialBackend,
+  HostError,
   dataDirectory,
   ensureHub,
   hostIdentity,
   hostStatus,
   mintOwnerSetCookie,
   readSecretResult,
+  recoverTenantDeployments,
   secretReference,
   sidecarFacts,
   storeSecret,
   mountGoogleDrive,
   type GoogleSecretStore,
 } from "@corbits/embedded-host";
+import { projectParam } from "./api-build.js";
 
 /**
  * The Google Drive connection's client and tokens live in the OS keychain
@@ -59,6 +62,24 @@ export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keych
         detail: cause instanceof Error ? cause.message : "The hub did not start.",
       })),
     });
+  });
+
+  /**
+   * A project is being opened: place the named deployments of its that died
+   * with a previous host again, rather than deploying new ones (CL-9700). A
+   * project is its own tenant, so the id is the tenant's; the page names the
+   * deployments it would otherwise redeploy. Answers the ids being placed;
+   * the page waits for them before it ensures anything. A remote hub places
+   * its own sidecars and answers nothing here.
+   */
+  api.post("/projects/:id/recover-deployments", async (context) => {
+    const projectId = await projectParam(context);
+    const body: unknown = await context.req.json().catch(() => null);
+    const ids = body !== null && typeof body === "object" ? (body as { deploymentIds?: unknown }).deploymentIds : undefined;
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && /^run_[0-9a-f]+$/.test(id))) {
+      throw new HostError("validation_failed", "deploymentIds names the deployments to place again.");
+    }
+    return context.json({ deploymentIds: await recoverTenantDeployments(projectId, ids) });
   });
 
   /**

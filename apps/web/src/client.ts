@@ -639,7 +639,24 @@ function placementFailure(what: string, result: Exclude<PlacementResult, { outco
 }
 
 export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars" | "sidecarsLostBefore">): SidecarCapability {
-  return { canPlaceSidecars: status.canPlaceSidecars, ...(status.sidecarsLostBefore === null ? {} : { sidecarsLostBefore: status.sidecarsLostBefore }) };
+  return {
+    canPlaceSidecars: status.canPlaceSidecars,
+    ...(status.sidecarsLostBefore === null ? {} : { sidecarsLostBefore: status.sidecarsLostBefore, recover: recoverDeployments }),
+  };
+}
+
+/**
+ * The host places a project's named dead deployments again (CL-9700), so
+ * the ensure steps reuse them and their runs resume rather than deploying
+ * afresh and replaying the project's decisions. A host that cannot answer
+ * (older, or a remote hub) places nothing, and the ensure step deploys.
+ */
+async function recoverDeployments(tenantId: string, deploymentIds: readonly string[]): Promise<readonly string[]> {
+  const answer = await request<{ deploymentIds: string[] }>(`/projects/${encodeURIComponent(tenantId)}/recover-deployments`, {
+    method: "POST",
+    body: JSON.stringify({ deploymentIds }),
+  }).catch(() => ({ deploymentIds: [] as string[] }));
+  return answer.deploymentIds;
 }
 
 /** The static closure manifest `scripts/pack-closure-static.ts` writes to
