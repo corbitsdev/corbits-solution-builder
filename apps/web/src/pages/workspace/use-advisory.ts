@@ -214,10 +214,9 @@ export function evaluatorRevisionDue(args: {
   readonly evaluator: StageEvaluator;
   readonly draft: string | null;
   readonly messages: readonly ChatMessage[];
-  readonly underReview: boolean;
 }): string | null {
-  const { stage, evaluator, draft, messages, underReview } = args;
-  if (stage === 1 || underReview || draft === null) return null;
+  const { stage, evaluator, draft, messages } = args;
+  if (stage === 1 || draft === null) return null;
   if (evaluator.status !== "verdict" || evaluator.verdict.ready || evaluator.verdict.notes.length === 0) return null;
   if (messages.at(-1)?.author !== "agent") return null;
   const lastAsk = messages.findLast((message) => message.author === "me");

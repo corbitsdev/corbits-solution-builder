@@ -430,6 +430,7 @@ export function StageWorkspace({
         resultNodeId: null,
         questions: null,
         createdAt: message.at,
+        ...(message.subject ? { subject: message.subject } : {}),
       })),
     [foldedMessages],
   );
@@ -689,7 +690,6 @@ export function StageWorkspace({
     evaluator,
     draft: !usesArtifact || workCurrent ? (draftMessage?.body ?? null) : null,
     messages: foldedMessages,
-    underReview: workflowView?.reviews[stage as Stage]?.status === "open",
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
       // Another tab may already have sent these notes.
