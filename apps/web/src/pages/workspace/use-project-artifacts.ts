@@ -76,6 +76,9 @@ export function useProjectArtifacts(
       .filter((node) => node.stage === stage && node.kind === draftKind)
       .sort((a, b) => a.version - b.version)
       .at(-1);
+    // Opening the reply's review saves it as a version just after it lands;
+    // once saved, the reply is that version, not one past it.
+    if (head && Date.parse(head.createdAt) >= Date.parse(draftMessage.at)) return null;
     return {
       id: `reply:${draftMessage.id}`,
       kind: draftKind,
