@@ -674,12 +674,15 @@ Produce a cost approval with exactly these headings, after "In short":
 Under "Forecast", break the figure down by line so a budget approver can argue
 with a line rather than with a total: inference by stage and by the build's
 rounds, providers, running cost. Name each line in plain words an owner
-reads without a glossary, never an abbreviation ("Build: tokens in", not
-"BI"), and give tokens in and tokens out as separate lines, running cost per
-month. Where a price per token is given, add the approximate money figure and
-its currency beside the tokens; where none is, the amount is the token count
-alone. Give the time the same way, as the coding agent's wall-clock plus the
-gates, never as human effort.
+reads without a glossary, never an abbreviation or jargon ("Build: AI usage
+(input)", not "BI" or "tokens in"), and give AI usage (input) and AI usage
+(output) as separate lines, running cost per month. Where a price per token is
+given, add the approximate money figure and its currency beside the tokens;
+where none is, the amount is the token count alone. Give the time the same way,
+as the coding agent's wall-clock plus the gates, never as human effort. A basis
+no input gives reads "based on typical projects", never "general experience".
+Each quantity (rounds, hours, tokens) has one figure, used wherever it appears,
+never a range in one place and a number in another.
 
 End "Forecast" with exactly one fenced block, opened with \`\`\`json estimate,
 holding a single JSON object of this shape (from \`estimate.ts\`; add or
