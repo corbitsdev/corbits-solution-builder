@@ -132,6 +132,7 @@ export function StageConversation({
   onSend,
   working = false,
   disabled = false,
+  ended = false,
   placeholder = "Say what should change…",
   withdrawnIds = EMPTY_WITHDRAWN,
   pending = false,
@@ -153,6 +154,8 @@ export function StageConversation({
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
+  /** The project is finished: nothing said to the specialist can act, so there is no composer. */
+  ended?: boolean;
   placeholder?: string;
   /** Ids of person turns Stop withdrew, rendered dimmed with no reply. */
   withdrawnIds?: ReadonlySet<string>;
@@ -281,6 +284,7 @@ export function StageConversation({
           })}
         </div>
       )}
+      {ended ? null : (
       <div className="composer" data-working={working || pending ? "" : undefined}>
         {rows}
         <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
@@ -304,6 +308,7 @@ export function StageConversation({
         </Dictated>
         {popover}
       </div>
+      )}
     </div>
   );
 }
