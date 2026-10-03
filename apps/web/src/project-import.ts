@@ -92,6 +92,8 @@ export type ImportResult = {
   readonly projectId: string;
   readonly artifacts: number;
   readonly conversations: number;
+  /** The artifact written for each bundled node, by the node's id (#652): what the replay re-points approvals at. */
+  readonly ids: ReadonlyMap<string, string>;
 };
 
 /**
@@ -102,14 +104,21 @@ export type ImportResult = {
 export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Promise<ImportResult> {
   const { projectId } = await deps.createProject({ title: importedProjectTitle(bundle), policy: bundle.project.policy });
   const plan = importPlan(bundle, projectId);
-  const writes = [...plan.artifacts, ...plan.conversations];
+  const ids = new Map<string, string>();
+  const total = plan.artifacts.length + plan.conversations.length;
   let done = 0;
-  for (const write of writes) {
+  for (const [index, write] of plan.artifacts.entries()) {
+    const written = await deps.createArtifact(write);
+    ids.set(bundle.artifacts[index]!.node.id, written.id);
+    done += 1;
+    deps.onProgress?.(done, total);
+  }
+  for (const write of plan.conversations) {
     await deps.createArtifact(write);
     done += 1;
-    deps.onProgress?.(done, writes.length);
+    deps.onProgress?.(done, total);
   }
-  return { projectId, artifacts: plan.artifacts.length, conversations: plan.conversations.length };
+  return { projectId, artifacts: plan.artifacts.length, conversations: plan.conversations.length, ids };
 }
 
 function looksLikeZip(file: File): boolean {

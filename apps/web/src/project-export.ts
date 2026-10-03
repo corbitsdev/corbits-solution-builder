@@ -8,7 +8,9 @@ import type { ArtifactNode } from "./client.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
-export const BUNDLE_VERSION = 2 as const;
+/** v3 carries the workflow's position (#652); a v2 bundle is still read. */
+export const BUNDLE_VERSION = 3 as const;
+export const READABLE_BUNDLE_VERSIONS: readonly number[] = [2, 3];
 const STAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 /** A node as recorded; its lineage position is derived when a project is read. */
@@ -16,14 +18,35 @@ export type ExportedNode = Omit<ArtifactNode, "position">;
 export type ExportedArtifact = { node: ExportedNode; content: string };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 
+/** The workflow's position as exported (#652): what the import replays so the new project lands where the old one was. */
+export type BundleWorkflow = {
+  readonly stage: number;
+  readonly done: boolean;
+  /** Accepted decisions, in order, with only the fields the replay reads. */
+  readonly decisions: readonly {
+    readonly kind: string;
+    readonly stage: number;
+    readonly artifactId?: string;
+    readonly version?: number;
+    readonly sha256?: string;
+    readonly targetStage?: number;
+    readonly target?: string;
+  }[];
+  /** Each stakeholder's latest Concept approval vote, by name. */
+  readonly audienceDecisions: Readonly<Record<string, { readonly decision: "proceed" | "revise" | "reject"; readonly note?: string }>>;
+  readonly freeze: { readonly target: string } | null;
+};
+
 export type ProjectBundle = {
   format: typeof BUNDLE_FORMAT;
-  version: typeof BUNDLE_VERSION;
+  version: 2 | 3;
   exportedAt: string;
   project: { id: string; title: string; policy: unknown };
   artifacts: ExportedArtifact[];
   conversations: ExportedConversation[];
   notes: string;
+  /** Absent from a v2 bundle. */
+  workflow?: BundleWorkflow;
 };
 
 export type BundleDeps = {
@@ -37,6 +60,14 @@ export type BundleDeps = {
    *  restart, model switch) leaves earlier mail under earlier addresses. */
   stageAgentAddresses: (projectId: string, stage: number) => Promise<string[]>;
   readStageThread: (tenantId: string, addresses: string[]) => Promise<ChatMessage[]>;
+  /** The workflow's view, for the position the bundle carries (#652); a bundle without it imports from its artifact heads. */
+  workflowView?: (projectId: string) => Promise<{
+    stage: number;
+    done: boolean;
+    decisions: readonly { kind: string; stage: number; accepted: boolean; artifactId?: string; version?: number; sha256?: string; targetStage?: number; target?: string }[];
+    audienceDecisions: Readonly<Record<string, { decision: "proceed" | "revise" | "reject"; note?: string }>>;
+    freeze: { target: string } | null;
+  } | null>;
 };
 
 /** Only the fields a document node is documented to carry -- an explicit
@@ -96,6 +127,29 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
     conversations.push({ stage, messages: messages.map(pickMessage) });
   }
 
+  const view = deps.workflowView ? await deps.workflowView(projectId).catch(() => null) : null;
+  const workflow: BundleWorkflow | undefined = view
+    ? {
+        stage: view.stage,
+        done: view.done,
+        decisions: view.decisions
+          .filter((decision) => decision.accepted)
+          .map((decision) => ({
+            kind: decision.kind,
+            stage: decision.stage,
+            ...(decision.artifactId !== undefined ? { artifactId: decision.artifactId } : {}),
+            ...(decision.version !== undefined ? { version: decision.version } : {}),
+            ...(decision.sha256 !== undefined ? { sha256: decision.sha256 } : {}),
+            ...(decision.targetStage !== undefined ? { targetStage: decision.targetStage } : {}),
+            ...(decision.target !== undefined ? { target: decision.target } : {}),
+          })),
+        audienceDecisions: Object.fromEntries(
+          Object.entries(view.audienceDecisions).map(([name, vote]) => [name, { decision: vote.decision, ...(vote.note ? { note: vote.note } : {}) }]),
+        ),
+        freeze: view.freeze ? { target: view.freeze.target } : null,
+      }
+    : undefined;
+
   return {
     format: BUNDLE_FORMAT,
     version: BUNDLE_VERSION,
@@ -103,7 +157,8 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
     project: { id: detail.project.id, title: detail.project.title, policy: detail.project.policy },
     artifacts,
     conversations,
-    notes: "workflow events are not included yet",
+    notes: workflow ? "the workflow's position is carried; the import replays it" : "workflow events are not included",
+    ...(workflow ? { workflow } : {}),
   };
 }
 
@@ -118,7 +173,7 @@ export function parseBundle(value: unknown): ProjectBundle {
   if (record.format !== BUNDLE_FORMAT) {
     throw new Error(`not a project bundle: expected format "${BUNDLE_FORMAT}", got ${JSON.stringify(record.format)}`);
   }
-  if (record.version !== BUNDLE_VERSION) {
+  if (!READABLE_BUNDLE_VERSIONS.includes(record.version as number)) {
     throw new Error(`unsupported project bundle version: ${JSON.stringify(record.version)}`);
   }
   if (typeof record.exportedAt !== "string") {

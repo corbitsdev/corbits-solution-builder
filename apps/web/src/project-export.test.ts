@@ -41,8 +41,9 @@ describe("assembleBundle", () => {
   test("assembles artifacts, conversations, and project fields", async () => {
     const bundle = await assembleBundle("proj_1", deps());
     expect(bundle.format).toBe("solutions-builder.project");
-    expect(bundle.version).toBe(2);
-    expect(bundle.notes).toBe("workflow events are not included yet");
+    expect(bundle.version).toBe(3);
+    expect(bundle.notes).toBe("workflow events are not included");
+    expect(bundle.workflow).toBeUndefined();
     expect(bundle.project).toEqual({ id: "proj_1", title: "Renew the lease", policy: { audiences: [], audienceQuorum: 0 } });
     expect(bundle.artifacts).toHaveLength(1);
     expect(bundle.artifacts[0]?.content).toBe("the brief");
@@ -119,5 +120,46 @@ describe("parseBundle", () => {
 describe("bundleFileName", () => {
   test("slugs the title and appends the export suffix", () => {
     expect(bundleFileName("Renew the Lease!")).toBe("renew-the-lease.solutions-builder.json");
+  });
+});
+
+// #652: a v3 bundle carries the workflow's position; a v2 bundle still reads.
+describe("the bundle's workflow", () => {
+  test("carries the stage, the accepted decisions, the votes and the freeze", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        workflowView: async () => ({
+          stage: 8,
+          done: false,
+          decisions: [
+            { kind: "open_review", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+            { kind: "approve", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+            { kind: "approve", stage: 2, accepted: false, artifactId: "art_2", version: 1, sha256: "bbb" },
+            { kind: "approve", stage: 7, accepted: true, artifactId: "art_7", version: 1, sha256: "ccc", target: "macos" },
+          ],
+          audienceDecisions: { You: { decision: "proceed", note: "" }, "Tim Burke": { decision: "proceed", note: "Looks right" } },
+          freeze: { target: "macos" },
+        }),
+      }),
+    );
+    expect(bundle.version).toBe(3);
+    expect(bundle.workflow).toEqual({
+      stage: 8,
+      done: false,
+      decisions: [
+        { kind: "open_review", stage: 1, artifactId: "art_1", version: 1, sha256: "aaa" },
+        { kind: "approve", stage: 1, artifactId: "art_1", version: 1, sha256: "aaa" },
+        { kind: "approve", stage: 7, artifactId: "art_7", version: 1, sha256: "ccc", target: "macos" },
+      ],
+      audienceDecisions: { You: { decision: "proceed" }, "Tim Burke": { decision: "proceed", note: "Looks right" } },
+      freeze: { target: "macos" },
+    });
+    expect(() => parseBundle(bundle)).not.toThrow();
+  });
+
+  test("a v2 bundle is still accepted", () => {
+    const v2 = { format: "solutions-builder.project", version: 2, exportedAt: "2026-01-02T00:00:00.000Z", project: { id: "p", title: "T", policy: {} }, artifacts: [], conversations: [], notes: "workflow events are not included yet" };
+    expect(() => parseBundle(v2)).not.toThrow();
   });
 });
