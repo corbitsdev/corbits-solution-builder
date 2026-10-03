@@ -18,6 +18,7 @@ import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from 
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown } from "lucide-react";
+import { ApproveControl } from "./workspace/approve-control.tsx";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
 import { openInGoogleSlides } from "../google-slides.ts";
@@ -879,15 +880,13 @@ export function AudiencePackages({
                 {proceeded} of {requiredQuorum} required have proceeded.
               </p>
             ) : null}
-            <Button
-              variant="primary"
-              loading={approving}
+            <ApproveControl
+              label="Approve"
+              busy={approving}
               disabled={!canApprove || packages.length === 0 || !quorumMet}
               doing="Approving the packages and opening the next stage"
-              onClick={onApprove}
-            >
-              Approve and continue
-            </Button>
+              onApprove={onApprove}
+            />
             {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
           </div>
           <Tabs

@@ -13,7 +13,7 @@ import {
   Switch,
   type ChatMessage,
 } from "@corbits/react-ui";
-import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -21,6 +21,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
+import { ApproveControl } from "./approve-control.tsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
@@ -139,7 +140,6 @@ export function StageDocument({
   tools?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
   useEffect(() => {
     if (seed && seed.text.trim()) setMessage(seed.text);
@@ -542,41 +542,19 @@ export function StageDocument({
                 data-ready={evaluation?.ready ? "true" : undefined}
                 className={evaluation?.ready ? "is-ready approve" : "approve"}
               >
-                {confirming ? (
-                  <span className="approve-confirm" role="group" aria-label="Confirm">
-                    <span>
-                      {advisory && !evaluation?.ready
-                        ? "Continue anyway?"
-                        : soloApproval
-                          ? "Approve this and move on?"
-                          : "Send this for approval?"}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      loading={busy === "submit"}
-                      onClick={() => {
-                        // Quoted passages are for the stage being sent for
-                        // approval; once it is, nothing is left to restore.
-                        clearQuotedDraft(tenantId, node.stage);
-                        setConfirming(false);
-                        onSubmit();
-                      }}
-                    >
-                      Yes
-                    </Button>
-                    <Button variant="ghost" onClick={() => setConfirming(false)}>
-                      No
-                    </Button>
-                  </span>
-                ) : (
-                  <>
-                    <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
-                    <Button variant="ghost" loading={busy === "submit"} onClick={() => setConfirming(true)}>
-                      <Check aria-hidden="true" />
-                      {soloApproval ? "Approve" : "Send for approval"}
-                    </Button>
-                  </>
-                )}
+                <ApproveControl
+                  label={soloApproval ? "Approve" : "Send for approval"}
+                  evaluatorPending={Boolean(advisory) && !evaluation?.ready}
+                  busy={busy === "submit"}
+                  variant="ghost"
+                  lead={soloApproval ? "Happy with it?" : "Nothing more to say?"}
+                  onApprove={() => {
+                    // Quoted passages are for the stage being sent for
+                    // approval; once it is, nothing is left to restore.
+                    clearQuotedDraft(tenantId, node.stage);
+                    onSubmit();
+                  }}
+                />
               </span>
             </div>
           ) : null}
