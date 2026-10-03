@@ -37,6 +37,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
 import { composeApprovedChain } from "./approved-chain.ts";
+import { importedHistory } from "./imported-history.ts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -184,7 +185,8 @@ export function useOpeningDispatch({
           // Every approved artifact before this stage, and the person's
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
-          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
+          const history = await importedHistory(tenantId, detail.nodes, stage);
+          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage, history });
           // The workspace's language is in the specialist's own instructions
           // (`localizedRole`, client.ts), where a changed setting redeploys
           // it; the mail carries the record and the stage's lead, nothing else.
