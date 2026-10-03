@@ -82,6 +82,10 @@ export const keys = {
     all: ["artifact"] as const,
     of: (tenantId: string, id: string) => ["artifact", tenantId, id] as const,
   },
+  approvedChain: {
+    all: ["approvedChain"] as const,
+    of: (tenantId: string, stage: number, nodeIds: readonly string[]) => ["approvedChain", tenantId, stage, [...nodeIds]] as const,
+  },
   designerSettings: ["designerSettings"] as const,
   deckDesigns: ["deckDesigns"] as const,
   googleDrive: ["googleDrive"] as const,
