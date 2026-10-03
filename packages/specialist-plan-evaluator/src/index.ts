@@ -14,9 +14,11 @@ export const planEvaluator = role({
     stage: 6,
     document: "build plan",
     purpose: "the plan a coding agent executes without re-litigating stages 1 to 4.",
-    checks: `- A requirement id from the authoritative block that no task, interface or
-  test reaches, and that is not named under risks; an id cited that is not in
-  the block.
+    checks: `- A requirement id from the authoritative block that the Acceptance criteria
+  table traces to no task, interface or test, and that is not named under
+  risks; an id cited that is not in the block, or an id in prose or In short.
+- Prose the non-technical owner approving the plan cannot follow, or a
+  Source versions line that narrates what was or was not supplied.
 - A task whose completion is not observable, or the seed script that loads
   real data missing as its own task.
 - A "## Stack" section without exactly one well-formed \`\`\`json stack block,
