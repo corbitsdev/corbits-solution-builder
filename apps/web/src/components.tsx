@@ -17,6 +17,7 @@ import {
   type StatusDotTone,
 } from "@corbits/react-ui";
 import corbitsMark from "./assets/corbits-mark.svg";
+import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { beginBusy } from "./busy.ts";
 import { controlText } from "./control-text.ts";
 
@@ -256,20 +257,8 @@ export function Field({
   );
 }
 
-const STAGE_NAMES = [
-  "Problem discovery",
-  "Solution shape",
-  "Solution proposal",
-  "GUI design",
-  "Concept approval",
-  "Build plan",
-  "Cost approval",
-  "Build and test",
-  "Deliver",
-];
-
 export function stageName(stage: number | null): string {
-  return stage === null ? "Not started" : (STAGE_NAMES[stage - 1] ?? `Stage ${stage}`);
+  return stage === null ? "Not started" : ((STAGE_TITLES as Record<number, string>)[stage] ?? `Stage ${stage}`);
 }
 
 export function shortHash(hash: string): string {
