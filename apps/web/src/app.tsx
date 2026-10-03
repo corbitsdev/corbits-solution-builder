@@ -183,12 +183,12 @@ function StageStepper({
   );
 }
 
-function stageSteps(stage: number): WorkflowStep[] {
+function stageSteps(stage: number, done: boolean): WorkflowStep[] {
   return Array.from({ length: 9 }, (_, index) => {
     const number = index + 1;
     return {
       number,
-      label: stageName(number),
+      label: done && number === stage ? "Delivered" : stageName(number),
       status: number < stage ? "completed" : number === stage ? "current" : "pending",
     };
   });
@@ -317,7 +317,7 @@ export function AppBar({
         {inProject ? (
           <>
             <StageStepper
-              steps={stageSteps(detail.stage)}
+              steps={stageSteps(detail.stage, detail.done)}
               viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
               {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
             />
