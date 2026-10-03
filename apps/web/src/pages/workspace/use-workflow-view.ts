@@ -41,8 +41,9 @@ export type WorkflowViewState = {
   readonly markStage: (stage: number) => void;
 };
 
-/** A backstop only: this client's own decisions refresh on the spot, and the mailbox stream nudges on a run event. */
-const BACKSTOP_MS = 30_000;
+/** The workflow's decisions never reach the mailbox stream, so a change this client did not make (another
+ * person's vote, the run advancing itself) is seen only by polling; this client's own decisions refresh on the spot. */
+const POLL_MS = 5_000;
 
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
   const queryClient = useQueryClient();
@@ -62,7 +63,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
       const next = await api.projectWorkflowView(projectId);
       return next && next.stage >= 1 ? next : (queryClient.getQueryData<ProjectWorkflowView | null>(key) ?? null);
     },
-    refetchInterval: BACKSTOP_MS,
+    refetchInterval: POLL_MS,
     gcTime: Infinity,
   });
   const view = query.data ?? null;
@@ -87,8 +88,10 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   }, []);
 
   const markStage = useCallback(
-    (stage: number) => queryClient.setQueryData<ProjectWorkflowView | null>(key, (current) => (current ? { ...current, stage } : current)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    (stage: number) =>
+      queryClient.setQueryData<ProjectWorkflowView | null>(keys.workflowView.of(projectId), (current) =>
+        current ? { ...current, stage } : current,
+      ),
     [queryClient, projectId],
   );
 
