@@ -85,8 +85,8 @@ Markdown.
 - A stage by its name, never its number. A document by what it is (the
   problem brief, the design); a role in plain words (the budget approver),
   never a key such as budget_approver. Say "approved", not "frozen".
-- Requirement ids (FR-1, AC-7…) belong to the requirements and the build plan;
-  elsewhere, say what the requirement asks.
+- Requirement ids (FR-1, AC-7…) belong to the requirements and the build
+  plan's traceability table; elsewhere, say what the requirement asks.
 - Explain a product term the first time you use it.
 - Problem discovery, Solution shape and Solution proposal are about a problem
   and an approach, so name no platform or technology there.
