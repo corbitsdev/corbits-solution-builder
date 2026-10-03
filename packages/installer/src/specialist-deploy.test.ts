@@ -246,8 +246,8 @@ describe("specialistEntryIsCurrent", () => {
   });
 
   test("stale when the kit's brief has moved on since the deploy", async () => {
-    expect(rendered).toContain("The mockup fits the width it is read at.");
-    const before = rendered.replace("The mockup fits the width it is read at.", "");
+    expect(rendered).toContain("Every navigation item, tab, button and link leads to a");
+    const before = rendered.replace("Every navigation item, tab, button and link leads to a", "");
     expect(await check(before)).toBe(false);
   });
 
