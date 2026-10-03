@@ -536,8 +536,9 @@ export type ProjectDetail = {
 
 export type { Quote, StageTurn };
 
-/** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
-export type Evaluation = { ready: boolean; notes: string[] };
+/** A stage evaluator's verdict, and whether it may still send the specialist a
+ *  revision round. Advisory only — nothing gates on it. */
+export type Evaluation = { ready: boolean; notes: string[]; roundLeft: boolean };
 
 export type InstallState = PackageInstallState;
 

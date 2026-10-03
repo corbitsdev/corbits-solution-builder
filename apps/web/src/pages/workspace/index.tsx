@@ -59,7 +59,7 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { evaluatorRoundLeft, useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
@@ -685,8 +685,8 @@ export function StageWorkspace({
         : turn;
   };
 
-  // The evaluator's notes on a draft go to the specialist as one revision
-  // before the person reviews it, folded in the chat as an event line.
+  // The evaluator's notes on a draft it holds back go to the specialist as a
+  // revision, folded in the chat as an event line.
   const notesError = useEvaluatorRevision({
     stage,
     evaluator,
@@ -694,9 +694,10 @@ export function StageWorkspace({
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
-      // One round per stage, read from the stage's own thread: notes sent on
-      // an earlier draft's subject, or by another tab, stand this down.
-      if ((await api.readStageThread(tenantId, [...agent.addresses])).some(isEvaluatorNotes)) return;
+      // Read from the stage's own thread: notes on this draft sent by another
+      // tab, or a stage out of rounds, stand this down.
+      const sent = await api.readStageThread(tenantId, [...agent.addresses]);
+      if (sent.some((message) => message.subject === subject) || !evaluatorRoundLeft(sent)) return;
       await api.sendStageMail(tenantId, agentAddress, { body: revisionMail(ask), subject });
       await loadThread();
     },
@@ -1256,7 +1257,12 @@ export function StageWorkspace({
             }
             evaluation={
               evaluated && evaluator.status === "verdict"
-                ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
+                ? {
+                    ready: evaluator.verdict.ready,
+                    notes: [...evaluator.verdict.notes],
+                    roundLeft:
+                      stage !== 1 && notesError === null && evaluator.verdict.notes.length > 0 && evaluatorRoundLeft(foldedMessages),
+                  }
                 : null
             }
             advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
