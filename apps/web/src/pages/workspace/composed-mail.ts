@@ -61,3 +61,12 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   const { ids, rest } = splitIdsBlock(stripped);
   return { summary: "The requirement ids, as minted", body: ids, lead: rest || null };
 }
+
+/** Mail the app sends a specialist on its own account names itself in its
+ *  subject: the chat shows it, and the reply `pairReplies` pairs with it, as
+ *  one event line, without reading either body. */
+const APP_SUBJECT = "[app:";
+
+export function appSubject(kind: "package" | "brief", about: string): string {
+  return `${APP_SUBJECT}${kind}] ${about}`;
+}

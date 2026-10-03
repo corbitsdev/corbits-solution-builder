@@ -28,12 +28,12 @@ import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { appSubject } from "./composed-mail.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
-import { DRAFT_POINTER, conversationLead } from "./guidance.js";
+import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -123,19 +123,6 @@ function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" |
   // An exit status is reported, never coloured: zero is not evidence the
   // build is right, and a person reads the record, not a tick.
   return { label: `exited ${String(outcome.exitStatus ?? "?")}`, tone: outcome.exitStatus === 0 ? "info" : "warning" };
-}
-
-/**
- * What the pane shows of the supervisor's status: the chat already carries
- * its lead (`conversationLead`), so the document starts after it. A reply
- * short enough to be all lead is conversation, and the pane says where it is.
- */
-function statusDocument(body: string): string {
-  const text = body.trim();
-  const lead = conversationLead(text);
-  if (lead === DRAFT_POINTER) return text;
-  if (lead === text) return "The supervisor answered in the conversation and has not written a status for this attempt.";
-  return text.startsWith(lead) ? text.slice(lead.length).trim() : text;
 }
 
 export function BuildPanel({
@@ -335,6 +322,7 @@ export function BuildPanel({
         manifest: packaged.manifest,
       });
       await api.sendStageMail(tenantId, address, {
+        subject: appSubject("brief", String(attempt.attempt)),
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
@@ -350,7 +338,8 @@ export function BuildPanel({
 
   const archive = useMemo(() => buildArchives(detail.nodes)[0], [detail.nodes]) as ArtifactNode | undefined;
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
-  const status = useMemo(() => supervisorStatus(messages), [messages]);
+  const archiveAttempt = archive ? attemptOfNode(archive) : null;
+  const status = useMemo(() => (archiveAttempt === null ? null : supervisorStatus(messages, archiveAttempt)), [messages, archiveAttempt]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
@@ -534,7 +523,7 @@ export function BuildPanel({
               <>
                 <h2>Build status — {agentFor(8).title}</h2>
                 {status.reply ? (
-                  <Markdown source={statusDocument(status.reply.body)} />
+                  <Markdown source={status.reply.body} />
                 ) : (
                   <p className="inline-note">Waiting on the {agentFor(8).title.toLowerCase()} to read attempt {String(status.attempt)}'s record.</p>
                 )}
