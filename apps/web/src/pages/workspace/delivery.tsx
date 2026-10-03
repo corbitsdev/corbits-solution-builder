@@ -25,7 +25,8 @@ import {
 } from "../../pending-approvals.ts";
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
-import { Banner, Button, documentName, shortHash } from "../../components.jsx";
+import { Banner, Button, CopyButton, documentName, shortHash } from "../../components.jsx";
+import { formatSize } from "../graph.jsx";
 import { Markdown } from "../../markdown.jsx";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
@@ -104,16 +105,10 @@ function VerificationList({ verification }: { verification: DeliveryVerification
   );
 }
 
-function artifactSize(artifact: Record<string, unknown>): string | null {
-  if (typeof artifact["sizeBytes"] !== "number") return null;
-  const bytes = artifact["sizeBytes"] as number;
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} kB`;
-}
-
 /** One delivered file: its size, and its hash shortened, whole on hover and when copied. */
 function ArtifactRow({ artifact }: { artifact: Record<string, unknown> }) {
   const hash = typeof artifact["contentHash"] === "string" ? (artifact["contentHash"] as string) : null;
-  const size = artifactSize(artifact);
+  const size = typeof artifact["sizeBytes"] === "number" ? formatSize(artifact["sizeBytes"]) : null;
   return (
     <div className="cost-row">
       <span>{typeof artifact["path"] === "string" ? artifact["path"] : "—"}</span>
@@ -121,12 +116,12 @@ function ArtifactRow({ artifact }: { artifact: Record<string, unknown> }) {
         {size}
         {size && hash ? " · " : null}
         {hash ? (
-          <code className="delivery-hash" title={hash} onCopy={(event) => {
-            event.clipboardData.setData("text/plain", hash);
-            event.preventDefault();
-          }}>
-            {shortHash(hash)}
-          </code>
+          <>
+            <code className="delivery-hash" title={hash}>
+              {shortHash(hash)}
+            </code>
+            <CopyButton text={hash} label="Copy hash" />
+          </>
         ) : null}
         {!size && !hash ? "—" : null}
       </span>

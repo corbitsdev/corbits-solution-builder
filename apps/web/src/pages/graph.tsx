@@ -22,7 +22,7 @@ type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 const MATERIAL_READING_KIND = "material_reading";
 
 /** `sizeBytes` is unknown for a plain text/data-URL artifact (CL-8709) — say so rather than showing a false 0. */
-function formatSize(sizeBytes: number | undefined): string {
+export function formatSize(sizeBytes: number | undefined): string {
   if (sizeBytes === undefined) return "unknown size";
   if (sizeBytes >= 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
