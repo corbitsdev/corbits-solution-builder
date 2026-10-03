@@ -697,7 +697,7 @@ export function StageWorkspace({
     openingDraftNode && openingDraftContent !== null
       ? { title: openingDraftNode.title, version: openingDraftNode.version, content: openingDraftContent }
       : null;
-  const openingWho = agentFor(openingStage as Stage).title.toLowerCase();
+  const openingWho = openingStage >= 1 && openingStage <= 9 ? agentFor(openingStage as Stage).title.toLowerCase() : "specialist";
 
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
