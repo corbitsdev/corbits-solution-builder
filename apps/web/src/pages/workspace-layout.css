@@ -164,6 +164,25 @@
   min-height: 0;
 }
 
+/* The centered conversation and the side-by-side view are different
+   layouts; the switch between them runs as a view transition, with the
+   conversation and the document pane named so each moves as one piece. */
+.panes > .conv {
+  view-transition-name: stage-conversation;
+}
+
+.panes > .stage-pane {
+  view-transition-name: stage-document;
+}
+
+::view-transition-new(stage-document) {
+  animation: stage-document-in 320ms ease-out both;
+}
+
+@keyframes stage-document-in {
+  from { opacity: 0; transform: translateX(32px); }
+}
+
 .panes.is-solo {
   grid-template-columns: minmax(0, 1fr) 0fr;
 }
