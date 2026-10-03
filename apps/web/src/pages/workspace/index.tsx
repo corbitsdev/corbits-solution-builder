@@ -53,6 +53,7 @@ import { appSubject, artifactTag, isEvaluatorNotes, taggedSubject } from "./comp
 import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft, stackCarriedFromEarlierVersion } from "./stack-repair.ts";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
+import { readableDocument } from "@solutions-builder/app/document";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { documentVersions, draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -907,7 +908,7 @@ export function StageWorkspace({
               paneClassName="artifact-page"
             />
           ) : (
-            <Markdown source={artifacts.activeContent} />
+            <Markdown source={readableDocument(artifacts.activeContent)} />
           )}
         </div>
       </div>

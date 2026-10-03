@@ -12,7 +12,7 @@ import { Banner } from "../components.jsx";
 import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
-import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
+import { plural, ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
 import "./home-layout.css";
 import {
@@ -26,10 +26,6 @@ import {
   stageTrackSegClass,
 } from "./home-view.js";
 import { stageName } from "../stage-names.ts";
-
-function plural(count: number, noun: string): string {
-  return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
-}
 
 /** Card foot's right side, non-archived case: an absolute date, never a fake relative time. */
 function startedLabel(createdAt: string): string {

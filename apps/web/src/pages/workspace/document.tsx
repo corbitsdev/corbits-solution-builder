@@ -16,7 +16,7 @@ import { ArrowDown, ArrowUp, Send } from "lucide-react";
 import { appView } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { approachName, sectionsIn } from "@solutions-builder/app/document";
+import { approachName, readableDocument, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
@@ -192,7 +192,7 @@ export function StageDocument({
   // Against the version before this one, like tracked changes: what a revision
   // did is otherwise something the reader has to find by rereading the whole
   // document.
-  const previous = versions.find((entry) => entry.version === node.version - 1) ?? null;
+  const previous = versions.find((entry) => entry.position === node.position - 1) ?? null;
   const [showChanges, setShowChanges] = useState(true);
   const [previousContent, setPreviousContent] = useState<string | null>(null);
   useEffect(() => {
@@ -304,7 +304,7 @@ export function StageDocument({
   // answer produced, and whether the question that follows continues the same
   // interview or opens a new one after a full re-read. The turn itself only
   // says the question, so without this an answer looks unheard.
-  const versionOf = new Map(versions.map((entry) => [entry.id, entry.version]));
+  const versionOf = new Map(versions.map((entry) => [entry.id, entry.position]));
   const noun = documentName(node.kind).toLowerCase();
   const notes = new Map<string, TurnNote>();
   turns.forEach((turn, index) => {
@@ -680,7 +680,7 @@ export function StageDocument({
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
               {live !== null ? (
-                <span className="thinking">Writing version {node.version + 1}</span>
+                <span className="thinking">Writing version {node.position + 1}</span>
               ) : newer ? (
                 <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
                   <ArrowUp aria-hidden="true" />
@@ -715,7 +715,7 @@ export function StageDocument({
             </div>
             {live !== null ? (
               <div className="is-live">
-                <Markdown source={live} />
+                <Markdown source={readableDocument(live)} />
               </div>
             ) : binary ? (
               // Bytes, not prose: a slide deck, a workbook, an archive. The
@@ -725,7 +725,9 @@ export function StageDocument({
             ) : content ? (
               <DocumentBody
                 source={
-                  showChanges && previousContent !== null ? markChanges(previousContent, content) : content
+                  showChanges && previousContent !== null
+                    ? markChanges(readableDocument(previousContent), readableDocument(content))
+                    : readableDocument(content)
                 }
                 sideBySide={approaches.length >= 2}
               />

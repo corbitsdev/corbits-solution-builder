@@ -131,9 +131,13 @@ export function useProjectArtifacts(
     const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
     return [...groups.entries()]
       .map(([key, versions]) => {
+        const earlier = [...versions].sort((a, b) => a.position - b.position);
+        // An older import wrote a lineage as several artifacts; the
+        // document's own versions follow them rather than restart at 1.
+        const after = earlier.at(-1)?.position ?? 0;
         const sorted = [
-          ...[...versions].sort((a, b) => a.position - b.position),
-          ...(key === liveKey ? (document ?? [draftNode!]) : []),
+          ...earlier,
+          ...(key === liveKey ? (document?.map((node) => ({ ...node, position: after + node.version })) ?? [draftNode!]) : []),
         ];
         // The newest non-superseded node, not the first — a lineage written
         // before every write chained `sb.supersedes` can have more than one

@@ -33,6 +33,7 @@ function deps(overrides: Partial<BundleDeps> = {}): BundleDeps {
     readStageThread: async () => [
       { id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" },
     ],
+    projectWorkflowView: async () => null,
     ...overrides,
   };
 }
@@ -41,11 +42,10 @@ describe("assembleBundle", () => {
   test("assembles artifacts, conversations, and project fields", async () => {
     const bundle = await assembleBundle("proj_1", deps());
     expect(bundle.format).toBe("solutions-builder.project");
-    expect(bundle.version).toBe(2);
-    expect(bundle.notes).toBe("workflow events are not included yet");
+    expect(bundle.version).toBe(3);
     expect(bundle.project).toEqual({ id: "proj_1", title: "Renew the lease", policy: { audiences: [], audienceQuorum: 0 } });
     expect(bundle.artifacts).toHaveLength(1);
-    expect(bundle.artifacts[0]?.content).toBe("the brief");
+    expect(bundle.artifacts[0]?.versions).toEqual([{ version: 1, content: "the brief" }]);
     expect(bundle.artifacts[0]?.node.id).toBe("node_1");
     expect(bundle.conversations).toEqual([
       { stage: 1, messages: [{ id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" }] },
@@ -118,6 +118,6 @@ describe("parseBundle", () => {
 
 describe("bundleFileName", () => {
   test("slugs the title and appends the export suffix", () => {
-    expect(bundleFileName("Renew the Lease!")).toBe("renew-the-lease.solutions-builder.json");
+    expect(bundleFileName("Renew the Lease!")).toBe("renew-the-lease.solutions-builder.zip");
   });
 });
