@@ -16,7 +16,7 @@
  */
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { lookOf, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
+import { lookOf, roleLabel, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
 export type PreviewSlide =
@@ -36,7 +36,7 @@ export function previewSlides(deck: Deck): PreviewSlide[] {
     {
       kind: "cover",
       title: deck.projectTitle,
-      subtitle: `Prepared for ${deck.audience} · ${deck.role}`,
+      subtitle: `Prepared for ${deck.audience} · ${roleLabel(deck.role)}`,
       note: COVER_NOTE,
       ...picture("cover"),
     },

@@ -17,7 +17,7 @@
  */
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
+import { DEFAULT_DECK_DESIGN, roleLabel, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
 import { LANGUAGES, SUPPORTED_OUTPUT_LANGUAGES, type LanguageId, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import {
   api,
@@ -502,10 +502,7 @@ function Designer() {
   );
 }
 
-export function roleLabel(role: string): string {
-  const words = role.replace(/_/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+export { roleLabel };
 
 /**
  * The mockup names three looks. Live decks still save colour ids; these three
