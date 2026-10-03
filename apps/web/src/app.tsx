@@ -705,7 +705,8 @@ export function App() {
         artifactContent: api.artifactContent,
         stageAgentAddresses: api.stageAgentAddresses,
         readStageThread: api.readStageThread,
-      });
+    workflowView: api.projectWorkflowView,
+  });
       downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));

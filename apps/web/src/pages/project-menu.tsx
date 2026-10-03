@@ -51,6 +51,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
     artifactContent: api.artifactContent,
     stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
+    workflowView: api.projectWorkflowView,
   });
   downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
   const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
