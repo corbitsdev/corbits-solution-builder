@@ -47,7 +47,7 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, openQuestionTurn, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { appSubject, artifactTag, isEvaluatorNotes, taggedSubject } from "./composed-mail.ts";
 import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
@@ -418,6 +418,7 @@ export function StageWorkspace({
     [documentArtifact],
   );
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
+  const openTurn = useMemo(() => openQuestionTurn(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -970,8 +971,8 @@ export function StageWorkspace({
               tenantId={tenantId}
               turns={turns}
               openQuestion={
-                guidance.question
-                  ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+                openTurn && guidance.question
+                  ? { turnId: openTurn.id, text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                   : null
               }
               advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
