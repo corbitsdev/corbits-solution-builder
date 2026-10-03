@@ -23,7 +23,7 @@ import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
@@ -419,7 +419,7 @@ export function StageDocument({
             ) : message.role === "user" && withdrawnIds.has(message.id) ? (
               <div className="turn-withdrawn">
                 {who}
-                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <MessageBody text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
                 <span className="turn-withdrawn-note">Stopped before it was answered.</span>
               </div>
             ) : message.role === "agent" ? (
@@ -455,9 +455,11 @@ export function StageDocument({
                 />
               </>
             ) : (
+              // The turn is the mail the specialist was sent. Read back, that
+              // is the person's words; the revision envelope stays folded.
               <>
                 {who}
-                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <MessageBody text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
               </>
             );
           }}
