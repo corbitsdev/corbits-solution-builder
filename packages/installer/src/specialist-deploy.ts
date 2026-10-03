@@ -18,7 +18,6 @@ import {
   specialistDependencies,
   specialistEntrySource,
   specialistTooling,
-  stageUsesArtifactTools,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
@@ -511,9 +510,9 @@ async function ensureSpecialistDeploymentOnce(
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
   }
-  // Only a drafting stage's own specialist writes its document with the
-  // artifact tools, so only it is bound the hub credential they need.
-  const artifactTools = roleKey === DEFAULT_ROLE_KEY && stageUsesArtifactTools(stage);
+  // Every stage's own specialist carries the artifact tools and their hub
+  // credential: a drafting stage writes its document, and any stage reads what a person attaches.
+  const artifactTools = roleKey === DEFAULT_ROLE_KEY;
 
   // The project's own tenant is where this deploys (#29): the hub then
   // enforces the owner's delegation choice on every offering the chain

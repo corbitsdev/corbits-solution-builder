@@ -49,13 +49,14 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag } from "./composed-mail.ts";
+import { artifactTag, taggedSubject } from "./composed-mail.ts";
+import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft, stackCarriedFromEarlierVersion } from "./stack-repair.ts";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { documentVersions, draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { ArrowLeft, Flame, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Flame, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -82,7 +83,6 @@ import { useMountEffect } from "../../use-mount-effect.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { documentAsMessage, requirementsDocument, reviewDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
@@ -704,16 +704,18 @@ export function StageWorkspace({
     },
   });
 
-  const send = async (body: string) => {
-    if (!agentAddress || body.trim().length === 0) return;
+  /** Whether the message went; a refused one keeps its attachments in the composer. */
+  const send = async (body: string, attached: readonly AttachedDocument[] = []): Promise<boolean> => {
+    if (!agentAddress || body.trim().length === 0) return false;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
-    // the chat says so where the message would have been.
-    if (stage === 6 && requirementsRequest(body)) {
+    // the chat says so where the message would have been. One with
+    // documents attached was addressed to the architect, and goes there.
+    if (stage === 6 && attached.length === 0 && requirementsRequest(body)) {
       const at = new Date().toISOString();
       setRequirementsAsk({ body, at: Date.now() });
       setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
-      return;
+      return true;
     }
     setSending(true);
     setError(null);
@@ -722,12 +724,11 @@ export function StageWorkspace({
       // The body is the person's words alone. The artifact holding the
       // stage's document travels in the subject, so a specialist that never
       // wrote it, such as one taking over after a model hand-off, revises it
-      // instead of starting a second.
-      await api.sendStageMail(tenantId, agentAddress, {
-        body,
-        ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
-      });
+      // instead of starting a second; so does each document attached.
+      const tags = [...(work?.state === "ready" ? [artifactTag(work.artifact)] : []), ...(await attachedSubjectTags(tenantId, attached))];
+      await api.sendStageMail(tenantId, agentAddress, { body, ...taggedSubject(tags, body) });
       await loadThread();
+      return true;
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
         // The specialist's run has ended (#413): ask for it again, which
@@ -740,10 +741,11 @@ export function StageWorkspace({
           .ensureStageAgent(detail.project.id, stage)
           .then(() => agent.retry())
           .catch((again: unknown) => setError(again instanceof ApiFailure ? again.detail.message : String(again)));
-        return;
+        return false;
       }
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
+      return false;
     } finally {
       setSending(false);
     }
@@ -913,26 +915,8 @@ export function StageWorkspace({
       </div>
     ) : null;
 
-  // A requirements document or a review open beside the plan can be handed
-  // to the architect as a message (#345).
-  const sendToArchitect = () => {
-    const node = artifacts.activeNode;
-    const content = artifacts.activeContent;
-    if (!node || !content) return null;
-    const doc =
-      node.kind === "product_requirements"
-        ? requirementsDocument(content)
-        : node.kind === "engineering_review" && node.variant
-          ? reviewDocument(node.variant, content)
-          : null;
-    if (!doc) return null;
-    return (
-      <Button variant="ghost" disabled={sending} onClick={() => void send(documentAsMessage(doc))}>
-        <Send aria-hidden="true" />
-        Send to the architect
-      </Button>
-    );
-  };
+  const attachDocuments = attachableDocuments(artifacts.tabs);
+  const documentLabels = new Map(artifacts.tabs.flatMap((tab) => tab.versions.map((node) => [node.artifactId, tab.label] as const)));
 
   // The stage's document with its gate. Stage 6's panel renders it, so the
   // plan's toolbar can hold the panel's review menu.
@@ -970,11 +954,13 @@ export function StageWorkspace({
               }
               {...(draftRefs ? { draftRefs } : {})}
               onSelectVersion={artifacts.openVersion}
-              onRevise={(message, quotes) => {
+              onRevise={(message, quotes, _revise, attached) => {
                 artifacts.selectVersion(null);
                 const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-                void send(quoted ? `${quoted}\n\n${message}` : message);
+                return send(quoted ? `${quoted}\n\n${message}` : message, attached);
               }}
+              documents={attachDocuments}
+              attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
               onAddMaterial={async (files) => {
                 await api.attachMaterial(detail.project.id, files);
                 void refreshWorkflow();
@@ -994,7 +980,7 @@ export function StageWorkspace({
               composerPopover={sendBackPopover}
               events={events}
               strip={stripEl}
-              tools={stage !== 6 ? null : artifacts.isStageDraft ? reviewMenu : sendToArchitect()}
+              tools={stage === 6 && artifacts.isStageDraft ? reviewMenu : null}
               promote={
                 superseded
                   ? {
@@ -1013,10 +999,10 @@ export function StageWorkspace({
       messages={foldedMessages}
       value={composer}
       onValueChange={setComposer}
-      onSend={() => {
+      onSend={(attached) => {
         const body = composer;
         setComposer("");
-        void send(body);
+        return send(body, attached);
       }}
       onAnswer={(answer) => {
         setComposer("");
@@ -1046,6 +1032,8 @@ export function StageWorkspace({
       onAttach={(files) => {
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
+      documents={attachDocuments}
+      documentLabels={documentLabels}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1318,6 +1306,8 @@ export function StageWorkspace({
           onAttach={(files) => {
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
+          documents={attachDocuments}
+          documentLabels={documentLabels}
         />
       ) : null}
 

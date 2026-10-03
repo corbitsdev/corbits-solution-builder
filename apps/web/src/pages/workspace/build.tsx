@@ -32,9 +32,10 @@ import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
-import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
-import { appSubject } from "./composed-mail.ts";
+import { attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
+import { appSubject, taggedSubject } from "./composed-mail.ts";
+import type { StageEvent } from "./stage-events.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -154,6 +155,8 @@ export function BuildPanel({
   onSendHold,
   popover = null,
   onAttach,
+  documents,
+  documentLabels,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -177,8 +180,10 @@ export function BuildPanel({
   /** Holding send raises the send-back picker. */
   onSendHold?: (draft: string) => void;
   popover?: ReactNode;
-  /** The paperclip: files join the project as material. */
+  /** "Upload a file": files join the project as material. */
   onAttach?: (files: FileList) => void;
+  documents?: readonly AttachedDocument[];
+  documentLabels?: ReadonlyMap<string, string>;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -266,13 +271,15 @@ export function BuildPanel({
     if (element) element.scrollTop = element.scrollHeight;
   }, [log]);
 
-  const run = async (label: string, work: () => Promise<void>) => {
+  const run = async (label: string, work: () => Promise<void>): Promise<boolean> => {
     setBusy(label);
     setError(null);
     try {
       await work();
+      return true;
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -355,12 +362,13 @@ export function BuildPanel({
             messages={messages}
             value={composer}
             onValueChange={setComposer}
-            onSend={() => {
+            onSend={(attached) => {
               const body = composer;
               setComposer("");
-              void run("message", async () => {
+              return run("message", async () => {
                 if (!address) return;
-                await api.sendStageMail(tenantId, address, { body });
+                const tags = await attachedSubjectTags(tenantId, attached);
+                await api.sendStageMail(tenantId, address, { body, ...taggedSubject(tags, body) });
                 await thread.refetch();
               });
             }}
@@ -371,6 +379,8 @@ export function BuildPanel({
             empty={`Nothing has been sent to the ${agentFor(8).title.toLowerCase()} yet. It reads each attempt once the attempt is recorded.`}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
+            {...(documents ? { documents } : {})}
+            {...(documentLabels ? { documentLabels } : {})}
             popover={popover}
           />
         </>

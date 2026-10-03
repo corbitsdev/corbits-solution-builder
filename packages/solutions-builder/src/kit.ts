@@ -37,6 +37,7 @@ import type { Stage } from "./ledger.js";
 export {
   AGENT_ECONOMICS,
   ARTIFACT_WRITE_RULE,
+  ATTACHED_DOCUMENTS_RULE,
   PLATFORM_RULES,
   SHARED_RULES,
 } from "@solutions-builder/specialist-shared";

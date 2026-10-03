@@ -16,7 +16,7 @@
  * a client-side artifact write, not a signal this workflow waits on.
  */
 import type { ArtifactKind } from "./artifacts.js";
-import { ARTIFACT_WRITE_RULE, type AgentRole } from "./kit.js";
+import { ARTIFACT_WRITE_RULE, ATTACHED_DOCUMENTS_RULE, type AgentRole } from "./kit.js";
 import { STAGE_TITLES, type Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
 
@@ -265,7 +265,7 @@ export function specialistRoleSpec(options: {
       ...(tooling.delivery ? [DELIVER_IMPORT] : []),
     ],
     artifactKind: STAGE_ARTIFACT_KIND[stage],
-    promptNotes: tooling.artifacts ? [stageDocumentNote(stage, STAGE_ARTIFACT_KIND[stage])] : [],
+    promptNotes: tooling.artifacts && stageUsesArtifactTools(stage) ? [stageDocumentNote(stage, STAGE_ARTIFACT_KIND[stage])] : [],
     credentialPackage: artifactTools ? "@corbits/artifacts/sidecar-bundle" : null,
   };
 }
@@ -298,22 +298,26 @@ export type SpecialistSourceOptions = {
    *  the primary per-stage role via `agentFor(stage)` today. */
   readonly role: AgentRole;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
-   *  `credentialBindings` entry and the matching grant requirement, and tell
-   *  the model to write its document with `artifact_write`. Default false;
-   *  the drafting stages opt in through `stageUsesArtifactTools`. */
+   *  `credentialBindings` entry and the matching grant requirement. Default
+   *  false; every stage's own specialist opts in to read what a person
+   *  attaches, and only a drafting stage (`stageUsesArtifactTools`) is told
+   *  to write its document with `artifact_write`. */
   readonly artifactTools?: boolean;
 };
 
 /**
  * A role's kit prompt has no runtime after render time to load a skill
  * from — an agent step's `systemPrompt` is a static string baked in here —
- * so the skill text rides along with it. `artifactTools` appends the rule
- * telling the model to call `artifact_create`/`artifact_write` — only when
- * it actually carries those tools.
+ * so the skill text rides along with it. A role carrying the artifact tools
+ * is told how to read what the person attaches, and a drafting stage's how
+ * to write its document — only when it actually carries those tools.
  */
-function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
-  const prompt = `${role.system}\n\n${skillTextFor(role)}`;
-  return artifactTools ? `${prompt}\n\n${ARTIFACT_WRITE_RULE}` : prompt;
+function renderedPrompt(role: AgentRole, artifactTools: boolean, drafting: boolean): string {
+  return [
+    `${role.system}\n\n${skillTextFor(role)}`,
+    ...(artifactTools && drafting ? [ARTIFACT_WRITE_RULE] : []),
+    ...(artifactTools ? [ATTACHED_DOCUMENTS_RULE] : []),
+  ].join("\n\n");
 }
 
 /**
@@ -352,7 +356,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   const genericArtifactTools = spec.tooling.artifacts;
   const credentialName = workflowArtifactsCredentialName(role.id);
 
-  let systemPrompt = renderedPrompt(role, genericArtifactTools);
+  let systemPrompt = renderedPrompt(role, genericArtifactTools, stageUsesArtifactTools(stage));
   for (const note of spec.promptNotes) {
     systemPrompt = `${systemPrompt}\n\n${note}`;
   }

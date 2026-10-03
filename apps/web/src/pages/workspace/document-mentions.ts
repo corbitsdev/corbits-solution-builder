@@ -4,7 +4,7 @@
  * companion names one of the stage's documents, the document's text is
  * attached under an "Attached" heading rather than left for it to ask for.
  * The stage's own conversation carries only the person's words; a document
- * reaches it as a message of its own (`documentAsMessage`).
+ * reaches it when the person attaches it (`attach-documents.tsx`).
  */
 export type StageDocument = {
   /** A stable key: `requirements`, `review:application`, … */
@@ -60,9 +60,4 @@ export function withAttachedDocuments(body: string, documents: readonly StageDoc
   const attach = mentionedDocuments(body, documents).filter((doc) => doc.content.trim().length > 0 && !body.includes(doc.content.trim()));
   if (attach.length === 0) return body;
   return [body, ...attach.map((doc) => `---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`)].join("\n\n");
-}
-
-/** The whole document as a message of its own: what "Send to the architect" sends. */
-export function documentAsMessage(doc: StageDocument): string {
-  return `Here is the ${doc.label}, for your reference.\n\n---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`;
 }

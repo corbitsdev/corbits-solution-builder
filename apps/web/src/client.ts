@@ -8,7 +8,6 @@
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, STAGES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, evaluatorFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
-import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
@@ -2205,16 +2204,17 @@ export const api = {
    * convention data-URL-backed artifacts already return, so every reader
    * downstream (inline preview, download) stays on one code path.
    */
-  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
+  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string; version?: number }> => {
     const pinned = parseVersionId(nodeId);
     const artifactId = pinned?.artifactId ?? nodeId;
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
     const found = await findArtifact(createHubTransport(), tenantId, artifactId, pinned?.version);
     if (!found) return { content: "" };
+    const { version } = found.artifact;
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
-    if (typeof uploadId !== "string") return { content: found.artifact.content };
-    return { content: await downloadUploadedArtifact(found.tenantId, artifactId) };
+    if (typeof uploadId !== "string") return { content: found.artifact.content, version };
+    return { content: await downloadUploadedArtifact(found.tenantId, artifactId), version };
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>

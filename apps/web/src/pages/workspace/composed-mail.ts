@@ -24,11 +24,26 @@ export type ComposedFold = {
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
+const ATTACHED_TAG = /\[attached:([^\]]+):(\d+)\]/g;
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /** The stage artifact a message revises and its version, as the specialist's prompt reads them in a subject. */
 export function artifactTag(artifact: { readonly id: string; readonly version: number }): string {
   return `[artifact:${artifact.id}:${String(artifact.version)}]`;
+}
+
+/** A project document the person attached to a message, pinned to the version they saw. */
+export function attachedTag(document: { readonly artifactId: string; readonly version: number }): string {
+  return `[attached:${document.artifactId}:${String(document.version)}]`;
+}
+
+/** None without tags, so the mailbox's own default subject applies. */
+export function taggedSubject(tags: readonly string[], body: string): { readonly subject: string } | Record<string, never> {
+  return tags.length > 0 ? { subject: `${tags.join(" ")} ${body.slice(0, 60)}` } : {};
+}
+
+export function attachedTags(subject: string | undefined): { readonly artifactId: string; readonly version: number }[] {
+  return [...(subject ?? "").matchAll(ATTACHED_TAG)].map((tag) => ({ artifactId: tag[1]!, version: Number(tag[2]) }));
 }
 
 /** The send-back cue's sentence, its marker gone. */

@@ -178,6 +178,15 @@ expectedVersion set to that version; if you have not seen that version, read
 it once with artifact_read first.
 `.trim();
 
+/** Appended for every specialist that carries the artifact tools, drafting
+ *  or not: a document the person attaches travels by reference. */
+export const ATTACHED_DOCUMENTS_RULE = `
+Documents the person attached to a message are named in its subject, one
+"[attached:<id>:<version>]" each. Read each with artifact_read, passing that
+artifactId and version, before you answer the message. An attached document
+is for reference: never write to it.
+`.trim();
+
 /** The artifact kind a role drafts is named by the app package's `ArtifactKind`;
  *  this package sits below the app, so it holds the kind as a plain string. */
 export type AgentRole = {
