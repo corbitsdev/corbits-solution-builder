@@ -244,7 +244,17 @@ export function StageWorkspace({
   const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  useBusyWhile(
+    busy,
+    specialistActivity(
+      stage,
+      askKind(
+        pending?.body ?? null,
+        // Concept approval's draft is the packages, not a reply: its opening turn is not one.
+        stage === 5 ? detail.nodes.some((node) => node.kind === "audience_package") : foldedMessages.some((message) => message.author === "agent"),
+      ),
+    ),
+  );
 
   const openingDispatch = useOpeningDispatch({
     detail,
