@@ -2348,7 +2348,7 @@ export const api = {
         await localizedRole(transport, workspaceTenantId, role),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} evaluator`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} evaluator`, placement);
       return deployment;
     });
     ensureEvaluatorCalls.set(key, call);
