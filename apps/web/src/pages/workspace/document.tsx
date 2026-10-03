@@ -75,6 +75,7 @@ export function StageDocument({
   onSendHold,
   composerPopover = null,
   events = EMPTY_EVENTS,
+  tools = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -134,6 +135,8 @@ export function StageDocument({
   /** The stage's event record — decisions, versions, aborted turns — folded
    *  into the transcript as quiet lines. */
   events?: readonly StageEvent[];
+  /** The stage's own actions on this document, in its toolbar. */
+  tools?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
@@ -651,6 +654,7 @@ export function StageDocument({
                   </label>
                 ) : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}
+                {tools}
               </div>
             </div>
             {live !== null ? (
