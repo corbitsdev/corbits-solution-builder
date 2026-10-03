@@ -1046,7 +1046,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* The send-back picker a hold on send raises: floats above the composer,
-   anchored to it rather than the viewport. */
+   anchored to it rather than the viewport. The composer scrolls its own
+   overflow (#160), which would clip the picker above it, so it stops while
+   the picker is open. */
+.composer:has(> .sbpick) {
+  overflow: visible;
+}
+
 .sbpick-backdrop {
   position: fixed;
   inset: 0;
