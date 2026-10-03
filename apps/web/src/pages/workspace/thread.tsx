@@ -462,8 +462,10 @@ export function SpecialistTurn({
    *  headings stay in the document pane. */
   draft?: DraftRef | null;
   onOpenVersion: (nodeId: string) => void;
-  /** Set while the turn can be answered: sent once every question the turn
-   *  asks has a tapped answer. A lone question sends on its tap. */
+  /** Set while the turn can be answered -- the latest turn, nothing said
+   *  since: sent once every question the turn asks has a tapped answer. A
+   *  lone question sends on its tap. Absent, the questions show without
+   *  their options: an answered turn offers nothing to tap. */
   onAnswer?: ((answer: string) => void) | undefined;
   /** The answers so far, while some question is still unanswered: what the
    *  message box should hold, so the person sees them gather and can add
@@ -478,7 +480,7 @@ export function SpecialistTurn({
   const question = questions.length > 0;
   // What has been tapped for each question, by its place among the turn's
   // questions. Local to the turn: once answered, the turn is no longer the
-  // one being answered and its chips go quiet.
+  // one being answered and its chips go.
   const [chosen, setChosen] = useState<ReadonlyMap<number, string>>(() => new Map());
   const choose = (questionIndex: number, option: string) => {
     const next = new Map(chosen);
@@ -517,23 +519,18 @@ export function SpecialistTurn({
         return (
           <div key={index} className="turn-ask">
             <p className="turn-question">{segment.question}</p>
-            {segment.options.length > 0 ? (
-              <div className="turn-options" role="group" aria-label="Likely answers">
-                {segment.options.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className="turn-option"
-                    disabled={!onAnswer}
-                    aria-pressed={picked === option}
-                    onClick={() => choose(at, option)}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
+            {segment.options.length > 0 && onAnswer ? (
+              <>
+                <div className="turn-options" role="group" aria-label="Likely answers">
+                  {segment.options.map((option) => (
+                    <button key={option} type="button" className="turn-option" aria-pressed={picked === option} onClick={() => choose(at, option)}>
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <p className="turn-option-hint">Or type your own answer below.</p>
+              </>
             ) : null}
-            {segment.options.length > 0 && onAnswer ? <p className="turn-option-hint">Or type your own answer below.</p> : null}
           </div>
         );
       })}
