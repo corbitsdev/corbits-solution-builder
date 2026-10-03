@@ -49,7 +49,7 @@ export const REVISION_ASK = "--- WHAT THE PERSON IS ASKING FOR NOW ---";
  * person's own words. Without the current version in the turn the model
  * re-rolls the stage and version two is a different draft rather than a
  * better one, which is not what "revise" means to anyone. The chat shows
- * only the person's words; `splitRevision` is how it finds them.
+ * only the person's words; `personWordsIn` is how it finds them.
  */
 export function revisionRequest(args: { stage: number; userInput: string; currentDocument: string }): string {
   return [
@@ -80,16 +80,6 @@ export function personWordsIn(text: string): { readonly words: string; readonly 
   const at = text.lastIndexOf(REVISION_ASK);
   if (at === -1) return null;
   return { words: text.slice(at + REVISION_ASK.length).trim(), added: text.slice(0, at).trim() };
-}
-
-/** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
-export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
-  if (!text.startsWith(REVISION_LEAD)) return null;
-  const at = text.indexOf(REVISION_ASK);
-  if (at === -1) return null;
-  const inner = text.slice(REVISION_LEAD.length, at).trim();
-  const cut = inner.lastIndexOf("\n\nProduce the next version");
-  return { document: (cut === -1 ? inner : inner.slice(0, cut)).trim(), ask: text.slice(at + REVISION_ASK.length).trim() };
 }
 
 /**

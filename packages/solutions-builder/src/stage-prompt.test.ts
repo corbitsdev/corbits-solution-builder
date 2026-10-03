@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composedTurn, ensureChoiceSection, personWordsIn, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
+import { composedTurn, ensureChoiceSection, personWordsIn, revisionRequest, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
@@ -55,8 +55,8 @@ describe("revisionRequest carries the current version, as alpha main's round did
     const out = revisionRequest({ stage: 2, userInput: "Drop the mobile form.", currentDocument: "## In short\n- fine\n" });
     expect(out.indexOf("## In short")).toBeLessThan(out.indexOf("Revise the current version above"));
     expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
-    expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
-    expect(splitRevision("Drop the mobile form.")).toBeNull();
+    expect(personWordsIn(out)?.words).toBe("Drop the mobile form.");
+    expect(personWordsIn(out)?.added).toContain("## In short\n- fine");
   });
 });
 
