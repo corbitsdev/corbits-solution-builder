@@ -14,6 +14,7 @@ import {
   type ChatMessage,
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { appEventLine } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -239,6 +240,7 @@ export function StageDocument({
   // Memoised: the thread re-pins its scroll whenever this array is new, and a
   // fresh one on every keystroke in the composer made the transcript twitch.
   // The turns that report a round the platform could not complete, set apart in the transcript.
+  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
   const failedTurns = useMemo(() => new Set(turns.filter((turn) => turn.failed).map((turn) => turn.id)), [turns]);
 
   const messages: ChatMessage[] = useMemo(() => {
@@ -401,6 +403,9 @@ export function StageDocument({
                 </span>
               );
             }
+            const turn = turnById.get(message.id);
+            const line = turn && message.role === "user" ? appEventLine({ author: "me", ...(turn.subject ? { subject: turn.subject } : {}) }, undefined) : null;
+            if (line) return <span className="event conv-event">{line}</span>;
             const who = (
               <span className="who conv-who">
                 {message.role === "user" ? "You" : agentFor(node.stage as Stage).title}
