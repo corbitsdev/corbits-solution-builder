@@ -19,8 +19,25 @@ export type FramedDesign = {
   readonly main: string | null;
 };
 
+/** The design's notes section, which is a document for the build, not a screen. */
+const SCREEN = /data-testid=["']screen-/i;
+const DESIGN_NOTES = /<section\b[^>]*data-testid=["']design-notes["'][\s\S]*?<\/section>/i;
+
+/**
+ * A preview shows the design's screens and nothing else; the notes and any
+ * other text stay in the pane view, where the whole document is read.
+ */
 export function framedDesign(content: string, mode: FrameMode, title: string): FramedDesign {
   if (mode === "pane") return { phones: [], desktops: [], main: content };
+  const framed = framedScreens(content.replace(DESIGN_NOTES, ""), mode, title);
+  // What is left after the framed screens stays only while it still holds a
+  // screen: an unmarked one, or the desktop screens the iPhone view leaves.
+  return framed.main !== null && !SCREEN.test(framed.main) && (framed.phones.length > 0 || framed.desktops.length > 0)
+    ? { ...framed, main: null }
+    : framed;
+}
+
+function framedScreens(content: string, mode: FrameMode, title: string): FramedDesign {
   if (mode === "phone") {
     // The phone screens in phones and everything else in the pane, as
     // before #264; a design with no phone screens goes whole into one phone.

@@ -1,0 +1,10 @@
+{
+  "name": "@solutions-builder/specialist-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "What every stage specialist obeys: the shared prompt rules, the platform and artifact-write rules, the agent economics, the interview helper and the AgentRole shape.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
