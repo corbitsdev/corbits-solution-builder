@@ -21,7 +21,6 @@
     "@intx/db": "workspace:*",
     "@intx/hub-api": "workspace:*",
     "@intx/hub-sessions": "workspace:*",
-    "@intx/inference": "0.4.0",
     "@intx/types": "workspace:*",
     "arktype": "catalog:",
     "drizzle-orm": "catalog:",

@@ -71,5 +71,3 @@ export {
   type GoogleSecretStore,
   type UploadedSlides,
 } from "@corbits/embed-hub";
-/** One inference call outside any run, on a tenant's default offering (`hub().complete`). */
-export { NoInferenceSourceError, type Completion, type CompletionRequest } from "@corbits/embed-hub";

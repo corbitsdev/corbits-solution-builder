@@ -68,7 +68,7 @@ const PackageBody = type({
  * written under its id: the attempts live on disk under `builds/<id>/`, and
  * an id that is nobody's project must not grow a directory there.
  */
-export async function projectParam(context: { req: { param: (name: "id") => string } }): Promise<string> {
+async function projectParam(context: { req: { param: (name: "id") => string } }): Promise<string> {
   const projectId = context.req.param("id");
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new HostError("validation_failed", "That is not a project id.");
   if (!(await projectTenantExists(projectId))) throw new HostError("not_found", "That project was not found.");
