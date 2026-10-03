@@ -10,10 +10,9 @@ import { pairReplies } from "./withdrawn-turns.ts";
 
 /**
  * The request for `name`'s package sent after everything in `seenIds`, and
- * the reply `pairReplies` pairs with it: by the trigger id the hub recorded
- * on the request (#62) when it has one, else by order, one mail-triggered
- * turn at a time. Null while the request has not shown on the thread, or
- * has no paired reply yet.
+ * the reply `pairReplies` pairs with it by the trigger id the hub recorded
+ * on the request (#62). Null while the request has not shown on the thread,
+ * or has no paired reply yet.
  */
 export function packageReplyFor(messages: readonly ChatMessage[], seenIds: ReadonlySet<string>, name: string): ChatMessage | null {
   const ask = packageAsk(name);

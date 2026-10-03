@@ -212,18 +212,30 @@ export async function readStageThread(
   return [...inbox, ...sent].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+/**
+ * The run's thread root: the trigger id of the first mail it was sent. Named
+ * in `In-Reply-To`, it lands in `References`, on which the run's connector
+ * continues its thread whatever its last Message-ID is by the time it takes
+ * the mail, so a turn sent while another is still being answered is paired
+ * by id too (#62).
+ */
+function threadRoot(thread: readonly ChatMessage[]): string | undefined {
+  return thread.find((message) => message.author === "me")?.triggerMessageId;
+}
+
 /** Sends (or replies in) a stage conversation: the same send seam a
- * workbench chat uses, scoped to the stage agent's current address. */
+ * workbench chat uses, scoped to the stage agent's current address and
+ * threaded onto its run's thread. */
 export async function sendStageMail(
   tenantId: string,
   agentAddress: string,
-  input: { readonly body: string; readonly subject?: string; readonly inReplyTo?: string },
+  input: { readonly body: string; readonly subject?: string },
 ): Promise<void> {
-  const transport = createHubTransport();
-  await transport.fetch("POST", `${mailboxPath(tenantId)}/send`, {
+  const inReplyTo = threadRoot(await readStageThread(tenantId, [agentAddress]));
+  await createHubTransport().fetch("POST", `${mailboxPath(tenantId)}/send`, {
     to: [agentAddress],
     subject: input.subject ?? input.body.slice(0, 60),
     body: input.body,
-    ...(input.inReplyTo !== undefined ? { inReplyTo: input.inReplyTo } : {}),
+    ...(inReplyTo !== undefined ? { inReplyTo } : {}),
   });
 }
