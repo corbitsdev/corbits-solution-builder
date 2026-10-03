@@ -68,22 +68,18 @@ describe("EvaluatorStance", () => {
   test("says it is reading while the verdict is pending, with nothing to open", () => {
     const html = render({ status: "checking" });
     expect(html).toContain("Evaluator reading");
-    expect(html).not.toContain("aria-expanded");
+    expect(html).not.toContain("<details");
   });
 
-  // #157: one line in the approval bar. The notes open in the row's own
-  // flow on a click, never as a tooltip laid over Approve.
-  test("shows the stance as one line, with closed notes in the row's flow that the trigger controls", () => {
+  // #157: one short line in the approval row; the notes sit folded in a
+  // native disclosure in the row's own flow, never over the button.
+  test("shows the stance as one line, with its notes folded closed beneath it", () => {
     const html = render({ status: "verdict", verdict: { ready: false, notes: ["Success criteria are vague."] } });
-    expect(html).toContain("Not approved by evaluator");
-    expect(html).toContain('data-tone="not-ready"');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain("data-open");
-    expect(html).not.toContain('role="tooltip"');
-    const controls = /aria-controls="([^"]+)"/.exec(html)?.[1];
-    expect(controls).toBeDefined();
-    expect(html).toContain(`<div id="${controls}" class="evaluator-notes"><ul><li>Success criteria are vague.</li></ul></div>`);
-    expect(render({ status: "verdict", verdict: { ready: true, notes: [] } })).toContain("Approved by evaluator");
+    expect(html).toContain('<details class="evaluator-stance" data-tone="not-ready"');
+    expect(html).not.toContain(" open");
+    expect(html).toContain("<summary>Evaluator: not yet</summary>");
+    expect(html).toContain('<ul class="evaluator-notes"><li>Success criteria are vague.</li></ul>');
+    expect(render({ status: "verdict", verdict: { ready: true, notes: [] } })).toContain("Evaluator approved");
   });
 
   // #144: the evaluator writes its notes in markdown, like every specialist.

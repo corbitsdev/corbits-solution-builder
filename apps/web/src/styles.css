@@ -2070,7 +2070,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .composer-approve {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
@@ -2091,21 +2091,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
-/* Approving is a two-step: the ask and its button, then a confirm in place. */
-.approve-confirm {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .composer-approve .approve {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.composer-approve .approve,
-.composer-approve .approve-confirm {
   margin-left: auto;
   flex: none;
   white-space: nowrap;
@@ -2116,7 +2105,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .composer-approve-lead {
   white-space: nowrap;
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-3);
   flex: 1 1 12ch;
   min-width: 0;
@@ -2127,64 +2116,37 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   white-space: normal;
 }
 
-/* The brief evaluator's stance, one line in the approval bar (#157). Its
-   notes open on a click beneath the stance, in the row's own flow: a popover
-   was clipped by the composer's scroll and covered the Approve action. */
+/* The evaluator's stance, one line in the approval row (#157). Its notes
+   unfold beneath it in the row's own flow, never over the button. */
 .evaluator-stance {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
   min-width: 0;
-}
-
-.composer-approve .evaluator-stance-trigger {
-  font: inherit;
-  padding: 0 var(--space-1);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--wb-muted-foreground);
-  cursor: pointer;
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.evaluator-stance[data-tone="ready"] .evaluator-stance-trigger {
+.evaluator-stance > summary {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.evaluator-stance[data-tone="ready"],
+.evaluator-stance[data-tone="ready"] > summary {
   color: var(--wb-primary);
 }
 
-.evaluator-stance-trigger:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: 2px;
-}
-
 .evaluator-notes {
-  display: none;
-  max-width: 48ch;
-  margin-top: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius-panel);
-  background: var(--popover);
-  color: var(--wb-foreground);
-  font-family: var(--wb-font-ui);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  white-space: normal;
-}
-
-.evaluator-notes ul {
-  margin: 0;
+  max-width: 60ch;
+  max-height: 10rem;
+  overflow-y: auto;
+  margin: var(--space-1) 0 0;
   padding-left: var(--space-4);
   display: grid;
-  gap: var(--space-2);
-}
-
-.evaluator-stance[data-open] .evaluator-notes {
-  display: block;
+  gap: var(--space-1);
+  color: var(--wb-foreground);
+  font-family: var(--wb-font-ui);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 /* Quiet until hover — never a filled green pill. Green on hover lives in
