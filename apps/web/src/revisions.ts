@@ -26,8 +26,13 @@ function similarity(before: string, after: string): number {
 function markWords(before: string, after: string): string {
   const prefix = PREFIX.exec(after)?.[1] ?? "";
   const body = diffWordsWithSpace(before.slice((PREFIX.exec(before)?.[1] ?? "").length), after.slice(prefix.length))
-    .map((part) => {
-      if (part.added) return `${INS}${part.value}${END}`;
+    .map((part, at, parts) => {
+      if (part.added) {
+        // A replaced word sits against its replacement; a space keeps them two words.
+        const before = parts[at - 1];
+        const gap = before?.removed && !/\s$/.test(before.value) && !/^\s/.test(part.value) ? " " : "";
+        return `${gap}${INS}${part.value}${END}`;
+      }
       if (part.removed) return `${DEL}${part.value}${END}`;
       return part.value;
     })
