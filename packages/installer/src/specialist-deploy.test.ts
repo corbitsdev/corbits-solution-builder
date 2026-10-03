@@ -189,20 +189,25 @@ describe("stageSpecialistStatus across the project tenant and the workspace", ()
 // #103: a live specialist whose entry the kit has since changed is redeployed
 // onto the model it already leads with -- never silently onto another.
 describe("leadingOffering", () => {
-  const offerings = [{ id: "off_default" }, { id: "off_switched" }];
+  const offerings = [{ id: "off_primary" }, { id: "off_deployed" }, { id: "off_switched" }];
+  const runs = (offering: { id: string }) => offering.id === "off_deployed";
 
-  test("the catalog's first when nothing was switched", () => {
-    expect(leadingOffering(null, "dep_1", offerings)).toEqual({ id: "off_default" });
+  test("the one it was deployed on when nothing was switched, even after the primary moved", () => {
+    expect(leadingOffering(null, "dep_1", offerings, runs)).toEqual({ id: "off_deployed" });
   });
 
   test("the switched offering while the record still points at this deployment", () => {
     const recorded = { deploymentId: "dep_1", offeringId: "off_switched" };
-    expect(leadingOffering(recorded, "dep_1", offerings)).toEqual({ id: "off_switched" });
+    expect(leadingOffering(recorded, "dep_1", offerings, runs)).toEqual({ id: "off_switched" });
   });
 
-  test("the catalog's first when the record points at another deployment, or names an offering no longer connected", () => {
-    expect(leadingOffering({ deploymentId: "dep_old", offeringId: "off_switched" }, "dep_1", offerings)).toEqual({ id: "off_default" });
-    expect(leadingOffering({ deploymentId: "dep_1", offeringId: "off_gone" }, "dep_1", offerings)).toEqual({ id: "off_default" });
+  test("the one it was deployed on when the record points at another deployment, or names an offering no longer connected", () => {
+    expect(leadingOffering({ deploymentId: "dep_old", offeringId: "off_switched" }, "dep_1", offerings, runs)).toEqual({ id: "off_deployed" });
+    expect(leadingOffering({ deploymentId: "dep_1", offeringId: "off_gone" }, "dep_1", offerings, runs)).toEqual({ id: "off_deployed" });
+  });
+
+  test("none once its provider is removed: never the primary in its place", () => {
+    expect(leadingOffering(null, "dep_1", offerings, () => false)).toBeUndefined();
   });
 });
 
