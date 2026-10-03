@@ -123,6 +123,8 @@ export function probeDecision(input: { readonly startCommand: string; readonly p
 }
 
 const FINAL_TEXT_KEEP = 20_000;
+// The person reads local time beside this brief; the specialist must quote the same moment.
+const ZONED = { timeZoneName: "short" } as const;
 
 /**
  * The brief the supervisor is mailed when an attempt is recorded: what the
@@ -149,7 +151,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
-    `- Ran from ${outcome.startedAt} to ${outcome.endedAt}.`,
+    `- Ran from ${new Date(outcome.startedAt).toLocaleString(undefined, ZONED)} to ${new Date(outcome.endedAt).toLocaleString(undefined, ZONED)}.`,
     `- The interface gives a final text and an exit status and nothing else: no session, steering or checkpoint exists.`,
     ``,
     `### Final text`,

@@ -50,7 +50,7 @@ export function verificationLines(verification: DeliveryVerificationContent | un
     return ["Verification recorded with the archive: none. Nothing about this archive was checked by a tool; treat every check as not run."];
   }
   const lines = [
-    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${
+    `Verification recorded with the archive at ${new Date(verification.checkedAt).toLocaleString(undefined, { timeZoneName: "short" })} (checked by the tool, not by a model): ${
       verification.report.complete ? "every required item verified" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];
