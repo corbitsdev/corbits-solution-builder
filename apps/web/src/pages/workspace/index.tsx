@@ -977,7 +977,7 @@ export function StageWorkspace({
               promote={
                 superseded
                   ? {
-                      label: `${selectedTab.label} v${activeNode.position} · superseded by v${selectedTab.versions.length}`,
+                      label: `${selectedTab.label} v${activeNode.position} · superseded by v${selectedTab.versions.at(-1)?.position}`,
                       run: () => void promote(),
                       busy: promoting,
                     }
@@ -1251,6 +1251,7 @@ export function StageWorkspace({
               onRevise={(prompt) => send(prompt)}
               latestReply={latestDesign}
               canApprove={approveAllowed}
+              versionNodes={versionNodes}
             />
           )}
         </StagePanes>
@@ -1416,8 +1417,11 @@ function DesignPanel({
   onRevise,
   latestReply,
   canApprove,
+  versionNodes,
 }: {
   detail: ProjectDetail;
+  /** The design kept in an artifact: its versions are the history. */
+  versionNodes: ArtifactNode[] | null;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
@@ -1435,7 +1439,7 @@ function DesignPanel({
   // the mail-chat contract nothing writes one of these until approval, so
   // the specialist's latest reply stands in as a not-yet-persisted design
   // while none exists yet.
-  const persisted = useMemo(() => designHistory(detail.nodes), [detail.nodes]);
+  const persisted = useMemo(() => versionNodes ?? designHistory(detail.nodes), [versionNodes, detail.nodes]);
   const draftNode: ArtifactNode | null = latestReply
     ? {
         id: `reply:${latestReply.id}`,

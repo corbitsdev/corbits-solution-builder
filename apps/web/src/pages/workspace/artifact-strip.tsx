@@ -193,19 +193,17 @@ export function VersionStrip({
       >
         <ChevronLeft aria-hidden="true" />
       </button>
-      {versions.map((v, i) => (
-        // The lineage's position, not `v.version` — a superseded draft is
-        // superseded by stamping a fresh artifact (`sb.supersedes`), so each
-        // node's own `version` field is 1 regardless of where it sits in the
-        // chain; the chips would otherwise all read "v1".
+      {versions.map((v) => (
+        // `position`, not the index: an artifact's version is its place in
+        // its history, and older copies that sit before it keep their own.
         <button
           key={v.id}
           type="button"
           className={v.id === active.id ? "ver on" : "ver"}
           onClick={() => onSelect(v.id)}
-          title={v.supersededByNodeId ? `v${i + 1} · superseded` : `v${i + 1}`}
+          title={v.supersededByNodeId ? `v${v.position} · superseded` : `v${v.position}`}
         >
-          v{i + 1}
+          v{v.position}
         </button>
       ))}
       <button
