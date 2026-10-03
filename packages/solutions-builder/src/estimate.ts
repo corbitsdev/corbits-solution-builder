@@ -19,11 +19,24 @@ export type EstimateRead =
 
 const ESTIMATE_FENCE = "```json estimate\n";
 
-export function readEstimateRecord(markdown: string): EstimateRead {
+function estimateBlock(markdown: string): { open: number; start: number; end: number } | null {
   const open = markdown.indexOf(ESTIMATE_FENCE);
-  if (open < 0) return { status: "absent" };
+  if (open < 0) return null;
   const start = open + ESTIMATE_FENCE.length;
-  const end = markdown.indexOf("```", start);
+  return { open, start, end: markdown.indexOf("```", start) };
+}
+
+/** The markdown a person reads: the forecast block is data for the table. */
+export function withoutEstimateBlock(markdown: string): string {
+  const block = estimateBlock(markdown);
+  if (!block || block.end < 0) return markdown;
+  return markdown.slice(0, block.open) + markdown.slice(block.end + 3);
+}
+
+export function readEstimateRecord(markdown: string): EstimateRead {
+  const block = estimateBlock(markdown);
+  if (!block) return { status: "absent" };
+  const { start, end } = block;
   if (end < 0) return { status: "invalid", reason: "the block is not closed" };
   let json: unknown;
   try {

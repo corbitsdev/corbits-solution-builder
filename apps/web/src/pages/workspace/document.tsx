@@ -16,7 +16,7 @@ import { ArrowDown, ArrowUp, Send } from "lucide-react";
 import { appView } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { approachName, sectionsIn } from "@solutions-builder/app/document";
+import { approachName, readableDocument, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
@@ -712,7 +712,7 @@ export function StageDocument({
             </div>
             {live !== null ? (
               <div className="is-live">
-                <Markdown source={live} />
+                <Markdown source={readableDocument(live)} />
               </div>
             ) : binary ? (
               // Bytes, not prose: a slide deck, a workbook, an archive. The
@@ -722,7 +722,9 @@ export function StageDocument({
             ) : content ? (
               <DocumentBody
                 source={
-                  showChanges && previousContent !== null ? markChanges(previousContent, content) : content
+                  showChanges && previousContent !== null
+                    ? markChanges(readableDocument(previousContent), readableDocument(content))
+                    : readableDocument(content)
                 }
                 sideBySide={approaches.length >= 2}
               />
