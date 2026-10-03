@@ -750,10 +750,6 @@ export function AudiencePackages({
   const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
   // Who has not said Proceed on their current package, and so could close the gap.
   const awaited = audiences.filter((audience) => votesByAudience[audience.name]?.decision !== "proceed" || staleVoters.has(audience.name));
-  const voteNode = quorumMet
-    ? null
-    : (awaited.map((audience) => packages.find((node) => node.variant === audience.name)).find((node) => node !== undefined) ?? null);
-  const [gateBusy, setGateBusy] = useState<AudienceVote["decision"] | null>(null);
   const quorumReason = quorumMet
     ? null
     : blockedBy.length > 0
@@ -902,17 +898,6 @@ export function AudiencePackages({
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {/* The awaited decision at the top (#240), where a person reads the
-              tally; the approve row under the composer says what it waits on. */}
-          {voteNode?.variant ? (
-            <div className="button-row audience-gate">
-              <p className="inline-note audience-gate-vote">{isOwner(voteNode.variant) ? "Your" : `${voteNode.variant}'s`} decision:</p>
-              <DecisionButtons
-                busy={gateBusy}
-                onDecide={(decision) => void recordDecision(voteNode, decision, "", setGateBusy)}
-              />
-            </div>
-          ) : null}
           <Tabs
             label="Stakeholder packages"
             active={selected?.variant ?? ""}
