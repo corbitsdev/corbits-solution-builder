@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import ExcelJS from "exceljs";
 import { deckFrom, renderDeck } from "@solutions-builder/app/deck";
-import { readMaterial, readingHasText, slideXmlText } from "./material-reading.ts";
+import JSZip from "jszip";
+import { readMaterial, readingHasText, slideXmlText, wordXmlText } from "./material-reading.ts";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -96,5 +97,88 @@ describe("readMaterial", () => {
     const { text } = await readMaterial({ name: "log.txt", mediaType: "text/plain", bytes: new TextEncoder().encode(long) });
     expect(text.length).toBeLessThan(long.length);
     expect(text).toContain("more characters not shown");
+  });
+});
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
+
+/** A Word file as Word writes one: a zip whose `word/document.xml` holds the body. */
+async function docxBytes(body: string): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+  zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${body}<w:sectPr/></w:body></w:document>`);
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+const paragraph = (text: string, properties = "") =>
+  `<w:p w:rsidR="00A1">${properties ? `<w:pPr>${properties}</w:pPr>` : ""}<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
+
+describe("readMaterial, Word files (#609)", () => {
+  test("a Word file is read as its text in document order: headings, paragraphs, list items and table rows", async () => {
+    const bytes = await docxBytes(
+      [
+        paragraph("Lead handling", '<w:pStyle w:val="Title"/>'),
+        paragraph("What hurts", '<w:pStyle w:val="Heading2"/>'),
+        paragraph("Leads go cold &amp; nobody notices."),
+        "<w:p/>",
+        paragraph("Sales", '<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>'),
+        paragraph("Support", '<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>'),
+        `<w:tbl><w:tblPr/><w:tblGrid/><w:tr><w:trPr/><w:tc><w:tcPr/>${paragraph("Team")}</w:tc><w:tc>${paragraph("Leads")}</w:tc></w:tr><w:tr><w:tc>${paragraph("East")}</w:tc><w:tc>${paragraph("40")}</w:tc></w:tr></w:tbl>`,
+        paragraph("Signed off by finance."),
+      ].join(""),
+    );
+    const { text } = await readMaterial({ name: "brief.docx", mediaType: DOCX_MIME, bytes });
+    expect(text).toBe(
+      ["# Lead handling", "## What hurts", "Leads go cold & nobody notices.", "- Sales\n- Support", "Team | Leads\nEast | 40", "Signed off by finance."].join("\n\n"),
+    );
+  });
+
+  test("a Word file the browser gave no type for is known by its name", async () => {
+    const bytes = await docxBytes(paragraph("Only the name says what this is."));
+    const { text } = await readMaterial({ name: "Notes.DOCX", mediaType: "application/octet-stream", bytes });
+    expect(text).toBe("Only the name says what this is.");
+  });
+
+  test("a Word file with no text says so, in a note rather than as text", async () => {
+    const { text } = await readMaterial({ name: "blank.docx", mediaType: DOCX_MIME, bytes: await docxBytes("<w:p/><w:p><w:r><w:drawing/></w:r></w:p>") });
+    expect(text).toStartWith("(A Word file carrying no text");
+    expect(readingHasText(text)).toBe(false);
+  });
+
+  test("a file named .docx that is not a Word document fails rather than reading as blank", async () => {
+    const zip = new JSZip();
+    zip.file("hello.txt", "hi");
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    await expect(readMaterial({ name: "fake.docx", mediaType: DOCX_MIME, bytes })).rejects.toThrow("not a Word document");
+  });
+
+  test("the older binary Word file is still described, not read", async () => {
+    const { text } = await readMaterial({ name: "old.doc", mediaType: "application/msword", bytes: new Uint8Array(2048) });
+    expect(text).toStartWith("(A file attached: old.doc, application/msword, 2 KB.");
+  });
+});
+
+describe("wordXmlText", () => {
+  test("a tab and a line break are text; a tab stop, a tracked deletion and a field's code are not", () => {
+    const xml =
+      "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs></w:pPr>" +
+      "<w:r><w:t>Name</w:t><w:tab/><w:t>Role</w:t><w:br/><w:t>Ada</w:t></w:r>" +
+      "<w:del><w:r><w:delText>struck out</w:delText></w:r></w:del>" +
+      "<w:r><w:instrText> PAGEREF _Toc1 </w:instrText></w:r>" +
+      "<w:ins><w:r><w:t xml:space=\"preserve\"> Lovelace</w:t></w:r></w:ins></w:p>";
+    expect(wordXmlText(xml)).toBe("Name\tRole\nAda Lovelace");
+  });
+
+  test("a text box is read once, after the body, and does not cut the paragraph it is anchored to", () => {
+    const box = "<w:txbxContent><w:p><w:r><w:t>In the box</w:t></w:r></w:p></w:txbxContent>";
+    const xml =
+      `<w:p><w:r><w:t>Before</w:t></w:r><w:r><mc:AlternateContent><mc:Choice>${box}</mc:Choice><mc:Fallback>${box}</mc:Fallback></mc:AlternateContent></w:r>` +
+      "<w:r><w:t> and after.</w:t></w:r></w:p><w:p><w:r><w:t>Next.</w:t></w:r></w:p>";
+    expect(wordXmlText(xml)).toBe("Before and after.\n\nNext.\n\nIn the box");
+  });
+
+  test("character references are decoded", () => {
+    expect(wordXmlText("<w:p><w:r><w:t>R&amp;D &#8212; 5 &lt; 6 &#x2713;</w:t></w:r></w:p>")).toBe("R&D — 5 < 6 ✓");
   });
 });
