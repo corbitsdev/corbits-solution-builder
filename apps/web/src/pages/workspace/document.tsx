@@ -77,6 +77,8 @@ export function StageDocument({
   onSendHold,
   composerPopover = null,
   events = EMPTY_EVENTS,
+  documentLead = null,
+  composerLead = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -137,6 +139,13 @@ export function StageDocument({
   /** The stage's event record — decisions, versions, aborted turns — folded
    *  into the transcript as quiet lines. */
   events?: readonly StageEvent[];
+  /** A read of the document that heads the document pane, above the text:
+   *  Cost approval's estimate summary (#619). Never part of the document,
+   *  so a passage cannot be quoted from it. */
+  documentLead?: ReactNode;
+  /** A question the stage itself asks the person, in the chat column above
+   *  the box: Cost approval's "How will this be used?" (#619). */
+  composerLead?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
@@ -490,6 +499,7 @@ export function StageDocument({
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {composerLead}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
           {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
@@ -617,6 +627,7 @@ export function StageDocument({
       }
     >
         <div className="stage-inner">
+          {documentLead}
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>

@@ -12,6 +12,7 @@
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
+import { STACK_BLOCK_SHAPE } from "./stack.js";
 import { STACK_RUBRIC } from "./stack-rubric.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
@@ -602,6 +603,26 @@ seed data and tests — not a stand-in workflow. The seed script that loads
 real data is a task of its own, and the build is verified after it runs.
 
 ${STACK_RUBRIC}
+
+Under "## Stack", choose the mode and the capability packages against the
+rubric above. Say in prose which mode you chose and the one requirement that
+forced each step up, then write exactly one fenced block, opened with
+\`\`\`json stack, holding a single JSON object of this shape. Do not add,
+rename or leave out a field; "hubPlacement" alone is left out, when the mode
+is not "hub":
+
+\`\`\`
+${STACK_BLOCK_SHAPE}
+\`\`\`
+
+Every entry's \`cites\` array is non-empty and names only ids from the
+requirements block. Anything you considered but no requirement forces goes in
+\`deferred\`, never in \`packages\`. The JSON is the record, read by machine;
+the prose is why a reviewer trusts it. Every version of the plan you send, a
+redraft after an answer included, carries the whole "## Stack" section with
+that fenced JSON block in full, even when nothing in it changed: the block is
+read from each version on its own, so a version that only says the stack is
+unchanged or stands as approved is a plan with no stack, and it is refused.
 
 ${AGENT_ECONOMICS}
 

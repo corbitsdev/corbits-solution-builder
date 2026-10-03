@@ -3059,22 +3059,27 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* Stage 7's lead cards -- the estimate summary and the target question --
-   sit above the panes as paper on the ground, not as bare text. They keep
-   the gutter the conversation gives its turns (`.conv-scroll`), so a card's
-   left edge lines up with the box beneath it and its right edge sits the
-   same distance from the window. */
-.stage-view > .stage-lead {
-  flex: none;
-  margin: var(--space-4) var(--space-5) 0;
+/* Cost approval's lead cards (#619), each in the pane it is about: the
+   estimate summary heads the document pane above the text, and the target
+   question sits in the chat column above the box. Paper on the ground, not
+   bare text; the pane's own grid (`.stage-inner`, `.composer`) spaces them,
+   so nothing sits above the panes and takes the window from both. */
+.stage-lead {
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-lg);
   background: var(--wb-card);
 }
 
-.stage-view > .stage-lead + .stage-lead {
-  margin-top: var(--space-2);
+/* A wide summary scrolls inside its card, never the pane sideways. */
+.stage-inner > .estimate-view {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* The question is short; in the chat column it gives the turns the room. */
+.composer > .target-picker {
+  padding: var(--space-3) var(--space-4);
 }
 
 .target-picker {

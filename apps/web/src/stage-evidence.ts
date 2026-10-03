@@ -20,6 +20,7 @@ import {
   parseStackRecord,
   type StackCitationProblem,
   type StackRecord,
+  STACK_BLOCK_SHAPE,
 } from "@solutions-builder/app/stack";
 
 /** The "stack" is the architect's technical decision -- runtime, storage,
@@ -162,10 +163,15 @@ export function stage6RefusalMessage(reason: string): string {
  * What the banner's action sends the architect when a plan version has no
  * usable Stack (#325): a redraft after an answer tends to say the stack is
  * "unchanged" or "as approved" under the heading instead of repeating the
- * JSON block, and each version is read on its own.
+ * JSON block, and each version is read on its own. The ask carries the
+ * record's shape (#617): an architect that never wrote a valid block has
+ * nothing to repeat, and asked only for "the JSON record" it invents one.
  */
-export const STACK_RESEND_ASK =
-  "Please resend the whole build plan with the \"## Stack\" section carrying its fenced ```json stack block in full: the exact JSON record, even though nothing in it changed. The block is read by machine from each version on its own, so a version that only says the stack is unchanged has no stack.";
+export const STACK_RESEND_ASK = [
+  "Please resend the whole build plan with the \"## Stack\" section carrying its fenced ```json stack block in full: the exact JSON record, even though nothing in it changed. The block is read by machine from each version on its own, so a version that only says the stack is unchanged has no stack.",
+  "The block holds a single JSON object of this shape. Do not add, rename or leave out a field; \"hubPlacement\" alone is left out, when the mode is not \"hub\". Every \"cites\" array is non-empty and names only ids from the requirements block.",
+  `\`\`\`\n${STACK_BLOCK_SHAPE}\n\`\`\``,
+].join("\n\n");
 
 export function stage6StackRemediation(): Remediation {
   return { kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK };
