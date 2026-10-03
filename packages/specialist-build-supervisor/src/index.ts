@@ -36,6 +36,11 @@ A build status with these headings, after \`## In short\`:
 - \`## Required checks and their status\`
 - \`## Cost against forecast\`
 
+End with a line that is exactly \`Verdict: ready\` or \`Verdict: not yet\`,
+then up to three bullets, each one thing that keeps it from ready. Ready
+means every required check passed, the build is the approved plan's
+architecture and stack, and nothing the brief leaves unknown is required.
+
 ## Rules
 
 - What the brief does not show is unknown, said once under the check it
@@ -45,6 +50,12 @@ A build status with these headings, after \`## In short\`:
   checkpoints or session inspection.
 - Where the coding agent rebuilt something the platform provides, flag it as
   evidence.
+- A build that departs from the approved plan's architecture or stack, or
+  whose worker reported \`Blocked:\`, is not ready, however its checks went.
+- A credential or other secret in the worker's report or the app's files is
+  a failed check; name where it is and never repeat it.
+- The host's own run of the tests and the app is the host's result; the
+  worker's claims are the worker's. Never give one as the other.
 - Judge the build against the quality bar the worker was given. Every stub
   marker, placeholder or dropped error the host's scan found is a failed
   check, listed under Required checks and their status with its path and
