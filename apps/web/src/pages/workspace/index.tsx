@@ -589,6 +589,17 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  // Files handed over from any composer; a refused upload says so.
+  const addMaterial = async (files: File[]) => {
+    try {
+      await api.attachMaterial(detail.project.id, files);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return;
+    }
+    void refreshWorkflow();
+  };
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -795,9 +806,7 @@ export function StageWorkspace({
       events={events}
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
-      onAttach={(files) => {
-        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-      }}
+      onAttach={(files) => void addMaterial([...files])}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1032,9 +1041,7 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
-          onAttach={(files) => {
-            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-          }}
+          onAttach={(files) => void addMaterial([...files])}
         />
       ) : null}
 
@@ -1138,10 +1145,7 @@ export function StageWorkspace({
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
-            onAddMaterial={async (files) => {
-              await api.attachMaterial(detail.project.id, files);
-              void refreshWorkflow();
-            }}
+            onAddMaterial={addMaterial}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
