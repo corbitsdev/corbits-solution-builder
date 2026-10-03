@@ -1,23 +1,22 @@
 /**
- * `web` and `api` target verification — CL-8863.
+ * `web`, `api` and `cli` target verification — CL-8863.
  *
- * `targets.ts` describes what these checks do (`GUIDANCE.web`/`GUIDANCE.api`).
- * Their caller is stage 8's `publish_workspace` tool
- * (`@solutions-builder/tools-delivery/verify`, #129), which runs in the
- * build engineer's sidecar: the engineer names each target's start command,
- * port and routes, the tool starts and probes it from the attempt
- * directory, and the resulting `TargetVerification` is recorded on the
- * delivery manifest, where stage 9 and the person read it. The `cli` check
- * that `apps/hub/src/completion-judge.ts` used to run was deleted with that
- * file in commit ebf6e896 (CL-8340) and has no replacement.
+ * `targets.ts` describes what these checks do (`GUIDANCE`). Their callers
+ * package a build attempt (`verify.ts`): each target is started from the
+ * attempt directory with the start command, port and routes named for it —
+ * by the person, by the build engineer, or by the attempt's own run
+ * declaration (`run-declared.ts`) — and the resulting `TargetVerification`
+ * is recorded on the delivery manifest, where stage 9 and the person read
+ * it. What a target starts may reach this machine's network and nothing
+ * else, where the platform can confine it (`localNetworkOnly`).
  *
- * Both checks are HTTP-only. There is no headless browser in this repo (no
+ * The `web` and `api` checks are HTTP-only. There is no headless browser in this repo (no
  * playwright, no puppeteer) — `verifyWebTarget` fetches pages over plain
  * HTTP and never renders anything, and says so in its transcript rather
  * than implying a browser check that is not there.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { inheritedEnvironment } from "./host-environment.js";
+import { inheritedEnvironment, localNetworkOnly, networkLine } from "./host-environment.js";
 import type { TargetVerification } from "./targets.js";
 
 const DEFAULT_START_TIMEOUT_MS = 15_000;
@@ -67,8 +66,11 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
  * listening on the port, in the attempt directory. On Windows there are no
  * groups; the tree is taken down by pid.
  */
-function startTarget(input: ProcessTarget): { child: ChildProcess; exited: Promise<void> } {
-  const [command, ...rest] = input.command;
+type Started = { child: ChildProcess; exited: Promise<void>; confined: boolean };
+
+function startTarget(input: Omit<ProcessTarget, "port">, output?: Buffer[]): Started {
+  const { command: confinedCommand, confined } = localNetworkOnly(input.command);
+  const [command, ...rest] = confinedCommand;
   const child = spawn(command ?? "", rest, {
     cwd: input.cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -76,14 +78,22 @@ function startTarget(input: ProcessTarget): { child: ChildProcess; exited: Promi
     env: { ...inheritedEnvironment(), ...input.env },
     detached: process.platform !== "win32",
   });
-  // Drained and discarded: a target that fills its pipe would otherwise stall.
-  child.stdout?.resume();
-  child.stderr?.resume();
+  // Kept when asked for, else drained and discarded: a target that fills its pipe would otherwise stall.
+  if (output) {
+    child.stdout?.on("data", (chunk: Buffer) => output.push(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => output.push(chunk));
+  } else {
+    child.stdout?.resume();
+    child.stderr?.resume();
+  }
   const exited = new Promise<void>((resolve) => {
     child.once("exit", () => resolve());
-    child.once("error", () => resolve());
+    child.once("error", (error) => {
+      output?.push(Buffer.from(`${error.message}\n`));
+      resolve();
+    });
   });
-  return { child, exited };
+  return { child, exited, confined };
 }
 
 async function killProcess(target: { child: ChildProcess; exited: Promise<void> }): Promise<void> {
@@ -143,7 +153,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
         realInputFed: false,
         ranSuccessfully: false,
         producedOutput: false,
-        transcript: `$ ${input.command.join(" ")}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
+        transcript: `$ ${input.command.join(" ")}\n\n${networkLine(child.confined)}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
       };
     }
     const results: { route: string; status: number | "unreachable"; bodyLength: number }[] = [];
@@ -163,6 +173,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
     const producedOutput = results.some((r) => typeof r.status === "number" && r.status < 500 && r.bodyLength > 0);
     const transcript = [
       `$ ${input.command.join(" ")}`,
+      networkLine(child.confined),
       `port ${input.port} opened.`,
       results.map((r) => `GET ${r.route} -> ${r.status}${typeof r.status === "number" ? ` (${r.bodyLength} bytes)` : ""}`).join("\n"),
     ].join("\n\n");
@@ -202,7 +213,7 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
         realInputFed: false,
         ranSuccessfully: false,
         producedOutput: false,
-        transcript: `$ ${input.command.join(" ")}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
+        transcript: `$ ${input.command.join(" ")}\n\n${networkLine(child.confined)}\n\nport ${input.port} never accepted a connection within ${input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS}ms.`,
       };
     }
     const pageUrl = `http://127.0.0.1:${input.port}${path}`;
@@ -234,6 +245,7 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
     const producedOutput = html.trim().length > 0;
     const transcript = [
       `$ ${input.command.join(" ")}`,
+      networkLine(child.confined),
       `port ${input.port} opened.`,
       `GET ${pageUrl} -> ${pageStatus}${html.length > 0 ? ` (${html.length} bytes)` : ""}`,
       assetLine,
@@ -243,4 +255,68 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
   } finally {
     await killProcess(child);
   }
+}
+
+const OUTPUT_KEEP = 4_000;
+
+export type BoundedRun = {
+  readonly command: string;
+  readonly exitStatus: number | null;
+  readonly signal: string | null;
+  readonly timedOut: boolean;
+  readonly confined: boolean;
+  /** Its stdout and stderr as they came, the last `OUTPUT_KEEP` characters. */
+  readonly output: string;
+};
+
+/**
+ * Runs `command` until it ends or `timeoutMs` passes, whichever is first,
+ * and returns how it ended with its output's tail. Whatever it left running
+ * in its process group is ended either way.
+ */
+export async function runBounded(input: { command: readonly string[]; cwd: string; timeoutMs: number; env?: Readonly<Record<string, string>> }): Promise<BoundedRun> {
+  const output: Buffer[] = [];
+  const started = startTarget(input, output);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killProcess(started);
+  }, input.timeoutMs);
+  await started.exited;
+  clearTimeout(timer);
+  await killProcess(started);
+  return {
+    command: input.command.join(" "),
+    exitStatus: started.child.exitCode,
+    signal: started.child.signalCode,
+    timedOut,
+    confined: started.confined,
+    output: Buffer.concat(output).toString("utf8").slice(-OUTPUT_KEEP),
+  };
+}
+
+/** How a bounded run ended, in one line. */
+export function describeRun(run: BoundedRun, timeoutMs: number): string {
+  if (run.timedOut) return `did not end within ${String(timeoutMs / 1000)}s and was stopped`;
+  return run.exitStatus !== null ? `exited ${String(run.exitStatus)}` : `ended by ${run.signal ?? "an unknown cause"}`;
+}
+
+/**
+ * Runs a command-line target's smoke command (its `--help`, unless it
+ * declares another) and records how it ended and what it printed. Passes
+ * only on exit status 0 within the time allowed; no requirement's input is
+ * fed to it.
+ */
+export async function verifyCliTarget(target: string, input: { command: readonly string[]; cwd: string; timeoutMs: number }): Promise<TargetVerification> {
+  const run = await runBounded(input);
+  const transcript = [`$ ${run.command}`, networkLine(run.confined), describeRun(run, input.timeoutMs), run.output.trim() || "(no output)"].join("\n\n");
+  return {
+    target,
+    modality: "cli",
+    exercised: true,
+    realInputFed: false,
+    ranSuccessfully: !run.timedOut && run.exitStatus === 0,
+    producedOutput: run.output.trim().length > 0,
+    transcript,
+  };
 }

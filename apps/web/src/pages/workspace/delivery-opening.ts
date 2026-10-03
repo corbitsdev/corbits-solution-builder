@@ -72,7 +72,7 @@ export function verificationLines(verification: DeliveryVerificationContent | un
     lines.push("- No web or api target was started or probed.");
   }
   for (const target of verification.targets) {
-    const where = verification.ranOn === "host" ? " on the host, with the start command the person gave" : "";
+    const where = verification.ranOn === "host" ? " on the host, with the command in its transcript" : "";
     lines.push("", `Target "${target.target}" (${target.modality}) ${target.exercised ? (target.ranSuccessfully ? `ran${where} and answered` : `was started${where} and did not pass`) : "was not exercised"}:`, target.transcript);
   }
   return lines;

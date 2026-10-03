@@ -12,15 +12,17 @@
  *   holds the same bytes, `hash_mismatch` when it holds different ones, and
  *   `missing` when it holds none. So the manifest stage 9 reads describes
  *   the archive it is handed, not the directory the archive was made from.
- * - Each `web`/`api` target named for probing, started with the command
- *   and port given and probed over HTTP by `target-verify.ts`. The port opening and the
- *   responses that come back are what is recorded; a target whose port
- *   never opens is `failed`. A `cli`, `desktop` or other target has no
- *   verifier in this repo and is `inaccessible`, never assumed.
+ * - Each target named for probing, or the one the attempt declares
+ *   (`run-declared.ts`), run by `target-verify.ts`: a `web`/`api` target
+ *   started with the command and port given and probed over HTTP, a target
+ *   whose port never opens `failed`; a `cli` target's smoke command run to
+ *   its exit status. A `desktop` or other target has no verifier in this
+ *   repo and is `inaccessible`, never assumed.
  *
  * - The quality bar's scan (`quality-scan.ts`): stub markers, placeholder
  *   content and dropped errors, each a failed item at its path and line, and
- *   whether a test command exists. The tests are never run here.
+ *   whether a test command exists. On the host the attempt's declared test
+ *   command is run (`run-declared.ts`) and its result replaces the latter.
  *
  * What is NOT checked is said as plainly: files past the manifest's cap are
  * not listed and not claimed, and a web probe is an HTTP response check with
@@ -33,8 +35,12 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { summarizeVerification, type VerificationItem, type VerificationReport } from "./delivery.js";
 import { qualityItems, scanQuality, type QualityScan } from "./quality-scan.js";
-import { verifyApiTarget, verifyWebTarget } from "./target-verify.js";
+import { runDeclared } from "./run-declared.js";
+import { verifyApiTarget, verifyCliTarget, verifyWebTarget } from "./target-verify.js";
 import { classifyTarget, type TargetVerification } from "./targets.js";
+
+/** How long a command-line target's smoke command may run. */
+const CLI_TIMEOUT_MS = 30_000;
 
 export type ManifestFileEntry = { path: string; sha256: string; sizeBytes: number };
 
@@ -161,7 +167,7 @@ export async function probeTargets(probes: readonly TargetProbe[], cwd: string):
   for (const probe of probes) {
     const modality = classifyTarget(probe.target);
     const path = `target:${probe.target}`;
-    if (modality !== "web" && modality !== "api") {
+    if (modality !== "web" && modality !== "api" && modality !== "cli") {
       const transcript = `no ${modality} verifier exists in this repo; "${probe.target}" was not exercised.`;
       targets.push({ target: probe.target, modality, exercised: false, realInputFed: false, ranSuccessfully: false, producedOutput: false, transcript });
       items.push({ category: "receipts", path, required: true, status: "inaccessible", checkedBy: "tool", detail: transcript });
@@ -169,9 +175,11 @@ export async function probeTargets(probes: readonly TargetProbe[], cwd: string):
     }
     const base = { command: probe.command, cwd, port: probe.port, ...(probe.startTimeoutMs === undefined ? {} : { startTimeoutMs: probe.startTimeoutMs }) };
     const verification =
-      modality === "web"
-        ? await verifyWebTarget(probe.target, { ...base, ...(probe.path === undefined ? {} : { path: probe.path }) })
-        : await verifyApiTarget(probe.target, { ...base, routes: probe.routes });
+      modality === "cli"
+        ? await verifyCliTarget(probe.target, { command: probe.command, cwd, timeoutMs: CLI_TIMEOUT_MS })
+        : modality === "web"
+          ? await verifyWebTarget(probe.target, { ...base, ...(probe.path === undefined ? {} : { path: probe.path }) })
+          : await verifyApiTarget(probe.target, { ...base, routes: probe.routes });
     targets.push(verification);
     items.push({
       category: "receipts",
@@ -198,6 +206,9 @@ export async function verifyArchive(input: {
   cwd: string;
   exclude: ReadonlySet<string>;
   ranOn: "sidecar" | "host";
+  /** The delivery target, when the attempt's own run declaration is to be
+   *  run: its tests always, and the target unless `probes` names one. */
+  declaredTarget?: string;
 }): Promise<DeliveryVerificationContent> {
   const extracted = await extractArchive(input.archiveBytes);
   let compared: { items: VerificationItem[]; extras: number };
@@ -209,8 +220,18 @@ export async function verifyArchive(input: {
   } finally {
     await rm(extracted, { recursive: true, force: true });
   }
-  const probed = await probeTargets(input.probes, input.cwd);
-  const items = [...compared.items, ...qualityItems(quality), ...probed.items];
+  const declared = input.declaredTarget === undefined ? null : await runDeclared(input.cwd, input.declaredTarget);
+  const ownTarget = declared === null || input.probes.length > 0 ? null : declared.target;
+  const probes = ownTarget !== null && "command" in ownTarget ? [ownTarget] : input.probes;
+  const probed = await probeTargets(probes, input.cwd);
+  const scanned = qualityItems(quality).filter((item) => declared === null || item.category !== "tests");
+  const items = [
+    ...compared.items,
+    ...scanned,
+    ...(declared === null ? [] : [declared.tests]),
+    ...(ownTarget !== null && "status" in ownTarget ? [ownTarget] : []),
+    ...probed.items,
+  ];
   const checkedAt = new Date();
   return {
     checkedAt: checkedAt.toISOString(),

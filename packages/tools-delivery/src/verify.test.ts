@@ -144,9 +144,9 @@ describe("probeTargets", () => {
   }, 20_000);
 
   test("a target with no verifier is inaccessible, never assumed", async () => {
-    const { items, targets } = await probeTargets([{ target: "cli", command: ["true"], port: 1, routes: [] }], tmpdir());
+    const { items, targets } = await probeTargets([{ target: "desktop", command: ["true"], port: 1, routes: [] }], tmpdir());
     expect(items).toEqual([
-      { category: "receipts", path: "target:cli", required: true, status: "inaccessible", checkedBy: "tool", detail: expect.stringContaining("no cli verifier") },
+      { category: "receipts", path: "target:desktop", required: true, status: "inaccessible", checkedBy: "tool", detail: expect.stringContaining("no desktop verifier") },
     ]);
     expect(targets[0]?.exercised).toBe(false);
   });
