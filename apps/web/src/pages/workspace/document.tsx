@@ -23,7 +23,8 @@ import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { ComposedMail, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
@@ -459,7 +460,7 @@ export function StageDocument({
             ) : (
               <>
                 {who}
-                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <PersonTurn text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
               </>
             );
           }}
@@ -755,3 +756,14 @@ const EMPTY_EVENTS: readonly StageEvent[] = [];
  *  per-passage note the selection popover collects. The note folds into the
  *  quote's own line on send — `Quote` on the wire stays what it is. */
 type AttachedQuote = { quote: string; note?: string };
+
+/**
+ * A person's turn in the transcript. Material attached after the stage
+ * opened travels as a mail in the person's name (#607): the files' names
+ * show, and what they say opens on demand. Anything else is what the
+ * person wrote.
+ */
+function PersonTurn({ text }: { text: string }) {
+  const material = materialMailFold(text);
+  return material ? <ComposedMail fold={material} /> : <Markdown source={text} />;
+}
