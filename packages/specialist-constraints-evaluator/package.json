@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-constraints-evaluator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The stage 2 solution constraints evaluator: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

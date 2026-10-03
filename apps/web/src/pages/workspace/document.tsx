@@ -14,6 +14,7 @@ import {
   type ChatMessage,
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { appView } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -86,7 +87,7 @@ export function StageDocument({
    *  counts it among the questions already answered this stage; `total` is
    *  set only when the specialist's own text states how many there are. */
   openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
-  /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
+  /** The stage evaluator's verdict, advisory only. Null on a stage no evaluator reads. */
   evaluation?: Evaluation | null;
   /** Advice shown in the approval bar beside the approve control, such as
    *  the brief evaluator's stance (#157). It never enables or blocks
@@ -239,6 +240,7 @@ export function StageDocument({
   // Memoised: the thread re-pins its scroll whenever this array is new, and a
   // fresh one on every keystroke in the composer made the transcript twitch.
   // The turns that report a round the platform could not complete, set apart in the transcript.
+  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
   const failedTurns = useMemo(() => new Set(turns.filter((turn) => turn.failed).map((turn) => turn.id)), [turns]);
 
   const messages: ChatMessage[] = useMemo(() => {
@@ -401,6 +403,19 @@ export function StageDocument({
                 </span>
               );
             }
+            const turn = turnById.get(message.id);
+            const view = turn && message.role === "user" ? appView({ author: "me", body: turn.body, ...(turn.subject ? { subject: turn.subject } : {}) }) : null;
+            if (view === "hidden") return null;
+            if (view) {
+              return (
+                <span className="event conv-event">
+                  <details className="bubble-fold">
+                    <summary>{view.line}</summary>
+                    <Markdown source={view.detail} />
+                  </details>
+                </span>
+              );
+            }
             const who = (
               <span className="who conv-who">
                 {message.role === "user" ? "You" : agentFor(node.stage as Stage).title}
@@ -495,7 +510,10 @@ export function StageDocument({
           ) : null}
           {canSubmit && choosing ? (
             <div className="stage-action composer-approve composer-choose">
-              <span>Which approach?</span>
+              <span className="composer-approve-lead">
+                <span>Which approach?</span>
+                {advisory}
+              </span>
               {approaches.map((section) => {
                 const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
                 const name = approachName(section.heading) ?? `Approach ${letter}`;

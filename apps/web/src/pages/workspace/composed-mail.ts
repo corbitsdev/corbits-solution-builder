@@ -10,7 +10,9 @@
  * renders what this returns.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
+import { personWordsIn } from "@solutions-builder/app/stage-prompt";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
+import { shortPromptHash } from "../../design-disposition.ts";
 
 export type ComposedFold = {
   /** The one line the chat shows; null when nothing folds and only `lead` shows. */
@@ -42,6 +44,28 @@ function splitIdsBlock(text: string): { readonly ids: string; readonly rest: str
   return { ids: lines.slice(0, end).join("\n").trim(), rest: lines.slice(end).join("\n").trim() };
 }
 
+/** A stage's opening: the record the app sends the specialist when the stage starts, never something the person said. */
+export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject !== undefined && OPENING_SUBJECT.test(message.subject);
+}
+
+const EVALUATOR_NOTES_TAG = "[evaluator-notes:";
+
+/** The tag on a draft's request to its stage evaluator, keyed on the draft's text so one draft is judged once. */
+export function evaluationTag(stage: number, draft: string): string {
+  return `[evaluation:${stage}:${shortPromptHash(draft)}]`;
+}
+
+/** The subject of the evaluator's notes the app sends a specialist, keyed on the draft they judged so one draft's notes go once. */
+export function evaluatorNotesSubject(stage: number, draft: string): string {
+  return `${EVALUATOR_NOTES_TAG}${stage}:${shortPromptHash(draft)}]`;
+}
+
+/** The evaluator's notes, sent by the app: an event in the stage, never the person's words. */
+export function isEvaluatorNotes(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject?.startsWith(EVALUATOR_NOTES_TAG) === true;
+}
+
 /**
  * The fold for a person-authored message the app composed, or null for a
  * message the person wrote. Only `author === "me"` is ever inspected, so
@@ -60,4 +84,16 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (!hasIds) return { summary: null, body: "", lead: stripped };
   const { ids, rest } = splitIdsBlock(stripped);
   return { summary: "The requirement ids, as minted", body: ids, lead: rest || null };
+}
+
+/** How a message the app composed shows in either chat view: hidden, or as one
+ *  event line with the sent text folded beneath; null for an ordinary turn. */
+export function appView(
+  message: Pick<ChatMessage, "author" | "subject" | "body">,
+): "hidden" | { readonly line: string; readonly detail: string } | null {
+  if (isStageOpening(message)) return "hidden";
+  if (isEvaluatorNotes(message)) {
+    return { line: "Evaluator notes sent to the specialist", detail: personWordsIn(message.body)?.words ?? message.body };
+  }
+  return null;
 }

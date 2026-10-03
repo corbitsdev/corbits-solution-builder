@@ -355,13 +355,19 @@
 
 /* A design carried in a message travels folded (#301): one line to open,
    and a bounded, scrolling body when it is. */
+.turn-option-hint {
+  margin-top: var(--space-2);
+  color: var(--wb-muted-foreground);
+  font-size: 0.85em;
+}
+
 .conv .bubble .bubble-fold {
   margin-top: var(--space-2);
 }
 
 .conv .bubble .bubble-fold > summary {
   cursor: pointer;
-  color: var(--wb-muted);
+  color: var(--wb-muted-foreground);
   font-size: 0.92em;
 }
 

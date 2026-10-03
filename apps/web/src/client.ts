@@ -7,7 +7,8 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
-import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { agentById, agentFor, evaluatorFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -877,15 +878,8 @@ if (!STAGE_5_PACKAGE_ROLE) {
   throw new Error("kit role \"presentation-creator\" is missing");
 }
 
-const ensureStage1EvaluatorCalls = new Map<string, Promise<SpecialistDeployment>>();
-const BRIEF_EVALUATOR_ROLE_KEY = "brief-evaluator";
-
-/** Stage 1's brief-evaluator role -- named explicitly so a rename of the kit
- *  role fails loudly here rather than silently deploying the wrong prompt. */
-const BRIEF_EVALUATOR_ROLE = agentById(BRIEF_EVALUATOR_ROLE_KEY);
-if (!BRIEF_EVALUATOR_ROLE) {
-  throw new Error(`kit role "${BRIEF_EVALUATOR_ROLE_KEY}" is missing`);
-}
+/** Memoised evaluator deployments, by `${projectId}:${stage}`. */
+const ensureEvaluatorCalls = new Map<string, Promise<SpecialistDeployment>>();
 
 const ensureGuideAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
 const PRODUCT_GUIDE_ROLE_KEY = "product-guide";
@@ -2066,6 +2060,26 @@ export const api = {
    * already return, so every reader downstream (inline preview, download)
    * stays on one code path.
    */
+  /**
+   * The document a drafting stage's specialist keeps with the artifact tools:
+   * the newest artifact of the stage's kind that a workflow run wrote in the
+   * project's tenant. Null when there is none yet. A read that fails throws,
+   * so the workspace can say the document is unavailable rather than fall
+   * back to an older draft.
+   */
+  stageWorkArtifact: async (
+    tenantId: string,
+    kind: string,
+  ): Promise<{ id: string; version: number; content: string } | null> => {
+    const transport = createHubTransport();
+    const written = (await listArtifacts(transport, tenantId, { kind }))
+      .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    if (!written) return null;
+    const artifact = await installerGetArtifact(transport, tenantId, written.id);
+    if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
+    return { id: artifact.id, version: artifact.version, content: artifact.content };
+  },
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
@@ -2246,11 +2260,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // No hub credential binding: a stage 8 deployed with one never
-        // produced a run, while every unbound stage does. Nothing needs it
-        // now — the build runs on the host and the archive is recorded by
-        // the build panel, not uploaded from a sidecar.
-        false,
+        // Drafting stages write their document with the artifact tools,
+        // which need the hub credential binding; stage 8's archive is
+        // recorded by the build panel, not uploaded from a sidecar.
+        stageUsesArtifactTools(stage as Stage),
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2286,7 +2299,7 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
-        false,
+        stageUsesArtifactTools(stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
@@ -2298,22 +2311,24 @@ export const api = {
     return call;
   },
   /**
-   * Stage 1's brief evaluator (CL-8736): its own deployed agent, running
-   * `BRIEF_EVALUATOR_ROLE` (`agentById("brief-evaluator")`), mailed a copy of
-   * the current draft and read back for an advisory verdict. Deploys lazily
-   * — only when a caller actually has a draft worth judging, never on
-   * project creation — onto its own asset (`ensureSpecialistDeployment`'s
-   * `roleKey`, distinct from the stage's primary drafter). Memoised per
-   * project the same way `ensureStageAgent` memoises per project/stage.
+   * A stage's draft evaluator (CL-8736 for stage 1's brief evaluator): its
+   * own deployed agent, running the stage's `evaluatorFor` role, mailed the
+   * current draft and read back for an advisory verdict. Deploys lazily --
+   * only when a caller actually has a draft worth judging, never on project
+   * creation -- onto its own asset (`ensureSpecialistDeployment`'s
+   * `roleKey`, the role's id, distinct from the stage's primary drafter).
+   * Memoised per project and stage the same way `ensureStageAgent` is.
    */
-  ensureStage1EvaluatorAgent: (projectId: string): Promise<SpecialistDeployment> => {
-    const pending = ensureStage1EvaluatorCalls.get(projectId);
+  ensureEvaluatorAgent: async (projectId: string, stage: Stage): Promise<SpecialistDeployment> => {
+    const role = evaluatorFor(stage);
+    if (!role) throw new Error(`No evaluator reads stage ${stage}.`);
+    const key = `${projectId}:${stage}`;
+    const pending = ensureEvaluatorCalls.get(key);
     if (pending) {
-      return pending.then(async (deployment) => {
-        if (await memoStillLive(projectId, 1 as Stage, BRIEF_EVALUATOR_ROLE_KEY, deployment)) return deployment;
-        ensureStage1EvaluatorCalls.delete(projectId);
-        return api.ensureStage1EvaluatorAgent(projectId);
-      });
+      const deployment = await pending;
+      if (await memoStillLive(projectId, stage, role.id, deployment)) return deployment;
+      ensureEvaluatorCalls.delete(key);
+      return api.ensureEvaluatorAgent(projectId, stage);
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
@@ -2323,19 +2338,24 @@ export const api = {
         await lifecycleClosureSource(),
         lifecycleGitPush,
         projectId,
-        1 as Stage,
+        stage,
         specialistHubOrigin(),
         false,
-        BRIEF_EVALUATOR_ROLE_KEY,
-        await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
+        role.id,
+        await localizedRole(transport, workspaceTenantId, role),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure("the stage 1 brief evaluator", placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} evaluator`, placement);
       return deployment;
     });
-    call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
-    ensureStage1EvaluatorCalls.set(projectId, call);
-    return call;
+    ensureEvaluatorCalls.set(key, call);
+    try {
+      return await call;
+    } catch (cause) {
+      // A failed deploy is not remembered: the next ask deploys again.
+      ensureEvaluatorCalls.delete(key);
+      throw cause;
+    }
   },
   /**
    * The Product guide (CL-8737 restore): calm orientation across all nine

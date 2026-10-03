@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiFailure,
+  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type Provider,
@@ -47,7 +48,8 @@ import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -58,7 +60,9 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
+import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
@@ -90,7 +94,7 @@ function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, Arti
   return byReviewer;
 }
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
-import { agentFor } from "@solutions-builder/app/kit";
+import { agentFor, evaluatorFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
@@ -110,6 +114,13 @@ export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
  * one of the specialised panels (design, audiences, build) or the final
  * decisions stage. */
 const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
+
+/** A drafting stage's artifact, as last read: there is none yet, it was
+ *  read, or it exists and could not be read, which is shown, not hidden. */
+type WorkArtifact =
+  | { readonly state: "none" }
+  | { readonly state: "ready"; readonly artifact: { readonly id: string; readonly version: number; readonly content: string } }
+  | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
@@ -256,7 +267,11 @@ export function StageWorkspace({
   const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  const lastFromPerson = foldedMessages.findLast((message) => message.author === "me");
+  const ask = lastFromPerson && isEvaluatorNotes(lastFromPerson)
+    ? "review"
+    : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  useBusyWhile(busy, specialistActivity(stage, ask));
 
   const openingDispatch = useOpeningDispatch({
     detail,
@@ -285,14 +300,66 @@ export function StageWorkspace({
   // A stage 6 revision that dropped the plan's Stack block gets the last
   // valid one carried in (#437), so the gate's banner is for a plan that
   // never had one.
+  // A drafting stage with artifact tools keeps its document in an artifact
+  // the specialist writes; the host reads the newest one of the stage's kind
+  // rather than trusting what the reply says it wrote. It is read again as
+  // the thread moves, and polled while a reply is pending so the pane follows
+  // the specialist's writes. A stage with no artifact yet, such as a project
+  // drafted before the tools, keeps reading its draft from the mail.
+  const usesArtifact = stageUsesArtifactTools(stage as Stage);
+  const workKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const awaitingReply = foldedMessages.at(-1)?.author === "me";
+  const [work, setWork] = useState<WorkArtifact | null>(null);
+  // The thread `work` was read for: until it is the current one, a reply that
+  // just landed may sit beside the document as it was before that reply.
+  const [workReadFor, setWorkReadFor] = useState<readonly ChatMessage[] | null>(null);
+  const [workTick, setWorkTick] = useState(0);
+  useEffect(() => {
+    if (!usesArtifact || !awaitingReply) return;
+    const timer = setInterval(() => setWorkTick((tick) => tick + 1), 5000);
+    return () => clearInterval(timer);
+  }, [usesArtifact, awaitingReply]);
+  useEffect(() => {
+    if (!usesArtifact || !workKind) {
+      setWork(null);
+      return;
+    }
+    let cancelled = false;
+    const readFor = foldedMessages;
+    api.stageWorkArtifact(tenantId, workKind).then(
+      (artifact) => {
+        if (cancelled) return;
+        setWork(artifact ? { state: "ready", artifact } : { state: "none" });
+        setWorkReadFor(readFor);
+      },
+      (cause: unknown) => {
+        if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [usesArtifact, workKind, tenantId, foldedMessages, workTick]);
+  const workDraft = useMemo(() => {
+    if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
+    if (work.state === "unreadable" || !latestSpecialistMessage) return null;
+    return { ...latestSpecialistMessage, body: work.artifact.content };
+  }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
+  const workUnreadable = work?.state === "unreadable" ? work.message : null;
+  useEffect(() => {
+    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
+  }, [workUnreadable]);
   const draftMessage = useMemo(
-    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
-    [stage, foldedMessages, guidance.draft],
+    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
+    [stage, foldedMessages, workDraft],
   );
 
-  // Stage 1's brief evaluator reads each new draft; the Product guide answers
-  // when asked, on any stage. Both are advisory and never touch the gate.
-  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
+  // A stage's evaluator reads each new draft against the record the stage
+  // opened on; the Product guide answers when asked, on any stage. Both are
+  // advisory and never touch the gate.
+  const stageRecord = foldedMessages.find(isStageOpening)?.body ?? null;
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage as Stage, draftMessage?.body ?? null, stageRecord);
+  const evaluated = evaluatorFor(stage as Stage) !== null;
   const guideContext = {
     projectTitle: detail.project.title,
     stage,
@@ -311,7 +378,12 @@ export function StageWorkspace({
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
   useBusyWhile(!threadLoaded, "Loading the conversation");
-  const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
+  // Stage 4's design is the designer's artifact; a design sent as a reply is
+  // read only for a project drafted before the tools.
+  const latestDesign = useMemo(
+    () => (usesArtifact && work !== null && work.state !== "none" ? workDraft : latestDesignReply(foldedMessages)),
+    [usesArtifact, work, workDraft, foldedMessages],
+  );
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
@@ -328,6 +400,7 @@ export function StageWorkspace({
         resultNodeId: null,
         questions: null,
         createdAt: message.at,
+        ...(message.subject ? { subject: message.subject } : {}),
       })),
     [foldedMessages],
   );
@@ -338,12 +411,21 @@ export function StageWorkspace({
   // line naming it, on every document stage and on a reload alike, since
   // both the mail and the lineage are records.
   const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
+  // A reply that wrote the artifact is short; the version line it carries is
+  // still the artifact's, so the lineage is matched against the document.
+  const referenceMessages = useMemo(
+    () =>
+      work?.state === "ready" && latestSpecialistMessage
+        ? foldedMessages.map((message) => (message.id === latestSpecialistMessage.id ? { ...message, body: work.artifact.content } : message))
+        : foldedMessages,
+    [work, latestSpecialistMessage, foldedMessages],
+  );
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(foldedMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
         : undefined,
-    [stage, draftKind, foldedMessages, liveVersions],
+    [stage, draftKind, referenceMessages, liveVersions],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
@@ -590,6 +672,36 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  // With a Markdown draft on the table, a turn carries it and the
+  // instruction to revise it, as alpha main's rounds did (#431); a design
+  // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
+  // A document kept in an artifact is named, not pasted: the specialist
+  // already holds it, or reads it once.
+  const revisionMail = (turn: string): string => {
+    const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
+    return work?.state === "ready"
+      ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
+      : revising
+        ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
+        : turn;
+  };
+
+  // The evaluator's notes on a draft go to the specialist as one revision
+  // before the person reviews it, folded in the chat as an event line.
+  const notesError = useEvaluatorRevision({
+    stage,
+    evaluator,
+    draft: !usesArtifact || workReadFor === foldedMessages ? (draftMessage?.body ?? null) : null,
+    messages: foldedMessages,
+    send: async (ask, subject) => {
+      if (!agentAddress) throw new Error("The specialist is not reachable yet.");
+      // Another tab may already have sent these notes.
+      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      await api.sendStageMail(tenantId, agentAddress, { body: revisionMail(ask), subject });
+      await loadThread();
+    },
+  });
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -605,12 +717,7 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
-      const turn = withAttachedDocuments(body, stageDocuments);
-      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
+      const mail = revisionMail(withAttachedDocuments(body, stageDocuments));
       await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
@@ -792,6 +899,10 @@ export function StageWorkspace({
         setComposer("");
         void send(body);
       }}
+      onAnswer={(answer) => {
+        setComposer("");
+        void send(answer);
+      }}
       working={sending}
       disabled={!agentAddress}
       withdrawnIds={withdrawnIds}
@@ -800,6 +911,17 @@ export function StageWorkspace({
       onSendHold={() => openSendBack(composer)}
       popover={sendBackPopover}
       events={events}
+      // The design pane has no approval bar of its own to carry the
+      // evaluator's stance, so stage 4 shows it above the composer.
+      rows={
+        stage === 4 && evaluator.status !== "idle" ? (
+          <div className="stage-action composer-approve">
+            <span className="composer-approve-lead">
+              <EvaluatorStance evaluator={evaluator} notesError={notesError} />
+            </span>
+          </div>
+        ) : null
+      }
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => {
@@ -1133,11 +1255,11 @@ export function StageWorkspace({
                 : null
             }
             evaluation={
-              stage === 1 && evaluator.status === "verdict"
+              evaluated && evaluator.status === "verdict"
                 ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
                 : null
             }
-            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+            advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
             onRevise={(message, quotes) => {

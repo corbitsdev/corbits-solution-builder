@@ -20,6 +20,7 @@ export type StageTurn = {
   /** The questions a specialist turn opened a round with; null on every other turn. */
   readonly questions: string[] | null;
   readonly createdAt: string;
+  readonly subject?: string;
   /** Set on a specialist turn that reports a round the platform could not complete. */
   readonly failed?: true;
 };
@@ -63,6 +64,62 @@ export function revisionRequest(args: { stage: number; userInput: string; curren
   ].join("\n");
 }
 
+/**
+ * A revision turn for a stage whose document is an artifact. It names the
+ * artifact and its version instead of carrying the document, in the same
+ * envelope as `revisionRequest`, so the chat folds it the same way and the
+ * person's words are found by `splitRevision`.
+ */
+export function artifactRevisionRequest(args: { userInput: string; artifactId: string; version: number }): string {
+  return [
+    REVISION_LEAD,
+    `Artifact ${args.artifactId}, version ${String(args.version)}. If you have not seen this version in this conversation, read it once with artifact_read; otherwise do not read it.`,
+    "",
+    `Revise it with artifact_write on that same id, with expectedVersion ${String(args.version)} and edits for the passages that change. Keep every part that was not objected to and honour the directions the person has given.`,
+    "",
+    REVISION_ASK,
+    args.userInput.trim() || "(No further instruction. Improve the current version without changing what was agreed.)",
+  ].join("\n");
+}
+
+/**
+ * What a stage's draft evaluator is mailed: the record the stage opened
+ * with, then the draft. Without the record it could judge only the page,
+ * never whether the page is faithful to what was approved.
+ */
+export function evaluationRequest(args: { record: string | null; draft: string }): string {
+  if (!args.record) return args.draft;
+  return ["--- THE RECORD THE DRAFT WAS WRITTEN FROM ---", args.record.trim(), "", "--- THE DRAFT TO JUDGE ---", args.draft.trim()].join("\n");
+}
+
+/** The evaluator's notes, as the one revision the app asks the specialist for before the person reviews. */
+export function evaluatorNotesAsk(notes: readonly string[]): string {
+  return [
+    "A reviewer read this version against the record and noted the points below. Fix each one that holds up against the record; where one does not, leave that part as it is. Change nothing else.",
+    "",
+    ...notes.map((note) => `- ${note}`),
+  ].join("\n");
+}
+
+/**
+ * A person's message with what the app adds for the specialist. Whatever the
+ * app adds goes first and the person's own words go last, after the one
+ * marker every composed message ends with, so the chat can always tell them
+ * apart. With nothing to add, the words go alone.
+ */
+export function composedTurn(context: readonly string[], words: string): string {
+  const added = context.map((part) => part.trim()).filter((part) => part.length > 0);
+  if (added.length === 0) return words;
+  return [...added, "", REVISION_ASK, words.trim()].join("\n");
+}
+
+/** A composed message taken apart: the person's words, and what the app added. Null for a message the person typed alone. */
+export function personWordsIn(text: string): { readonly words: string; readonly added: string } | null {
+  const at = text.lastIndexOf(REVISION_ASK);
+  if (at === -1) return null;
+  return { words: text.slice(at + REVISION_ASK.length).trim(), added: text.slice(0, at).trim() };
+}
+
 /** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
 export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
   if (!text.startsWith(REVISION_LEAD)) return null;
@@ -96,7 +153,10 @@ export function withChoiceReminder(stage: number, userInput: string): string {
   const choice = choiceIn(stage, userInput);
   if (!choice) return userInput;
   const heading = `## ${choice.heading}`;
-  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
+  return composedTurn(
+    [`The choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`],
+    userInput,
+  );
 }
 
 /**

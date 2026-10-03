@@ -1,5 +1,5 @@
 /**
- * The workspace's quiet chrome: folded stage extras, the stage-1 evaluator
+ * The workspace's quiet chrome: folded stage extras, the stage evaluator
  * verdict, the product-guide dock, send-back, and the two waiting states. All
  * presentational — every prop is already resolved by the stage workspace
  * above them.
@@ -61,18 +61,18 @@ export function GuidanceCard({
 }
 
 /**
- * Stage 1's advisory brief-evaluator verdict, as one line in the approval
+ * A stage evaluator's advisory verdict, as one line in the approval
  * bar (#157): a stance beside the approve button, with the evaluator's notes
  * in a popover that opens on hover, on focus, or with a click and closes on
  * Escape. Never a gate: the approve button's enablement is unchanged. A
  * full verdict inline above the composer pushed the conversation out of
  * view, and the gate repeated its notes a second time.
  */
-export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
+export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: StageEvaluator; notesError?: string | null }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   if (evaluator.status === "idle") return null;
-  const stance =
+  const judged =
     evaluator.status === "checking"
       ? { label: "Evaluator reading…", tone: "checking", notes: [] as readonly string[] }
       : evaluator.status === "unavailable"
@@ -80,13 +80,16 @@ export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
         : evaluator.verdict.ready
           ? { label: "Approved by evaluator", tone: "ready", notes: evaluator.verdict.notes }
           : { label: "Not approved by evaluator", tone: "not-ready", notes: evaluator.verdict.notes };
+  const stance = notesError
+    ? { ...judged, notes: [...judged.notes, `These notes could not be sent to the specialist: ${notesError}`] }
+    : judged;
   const hasNotes = stance.notes.length > 0;
   return (
     <span className="evaluator-stance" data-tone={stance.tone} data-open={open || undefined} aria-live="polite">
       <button
         type="button"
         className="evaluator-stance-trigger"
-        aria-label="Brief evaluator verdict"
+        aria-label="Evaluator verdict"
         aria-expanded={hasNotes ? open : undefined}
         aria-controls={hasNotes ? id : undefined}
         onClick={() => setOpen((was) => !was)}

@@ -4,12 +4,12 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
-import { splitRevision } from "@solutions-builder/app/stage-prompt";
+import { appView, composedMailFold } from "./composed-mail.ts";
+import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
@@ -80,16 +80,17 @@ function MessageBody({ text }: { text: string }) {
       </>
     );
   }
-  // A revision turn carries the version it revises (#431); the chat shows
-  // the person's words and keeps the version behind a fold.
-  const revision = splitRevision(text);
-  if (revision) {
+  // A message the app composed around the person's words (the version it
+  // revises, an attached document, a choice reminder) shows only those
+  // words; what the app added stays behind a fold.
+  const composed = personWordsIn(text);
+  if (composed) {
     return (
       <>
-        <Markdown source={revision.ask} />
+        <Markdown source={composed.words} />
         <details className="bubble-fold">
-          <summary>The version this revises</summary>
-          <Markdown source={revision.document} />
+          <summary>{composed.added.startsWith(REVISION_LEAD) ? "The version this revises" : "What the app sent with this"}</summary>
+          <Markdown source={composed.added} />
         </details>
       </>
     );
@@ -144,6 +145,7 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  onAnswer,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -178,7 +180,10 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** Sends a tapped answer to the latest turn's question, as typing it would. */
+  onAnswer?: ((answer: string) => void) | undefined;
 }) {
+  const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -243,10 +248,25 @@ export function StageConversation({
                 </div>
               );
             }
+            const source = byId.get(message.id);
+            // The opening is what the specialist is sent to start the stage;
+            // the person never said it, and the document strip already shows
+            // what it carried.
+            const view = source ? appView(source) : null;
+            if (view === "hidden") return null;
+            if (view) {
+              return (
+                <div key={message.id} className="event conv-event">
+                  <details className="bubble-fold">
+                    <summary>{view.line}</summary>
+                    <Markdown source={view.detail} />
+                  </details>
+                </div>
+              );
+            }
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
-            const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
@@ -267,11 +287,15 @@ export function StageConversation({
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
-                  ) : draft ? (
-                    <>
-                      <DraftReference draft={draft} onOpen={onOpenVersion} />
-                      {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
-                    </>
+                  ) : !you ? (
+                    <SpecialistTurn
+                      text={text}
+                      note={null}
+                      draft={draft}
+                      onOpenVersion={onOpenVersion ?? (() => undefined)}
+                      onAnswer={message.id === lastAgentId && !pending ? onAnswer : undefined}
+                      onDraft={onValueChange}
+                    />
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -403,8 +427,10 @@ export function SpecialistTurn({
   let questionIndex = -1;
   // A draft's lead -- the sentence or two before its first heading -- is
   // conversation and stays; the pointer that stands in when there is no
-  // lead is what the draft line already says.
-  const lead = draft ? conversationLead(text) : null;
+  // lead is what the draft line already says. A reply that wrote its
+  // document to an artifact is not a document, so its words stay.
+  const hideDocument = draft !== null && isSubstantialDraft(text);
+  const lead = hideDocument ? conversationLead(text) : null;
   return (
     <>
       {note ? (
@@ -421,7 +447,7 @@ export function SpecialistTurn({
       {draft ? <DraftReference draft={draft} onOpen={onOpenVersion} /> : null}
       {lead !== null && lead !== DRAFT_POINTER ? <Markdown source={lead} /> : null}
       {segments.map((segment, index) => {
-        if (segment.kind === "text") return draft ? null : <Markdown key={index} source={segment.markdown} />;
+        if (segment.kind === "text") return hideDocument ? null : <Markdown key={index} source={segment.markdown} />;
         const at = ++questionIndex;
         const picked = chosen.get(at);
         return (
@@ -443,6 +469,7 @@ export function SpecialistTurn({
                 ))}
               </div>
             ) : null}
+            {segment.options.length > 0 && onAnswer ? <p className="turn-option-hint">Or type your own answer below.</p> : null}
           </div>
         );
       })}
