@@ -228,14 +228,17 @@ function DeliveryDecision({
   // never told anyone it had arrived (defect: an empty pane until reload).
   // Stops once delivered — `load` itself also short-circuits, but skipping
   // the call here means a pending timer never has to make the round trip.
+  // The workflow's own finish stops it too: after a reload the approval id
+  // is gone from memory, so `delivered` alone would never stop it.
   useEffect(() => {
     void load();
+    if (finished) return;
     const timer = setInterval(() => {
       if (!deliveredRef.current) void load();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, projectId]);
+  }, [tenantId, projectId, finished]);
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
