@@ -8,7 +8,6 @@ import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "r
 import { ChatInput, Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { Plus, Send } from "lucide-react";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
@@ -285,6 +284,10 @@ export function OpeningScreen({
         conversation={
           <div className="stage-conversation">
             <div className={CONV_SCROLL_CLASS}>
+              <div className="opening-intro">
+                <p className="opening-stage-name">{stageName(stage)}</p>
+                <p className="inline-note">{STAGE_GOAL[stage] ?? ""}</p>
+              </div>
               {!resuming && opening ? (
                 <div className="msg you">
                   <span className="who conv-who">You</span>
@@ -301,23 +304,14 @@ export function OpeningScreen({
               </div>
             </div>
             <div className="composer" aria-hidden="true">
-              {/* The same composer the conversation mounts, so nothing shifts when it does. */}
-              <Dictated value="" onValueChange={() => {}} disabled>
-                {(mic) => (
-                  <ChatInput
-                    className={COMPOSER_BOX_CLASS}
-                    value=""
-                    onValueChange={() => {}}
-                    onSend={() => {}}
-                    onAttach={() => {}}
-                    attachIcon={<Plus className="size-4" aria-hidden="true" />}
-                    sendIcon={<Send className="size-4" aria-hidden="true" />}
-                    leadingTools={mic}
-                    disabled
-                    placeholder={`Message the ${who}…`}
-                  />
-                )}
-              </Dictated>
+              <ChatInput
+                className={COMPOSER_BOX_CLASS}
+                value=""
+                onValueChange={() => {}}
+                onSend={() => {}}
+                disabled
+                placeholder={`Message the ${who}…`}
+              />
             </div>
           </div>
         }
