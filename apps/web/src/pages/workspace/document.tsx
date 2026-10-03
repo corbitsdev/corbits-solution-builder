@@ -83,10 +83,11 @@ export function StageDocument({
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   turns: StageTurn[];
-  /** A question visibly recorded in the latest specialist mail. `ordinal`
-   *  counts it among the questions already answered this stage; `total` is
-   *  set only when the specialist's own text states how many there are. */
-  openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
+  /** The question still open (`openQuestionTurn`) and the turn that asked
+   *  it. `ordinal` counts it among the questions already answered this
+   *  stage; `total` is set only when the specialist's own text states how
+   *  many there are. */
+  openQuestion: { turnId: string; text: string; ordinal?: number | null; total?: number | null } | null;
   /** The stage evaluator's verdict, advisory only. Null on a stage no evaluator reads. */
   evaluation?: Evaluation | null;
   /** Advice shown in the approval bar beside the approve control, such as
@@ -271,13 +272,6 @@ export function StageDocument({
     return eventMessages(list, events);
   }, [turns, busy, pending, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
-  // The array's last entry is often a system bookkeeping line ("Review
-  // opened", a draft's version) that sorted in after the specialist's real
-  // last turn. Answer chips belong to the last turn, not the last line.
-  const lastTurnId = useMemo(
-    () => messages.findLast((message) => message.role !== "system")?.id,
-    [messages],
-  );
 
   // What each specialist turn did with the answer before it: which version the
   // answer produced, and whether the question that follows continues the same
@@ -445,12 +439,9 @@ export function StageDocument({
                   note={notes.get(message.id) ?? null}
                   draft={draftRefs.get(message.id) ?? null}
                   onOpenVersion={onSelectVersion}
-                  // Tapping a choice sends it, exactly as typing it would. That
-                  // holds outside the interview too: a brainstormer proposing
-                  // options is asking for a choice, whether or not a question
-                  // is queued.
+                  // Tapping a choice sends it, exactly as typing it would.
                   onAnswer={
-                    busy === null && message.id === lastTurnId
+                    busy === null && message.id === openQuestion?.turnId
                       ? (answer) => {
                           // The last tap sends what the box was gathering
                           // (#186): the box empties, as after any send, so

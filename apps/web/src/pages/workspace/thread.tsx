@@ -9,7 +9,7 @@ import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-promp
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft, openQuestionTurn } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
@@ -180,10 +180,10 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
-  /** Sends a tapped answer to the latest turn's question, as typing it would. */
+  /** Sends a tapped answer to the open question, as typing it would. */
   onAnswer?: ((answer: string) => void) | undefined;
 }) {
-  const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
+  const openQuestionId = useMemo(() => openQuestionTurn(messages)?.id, [messages]);
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -293,7 +293,7 @@ export function StageConversation({
                       note={null}
                       draft={draft}
                       onOpenVersion={onOpenVersion ?? (() => undefined)}
-                      onAnswer={message.id === lastAgentId && !pending ? onAnswer : undefined}
+                      onAnswer={message.id === openQuestionId && !pending ? onAnswer : undefined}
                       onDraft={onValueChange}
                     />
                   ) : (

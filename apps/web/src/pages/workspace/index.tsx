@@ -45,7 +45,7 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, isHtmlDocument, latestDesignReply, openQuestionTurn, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
 import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app/stage-prompt";
@@ -386,6 +386,7 @@ export function StageWorkspace({
   );
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
+  const openTurn = useMemo(() => openQuestionTurn(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -1250,8 +1251,8 @@ export function StageWorkspace({
             tenantId={tenantId}
             turns={turns}
             openQuestion={
-              guidance.question
-                ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+              openTurn && guidance.question
+                ? { turnId: openTurn.id, text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                 : null
             }
             evaluation={

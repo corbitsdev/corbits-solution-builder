@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../../stage-mail.ts";
 import { segmentsIn } from "./choices.ts";
+import { appView } from "./composed-mail.ts";
 
 export type InterviewQuestion = {
   readonly text: string;
@@ -37,8 +38,8 @@ export type InterviewProgress = {
  * only when that total is not already exceeded.
  */
 export function interviewProgress(messages: readonly ChatMessage[]): InterviewProgress | null {
-  const current = latestAgent(messages);
-  if (!current || !questionIn(current.body)) return null;
+  const current = openQuestionTurn(messages);
+  if (!current) return null;
   const answered = messages.filter(
     (message) => message.author === "agent" && message.id !== current.id && questionIn(message.body) !== null,
   ).length;
@@ -114,6 +115,23 @@ function questionIn(body: string): InterviewQuestion | null {
   return { text: first.question, choices: [...first.options] };
 }
 
+/**
+ * The specialist turn whose question is still open: the latest that asked
+ * one, until the person replies. Mail the app sends on its own account
+ * (`appView`) is not the person replying, and a later reply that asks
+ * nothing, such as a revision from the evaluator's notes, leaves it open.
+ */
+export function openQuestionTurn(messages: readonly ChatMessage[]): ChatMessage | null {
+  for (const message of [...messages].reverse()) {
+    if (message.author === "agent") {
+      if (questionIn(message.body)) return message;
+    } else if (appView(message) === null) {
+      return null;
+    }
+  }
+  return null;
+}
+
 function latestAgent(messages: readonly ChatMessage[]): ChatMessage | null {
   return [...messages].reverse().find((message) => message.author === "agent") ?? null;
 }
@@ -165,7 +183,8 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   const purpose = PURPOSE[stage] ?? "Review the available evidence and identify the next human decision.";
   const latest = latestAgent(messages);
   const draft = latestSubstantialDraft(messages);
-  const question = latest ? questionIn(latest.body) : null;
+  const open = openQuestionTurn(messages);
+  const question = open ? questionIn(open.body) : null;
 
   if (question) {
     return {
