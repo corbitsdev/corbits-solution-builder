@@ -410,7 +410,12 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const [view, setShownView] = useState<View>(initialView);
+  const setView = (next: View) => {
+    setNotice(null);
+    setError(null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
