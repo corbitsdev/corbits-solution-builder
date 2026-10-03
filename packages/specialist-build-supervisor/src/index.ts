@@ -55,9 +55,9 @@ A build status with these headings, after \`## In short\`:
   marker, placeholder or dropped error the host's scan found is a failed
   check, listed under Required checks and their status with its path and
   line. Tests the host did not run are not run; the worker's claim that they
-  pass counts only if its final text shows the command and its output. Name
-  every requirement id the final text does not show as implemented and
-  tested.
+  pass counts only if its final text shows the command and its output. Name,
+  by what it asks, every requirement the final text does not show as
+  implemented and tested.
 
 ${SHARED_RULES}
 
