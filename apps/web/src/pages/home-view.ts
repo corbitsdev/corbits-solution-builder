@@ -51,8 +51,9 @@ export function cardDescription(project: {
  * One segment of the mockup's 9-seg track: prior stages fill, the live one
  * stretches (`now`), and a finished project fills the current segment too.
  */
-export function stageTrackSegClass(at: number, stage: number | null, done: boolean): string {
+export function stageTrackSegClass(at: number, stage: number | null, done: boolean, skipped: readonly number[]): string {
   if (stage === null) return "seg";
+  if (skipped.includes(at)) return "seg skipped";
   if (at < stage || (done && at <= stage)) return "seg done";
   if (at === stage) return "seg now";
   return "seg";

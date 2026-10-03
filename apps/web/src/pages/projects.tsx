@@ -17,7 +17,7 @@ import { Banner, Button } from "../components.jsx";
 // stage/turn/done come from project-list.ts helpers and spend copy from
 // project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
 import { readImportPayload } from "../project-import.js";
-import { displayDone, displayStage, displayTurn } from "../project-list.js";
+import { displayDone, displaySkipped, displayStage, displayTurn } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -293,6 +293,7 @@ function ProjectCard({
   const [stageFailed, setStageFailed] = useState(false);
   const [stageAttempt, setStageAttempt] = useState(0);
   const [done, setDone] = useState(false);
+  const [skipped, setSkipped] = useState<readonly number[]>([]);
   useEffect(() => {
     setStage(null);
     setStageFailed(false);
@@ -306,6 +307,7 @@ function ProjectCard({
       }
       setStage(resolved);
       setDone(displayDone(project.id));
+      setSkipped(displaySkipped(project.id));
     });
     return () => {
       cancelled = true;
@@ -445,7 +447,7 @@ function ProjectCard({
 
       <p className="card-desc">{cardDescription(project)}</p>
 
-      <StageTrack stage={stage} done={done} />
+      <StageTrack stage={stage} done={done} skipped={skipped} />
 
       <div className="card-foot">
         <span>
@@ -473,12 +475,12 @@ function ProjectCard({
 }
 
 /** The same nine-segment language the topbar stepper speaks, one per card. */
-function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
+function StageTrack({ stage, done, skipped }: { stage: number | null; done: boolean; skipped: readonly number[] }) {
   return (
     <div className="card-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
       {Array.from({ length: 9 }, (_, index) => {
         const at = index + 1;
-        return <span key={at} className={stageTrackSegClass(at, stage, done)} />;
+        return <span key={at} className={stageTrackSegClass(at, stage, done, skipped)} />;
       })}
     </div>
   );
