@@ -5,6 +5,9 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
+import { keys } from "./queries/keys.ts";
+import { useQuery } from "@tanstack/react-query";
+import { Toaster, toast } from "sonner";
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
   api,
@@ -30,6 +33,7 @@ import { StageTour } from "./tour.jsx";
 import {
   BootScreen,
   NotificationsBell,
+  useTheme,
   type WorkflowStep,
 } from "@corbits/react-ui";
 import { subscribeInbox, type InboxState } from "./inbox.ts";
@@ -257,6 +261,13 @@ export function AppBar({
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
+  // The same read the home card makes, so a finished project's track says so.
+  const workflow = useQuery({
+    queryKey: keys.workflowView.card(detail?.project.id ?? ""),
+    queryFn: () => api.projectWorkflowView(detail!.project.id),
+    enabled: inProject,
+    retry: false,
+  });
   const inSettings = view === "settings";
   return (
     <header className={inProject ? "topbar topbar-project" : "topbar"}>
@@ -325,7 +336,9 @@ export function AppBar({
             <span className="step-name">
               {viewedStage !== null && viewedStage !== detail.stage
                 ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
-                : stageName(detail.stage)}
+                : workflow.data?.done
+                  ? "Delivered"
+                  : stageName(detail.stage)}
             </span>
           </>
         ) : null}
@@ -410,7 +423,12 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const { resolvedMode } = useTheme();
+  const [view, setShownView] = useState<View>(initialView);
+  const setView = (next: View) => {
+    setError(null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
@@ -432,8 +450,6 @@ export function App() {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  // Where a download landed, said once (#323): the title menu's notices.
-  const [notice, setNotice] = useState<string | null>(null);
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
@@ -800,7 +816,7 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={setNotice}
+        onNotice={(message) => toast.success(message)}
         onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
@@ -808,6 +824,7 @@ export function App() {
         }}
       />
 
+      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -821,9 +838,6 @@ export function App() {
           </Banner>
         ) : null}
 
-        {notice ? (
-          <Banner tone="okay" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
-        ) : null}
 
         {view === "projects" ? (
           <Projects projects={projects} onOpen={openProject} onChanged={refresh} />

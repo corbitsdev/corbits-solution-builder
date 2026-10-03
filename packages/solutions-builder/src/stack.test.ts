@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeOperation, parseStackRecord, stackSectionOf, type StackMode, type StackRecord } from "./stack.js";
+import { describeOperation, parseStackRecord, STACK_BLOCK_SHAPE, stackSectionOf, type StackMode, type StackRecord } from "./stack.js";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 
@@ -188,5 +188,31 @@ describe("describeOperation", () => {
       }),
     );
     expect(description.needs.toLowerCase()).not.toContain("@intx");
+  });
+});
+
+// #617: the shape a specialist is told is the shape the parser accepts.
+describe("STACK_BLOCK_SHAPE", () => {
+  test("names every field of a record the parser accepts", () => {
+    const stack = record({ mode: "hub", hubPlacement: "cloud", packages: [{ ...CHOICE, name: "@intx/workflow" }] });
+    expect(parseStackRecord(planWithStack(stack))).not.toBeNull();
+    const fields = [...Object.keys(stack), ...Object.keys(stack.runtime), ...Object.keys(stack.packaging), ...Object.keys(stack.packages[0]!)];
+    for (const field of new Set(fields)) expect(STACK_BLOCK_SHAPE).toContain(`"${field}"`);
+  });
+
+  test("names every mode, hub placement and packaging kind the parser accepts", () => {
+    const modes: StackMode[] = ["plain", "inference", "agent", "local-workflow", "durable-workflow", "hub"];
+    for (const mode of modes) {
+      expect(parseStackRecord(planWithStack(record({ mode })))).not.toBeNull();
+      expect(STACK_BLOCK_SHAPE).toContain(`"${mode}"`);
+    }
+    for (const hubPlacement of ["embedded", "cloud"] as const) {
+      expect(parseStackRecord(planWithStack(record({ mode: "hub", hubPlacement })))).not.toBeNull();
+      expect(STACK_BLOCK_SHAPE).toContain(`"${hubPlacement}"`);
+    }
+    for (const kind of ["compiled-binary", "web-hosted", "desktop", "cli", "library"] as const) {
+      expect(parseStackRecord(planWithStack(record({ packaging: { ...CHOICE, kind } })))).not.toBeNull();
+      expect(STACK_BLOCK_SHAPE).toContain(`"${kind}"`);
+    }
   });
 });
