@@ -1,5 +1,16 @@
-import { api, STAGE_DRAFT_KIND, type ArtifactNode } from "../../client.ts";
+import { api, STAGE_DRAFT_KIND } from "../../client.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../../project-import.ts";
+import type { ChainNode } from "./approved-chain.ts";
+
+/** An imported stage's conversation and its latest draft: the nodes its history reads. None for a project that was not imported. */
+export function importedHistoryNodes(nodes: readonly ChainNode[], stage: number): { readonly conversation?: ChainNode | undefined; readonly draft?: ChainNode | undefined } {
+  const ofStage = nodes.filter((node) => node.stage === stage && node.supersededByNodeId === null);
+  const conversation = ofStage.find((node) => node.kind === IMPORTED_CONVERSATION_KIND);
+  if (!conversation) return {};
+  const draftKind = STAGE_DRAFT_KIND[stage];
+  const draft = ofStage.filter((node) => node.kind === draftKind).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+  return { conversation, draft };
+}
 
 /**
  * What an imported project's stage already said and wrote, for that stage's
@@ -7,15 +18,12 @@ import { IMPORTED_CONVERSATION_KIND } from "../../project-import.ts";
  * specialist would start the stage over beside a transcript it never read.
  * Empty for any project that was not imported.
  */
-export async function importedHistory(tenantId: string, nodes: readonly ArtifactNode[], stage: number): Promise<string> {
-  const ofStage = nodes.filter((node) => node.stage === stage && node.supersededByNodeId === null);
-  const conversation = ofStage.find((node) => node.kind === IMPORTED_CONVERSATION_KIND);
+export async function importedHistory(tenantId: string, nodes: readonly ChainNode[], stage: number): Promise<string> {
+  const { conversation, draft } = importedHistoryNodes(nodes, stage);
   if (!conversation) return "";
-  const draftKind = STAGE_DRAFT_KIND[stage];
-  const draft = ofStage.filter((node) => node.kind === draftKind).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
   // A failed read fails the opening, which shows it and retries: a stage
   // opened without its imported history would start over.
-  const read = async (node: ArtifactNode | undefined) => (node ? (await api.artifactContent(tenantId, node.id)).content.trim() : "");
+  const read = async (node: ChainNode | undefined) => (node ? (await api.artifactContent(tenantId, node.id)).content.trim() : "");
   const [transcript, document] = await Promise.all([read(conversation), read(draft)]);
   const parts = [
     "This project was imported. Continue this stage from where it left off; do not start it over or ask again what is already answered.",

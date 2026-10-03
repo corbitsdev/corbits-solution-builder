@@ -12,7 +12,9 @@
  * other attached file. A design is handed as its text, never its markup
  * (#219), capped the way a hand-off is.
  */
+import { queryOptions } from "@tanstack/react-query";
 import { api, type ArtifactNode } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import type { ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { renderInputs, type Inputs } from "@solutions-builder/app/stage-prompt";
@@ -20,6 +22,7 @@ import { DESIGN_TEXT_CAP, designAsText } from "../../design-handoff.ts";
 import { capMaterialText } from "../../material-reading.ts";
 import { isHtmlDocument } from "./guidance.ts";
 import { OPENING_VARIANT } from "../../project-list.ts";
+import { importedHistory, importedHistoryNodes } from "./imported-history.ts";
 
 export type ChainNode = Pick<ArtifactNode, "id" | "kind" | "stage" | "title" | "artifactId" | "version" | "variant" | "supersededByNodeId" | "createdAt" | "mediaType">;
 
@@ -139,9 +142,24 @@ export async function composeApprovedChain(deps: {
   readonly nodes: readonly ChainNode[];
   readonly reviews: Readonly<Record<number, ReviewState | undefined>>;
   readonly stage: number;
-  /** An imported stage's history (`importedHistory`), inside the chain so the transcript folds it away with the rest. */
-  readonly history: string;
 }): Promise<string> {
   const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
-  return renderApprovedChain(await readHandedItems(deps.tenantId, chain), deps.stage, deps.history);
+  // An imported stage's history goes inside the chain, so the transcript folds it away with the rest.
+  const history = await importedHistory(deps.tenantId, deps.nodes, deps.stage);
+  return renderApprovedChain(await readHandedItems(deps.tenantId, chain), deps.stage, history);
+}
+
+/**
+ * The chain as a query, keyed on the exact nodes it reads: the architect's
+ * opening and stage 6's requirements author read one composition. A node's
+ * content never changes under its id, so a composed chain is never stale.
+ */
+export function approvedChainQuery(deps: Parameters<typeof composeApprovedChain>[0]) {
+  const { conversation, draft } = importedHistoryNodes(deps.nodes, deps.stage);
+  const nodeIds = [...approvedChainNodes(deps.nodes, deps.reviews, deps.stage), conversation, draft].flatMap((node) => (node ? [node.id] : []));
+  return queryOptions({
+    queryKey: keys.approvedChain.of(deps.tenantId, deps.stage, nodeIds),
+    queryFn: () => composeApprovedChain(deps),
+    staleTime: Infinity,
+  });
 }
