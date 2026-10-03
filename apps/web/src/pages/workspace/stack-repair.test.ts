@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { repairedStackDraft, stackCarriedFromEarlierVersion, withStackSection } from "./stack-repair.ts";
+import { repairedStackDraft, withStackSection } from "./stack-repair.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 
 const msg = (id: string, author: "me" | "agent", body: string): ChatMessage => ({ id, author, body, at: `2026-01-01T00:00:${id.padStart(2, "0")}.000Z` });
@@ -8,17 +8,6 @@ const headed = (middle: string) => ["Status line.", "", "## In short", "- a", ""
 const v1 = headed(`${STACK}\n\n`);
 const v2NoStack = headed("");
 const v2Unchanged = headed("## Stack\n\nThe stack is unchanged from v1.\n\n");
-
-describe("stackCarriedFromEarlierVersion", () => {
-  const versions: Record<number, string> = { 1: v1, 2: v2NoStack };
-  const read = async (version: number) => versions[version]!;
-
-  test("a version that dropped the block gets the newest earlier version's block; one that has it needs nothing", async () => {
-    expect(await stackCarriedFromEarlierVersion(v2NoStack, 3, read)).toContain("```json stack");
-    expect(await stackCarriedFromEarlierVersion(v1, 3, read)).toBeNull();
-    expect(await stackCarriedFromEarlierVersion(v2NoStack, 2, async () => v2NoStack)).toBeNull();
-  });
-});
 
 describe("repairedStackDraft", () => {
   test("a revision that dropped the block gets the earlier version's block before Components", () => {

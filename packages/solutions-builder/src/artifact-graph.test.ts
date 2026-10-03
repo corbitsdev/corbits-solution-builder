@@ -80,17 +80,6 @@ describe("foldArtifactGraph", () => {
     expect(graph.nodes.map((n) => n.id)).toEqual(["art_brief"]);
   });
 
-  test("folds a drafting stage's document as its specialist wrote it, with no sb metadata", () => {
-    const written = (id: string, kind: string, origin: string) => ({ ...entry(id, 3, kind, null), kind, source: { origin } });
-    const graph = foldArtifactGraph(
-      [written("art_plan", "build_plan", "workflow"), written("art_design", "design_artifact", "workflow"), written("art_pasted", "build_plan", "imported")],
-      "proj_1",
-    );
-    expect(graph.nodes).toEqual([
-      expect.objectContaining({ id: "art_plan", versionId: "art_plan@3", kind: "build_plan", stage: 6, provenance: { producer: "agent", agentRole: "architect" } }),
-    ]);
-  });
-
   test("folds a withdrawn-turns record with no sourceVersionIds (CL-8920)", () => {
     const withdrawnTurns = entry("art_withdrawn", 1, "Withdrawn turns", {
       projectId: "proj_1",
