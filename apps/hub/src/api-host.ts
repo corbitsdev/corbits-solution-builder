@@ -15,6 +15,7 @@ import {
   mountGoogleDrive,
   type GoogleSecretStore,
 } from "@corbits/embedded-host";
+import { projectParam } from "./api-build.js";
 
 /**
  * The Google Drive connection's client and tokens live in the OS keychain
@@ -71,9 +72,8 @@ export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keych
    * the page waits for them before it ensures anything. A remote hub places
    * its own sidecars and answers nothing here.
    */
-  api.post("/projects/:projectId/recover-deployments", async (context) => {
-    const projectId = context.req.param("projectId");
-    if (!/^tnt_[0-9a-f]+$/.test(projectId)) throw new HostError("validation_failed", "A project id names a tenant.");
+  api.post("/projects/:id/recover-deployments", async (context) => {
+    const projectId = await projectParam(context);
     const body: unknown = await context.req.json().catch(() => null);
     const ids = body !== null && typeof body === "object" ? (body as { deploymentIds?: unknown }).deploymentIds : undefined;
     if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && /^run_[0-9a-f]+$/.test(id))) {
