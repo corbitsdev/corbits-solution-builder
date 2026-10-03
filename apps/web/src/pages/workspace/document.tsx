@@ -547,32 +547,34 @@ export function StageDocument({
               <span className="composer-approve-lead">
                 <span>Which approach?</span>
                 {advisory}
+                {targetPending ? <span className="composer-note">Pick how it will be used first.</span> : null}
               </span>
-              {targetPending ? <span className="composer-note">Pick how it will be used first.</span> : null}
-              {approaches.map((section) => {
-                const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
-                const name = approachName(section.heading) ?? `Approach ${letter}`;
-                return (
-                  <Button
-                    key={section.heading}
-                    variant="primary"
-                    disabled={busy !== null || targetPending}
-                    onClick={() => onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)}
-                  >
-                    {name}
-                  </Button>
-                );
-              })}
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() => {
-                  setRedrafting(true);
-                  composer.current?.focus();
-                }}
-              >
-                Neither, redraft
-              </Button>
+              <span className="composer-choices">
+                {approaches.map((section) => {
+                  const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
+                  const name = approachName(section.heading) ?? `Approach ${letter}`;
+                  return (
+                    <Button
+                      key={section.heading}
+                      variant="primary"
+                      disabled={busy !== null || targetPending}
+                      onClick={() => onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)}
+                    >
+                      {name}
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="ghost"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setRedrafting(true);
+                    composer.current?.focus();
+                  }}
+                >
+                  Neither, redraft
+                </Button>
+              </span>
             </div>
           ) : promote ? (
             <div className="stage-action composer-approve">
