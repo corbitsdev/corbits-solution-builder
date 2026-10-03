@@ -28,7 +28,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { summarizeVerification, type VerificationItem, type VerificationReport } from "./delivery.js";
@@ -75,9 +75,55 @@ export type DeliveryVerificationContent = {
 /** Walks `dir` and returns every regular file's path (relative, POSIX) with
  *  its sha256 and size, skipping any path segment named in `exclude`. */
 export async function hashTree(dir: string, exclude: ReadonlySet<string>): Promise<ManifestFileEntry[]> {
-  const paths = await walkFiles(dir, exclude);
+  return hashFiles(dir, await walkFiles(dir, exclude));
+}
+
+/** Every regular file under `dir` that ships: what git would keep (tracked,
+ *  or untracked and not ignored by any `.gitignore`), less any path segment
+ *  named in `exclude`. Git decides, so the build output a toolchain's
+ *  `.gitignore` names never reaches the archive; a directory that is not a
+ *  repository is read through a throwaway one. */
+export async function shippedFiles(dir: string, exclude: ReadonlySet<string>): Promise<string[]> {
+  const listed = await listUnignored(dir);
+  const paths = [...new Set(listed.split("\0"))].filter((path) => path.length > 0 && !path.split("/").some((segment) => exclude.has(segment)));
+  const regular = await Promise.all(paths.map(async (path) => ((await lstat(join(dir, path)).catch(() => null))?.isFile() ? path : null)));
+  return regular.filter((path): path is string => path !== null).sort();
+}
+
+async function listUnignored(dir: string): Promise<string> {
+  const inRepo = await runGit(["-C", dir, "rev-parse", "--is-inside-work-tree"]).then(
+    (out) => out.trim() === "true",
+    () => false,
+  );
+  if (inRepo) return runGit(["-C", dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  const scratch = await mkdtemp(join(tmpdir(), "sb-ship-"));
+  try {
+    await runGit(["init", "-q", "--bare", scratch]);
+    return await runGit([`--git-dir=${scratch}`, `--work-tree=${dir}`, "ls-files", "-z", "--others", "--exclude-standard"]);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+function runGit(args: readonly string[]): Promise<string> {
+  return new Promise((res, reject) => {
+    const child = spawn("git", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) res(Buffer.concat(out).toString("utf8"));
+      else reject(new Error(`git ${args.join(" ")} exited ${String(code)}: ${Buffer.concat(err).toString("utf8")}`));
+    });
+  });
+}
+
+/** Hashes each listed file (relative, POSIX) under `dir`, in path order. */
+export async function hashFiles(dir: string, paths: readonly string[]): Promise<ManifestFileEntry[]> {
   return Promise.all(
-    paths.sort().map(async (path): Promise<ManifestFileEntry> => {
+    [...paths].sort().map(async (path): Promise<ManifestFileEntry> => {
       const bytes = await readFile(join(dir, path));
       return { path, sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.byteLength };
     }),
