@@ -2128,11 +2128,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* The brief evaluator's stance, one line in the approval bar (#157). Its
-   notes open beneath the pointer or the focus, or on a click, as a popover
-   anchored to the stance rather than a paragraph in the column. */
+   notes open on a click beneath the stance, in the row's own flow: a popover
+   was clipped by the composer's scroll and covered the Approve action. */
 .evaluator-stance {
-  position: relative;
   display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
 }
 
@@ -2143,7 +2144,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--wb-muted-foreground);
-  cursor: default;
+  cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
   overflow: hidden;
@@ -2162,11 +2163,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .evaluator-notes {
   display: none;
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + var(--space-2));
-  z-index: 30;
-  width: min(48ch, 80vw);
+  max-width: 48ch;
+  margin-top: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--wb-border-strong);
   border-radius: var(--radius-panel);
@@ -2175,7 +2173,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-family: var(--wb-font-ui);
   font-size: 0.8125rem;
   line-height: 1.45;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+  white-space: normal;
 }
 
 .evaluator-notes ul {
@@ -2185,8 +2183,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-2);
 }
 
-.evaluator-stance:hover .evaluator-notes,
-.evaluator-stance:focus-within .evaluator-notes,
 .evaluator-stance[data-open] .evaluator-notes {
   display: block;
 }

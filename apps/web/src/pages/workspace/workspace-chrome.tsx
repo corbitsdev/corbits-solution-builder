@@ -18,9 +18,9 @@ import { BusyLine } from "../../zen-garden.tsx";
 /**
  * A stage evaluator's advisory verdict, as one line in the approval
  * bar (#157): a stance beside the approve button, with the evaluator's notes
- * in a popover that opens on hover, on focus, or with a click and closes on
- * Escape. Never a gate: the approve button's enablement is unchanged. A
- * full verdict inline above the composer pushed the conversation out of
+ * opening beneath it on a click and closing on a second click or Escape.
+ * Never a gate: the approve button's enablement is unchanged. A full
+ * verdict inline above the composer pushed the conversation out of
  * view, and the gate repeated its notes a second time.
  */
 export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: StageEvaluator; notesError?: string | null }) {
@@ -55,7 +55,7 @@ export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: S
         {stance.label}
       </button>
       {hasNotes ? (
-        <div id={id} role="tooltip" className="evaluator-notes">
+        <div id={id} className="evaluator-notes">
           <ul>
             {stance.notes.map((note, index) => (
               <li key={index}>
