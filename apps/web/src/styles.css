@@ -154,6 +154,28 @@ input[type="file"]:not(:disabled) {
   outline-offset: 3px;
 }
 
+/* A pane or a scrolling region can take focus too, but a ring around a
+   whole pane reads as an error frame, not as where the keyboard is. The
+   ring is for controls; a container with a role still gets one. */
+:where(div, section, main, article, aside, ul, ol):not([role]):focus-visible {
+  outline: none;
+}
+
+/* The design's approval floats at the foot of the pane, where reading ends. */
+.pane-approve {
+  position: sticky;
+  bottom: var(--space-4);
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+  pointer-events: none;
+}
+
+.pane-approve > * {
+  pointer-events: auto;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--wb-foreground) 18%, transparent);
+}
+
 /* ChatInput's textarea sits inside a rounded wrapper; a plain focus-visible
    outline on the textarea itself draws a sharp rectangle inside that curve.
    Ring the rounded wrapper instead via :focus-within, and drop the inner
