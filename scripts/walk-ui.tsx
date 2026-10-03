@@ -246,6 +246,7 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       events={fixtureEvents}
       onSelectVersion={() => {}}
       onRevise={() => {}}
+      onChoose={() => {}}
       onSubmit={() => {}}
     />
   );

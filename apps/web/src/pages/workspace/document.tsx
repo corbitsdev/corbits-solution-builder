@@ -62,6 +62,7 @@ export function StageDocument({
   draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
+  onChoose,
   onAddMaterial,
   documents = [],
   attachedByTurn = EMPTY_ATTACHED,
@@ -109,6 +110,8 @@ export function StageDocument({
   onSelectVersion: (id: string) => void;
   /** Resolves false when the message did not go, which puts its attached documents back. */
   onRevise: (message: string, quotes: Quote[], revise?: boolean, attached?: readonly AttachedDocument[]) => void | Promise<boolean>;
+  /** Sends stage 3's choice of approach. */
+  onChoose: (letter: string, name: string) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   documents?: readonly AttachedDocument[];
@@ -558,7 +561,7 @@ export function StageDocument({
                       key={section.heading}
                       variant="primary"
                       disabled={busy !== null || targetPending}
-                      onClick={() => onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)}
+                      onClick={() => onChoose(letter, name)}
                     >
                       {name}
                     </Button>

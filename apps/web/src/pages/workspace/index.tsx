@@ -49,7 +49,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag, isEvaluatorNotes, taggedSubject } from "./composed-mail.ts";
+import { appSubject, artifactTag, isEvaluatorNotes, taggedSubject } from "./composed-mail.ts";
 import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft, stackCarriedFromEarlierVersion } from "./stack-repair.ts";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
@@ -708,7 +708,8 @@ export function StageWorkspace({
   });
 
   /** Whether the message went; a refused one keeps its attachments in the composer. */
-  const send = async (body: string, attached: readonly AttachedDocument[] = []): Promise<boolean> => {
+  /** `choice` names the stage 3 approach the chooser sent, so the chat shows the mail as that event. */
+  const send = async (body: string, attached: readonly AttachedDocument[] = [], choice?: string): Promise<boolean> => {
     if (!agentAddress || body.trim().length === 0) return false;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
@@ -729,7 +730,7 @@ export function StageWorkspace({
       // wrote it, such as one taking over after a model hand-off, revises it
       // instead of starting a second; so does each document attached.
       const tags = [...(work?.state === "ready" ? [artifactTag(work.artifact)] : []), ...(await attachedSubjectTags(tenantId, attached))];
-      await api.sendStageMail(tenantId, agentAddress, { body, ...taggedSubject(tags, body) });
+      await api.sendStageMail(tenantId, agentAddress, { body, ...(choice === undefined ? taggedSubject(tags, body) : { subject: appSubject("choice", choice, tags) }) });
       await loadThread();
       return true;
     } catch (cause) {
@@ -955,6 +956,10 @@ export function StageWorkspace({
                 artifacts.selectVersion(null);
                 const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
                 return send(quoted ? `${quoted}\n\n${message}` : message, attached);
+              }}
+              onChoose={(letter, name) => {
+                artifacts.selectVersion(null);
+                void send(`Chosen: Approach ${letter} (${name}).`, [], name);
               }}
               documents={attachDocuments}
               attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
