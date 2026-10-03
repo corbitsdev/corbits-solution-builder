@@ -7,12 +7,14 @@
  */
 import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
 import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
+import { keys } from "../queries/keys.ts";
 import { manifestCompanionOf } from "./workspace/stage9-opening.ts";
 import { parseDeliveryManifest } from "./workspace/delivery-opening.ts";
 
@@ -428,27 +430,20 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
 export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const manifestId = node.sizeBytes === undefined ? (manifestCompanionOf(nodes, node)?.id ?? null) : null;
-  const [recordedSize, setRecordedSize] = useState<number | undefined>(undefined);
-  useEffect(() => {
-    setRecordedSize(undefined);
-    if (!manifestId) return;
-    let cancelled = false;
-    api
-      .artifactContent(tenantId, manifestId)
-      .then((result) => {
-        const sizeBytes = parseDeliveryManifest(result.content)?.archive.sizeBytes;
-        if (!cancelled && typeof sizeBytes === "number") setRecordedSize(sizeBytes);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, manifestId]);
+  // An artifact id names a fixed version, so its content is never stale.
+  const manifest = useQuery({
+    queryKey: keys.artifact.of(tenantId, manifestId ?? ""),
+    queryFn: async () => (await api.artifactContent(tenantId, manifestId!)).content,
+    enabled: manifestId !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const recordedSize = manifest.data === undefined ? undefined : parseDeliveryManifest(manifest.data)?.archive.sizeBytes;
   const sizeBytes = node.sizeBytes ?? recordedSize;
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive · {sizeBytes === undefined ? "size not recorded" : `${formatSize(sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
+        {node.title} · tar.gz archive · {sizeBytes !== undefined ? `${formatSize(sizeBytes)} stored` : manifest.isError ? "size could not be read" : manifestId !== null && manifest.isPending ? "reading its size" : "size not recorded"}. The build attempt's workspace as the worker left it,
         without installed dependencies; it unpacks into a directory named for the project. Its bytes are what delivery
         review verifies once accepted.
       </p>
