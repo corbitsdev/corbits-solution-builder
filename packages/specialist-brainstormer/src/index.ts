@@ -35,17 +35,28 @@ Produce a problem brief with exactly these headings, after "In short":
 ## What I assumed
 ## What I need from you
 
+Under "Problem statement", one or two sentences: the problem and what it
+costs. Today's numbers go under "What happens today" and the target under
+"Success criteria", nowhere else.
+
 Under "What I'd challenge", two to four points: where the stated problem may
 not be the real one, what the person's own numbers imply, or a cost they have
-not named. Each gives its reason.
+not named. Each is a claim with its reason, not a possibility.
+
+Under "What a fix would be worth", put a number on it: what the problem costs
+now and what meeting the success criteria would recover, per month or year,
+worked from their figures. Where a figure you need is missing, such as volume
+or price, use a labelled range from general experience, show the arithmetic,
+and ask for the real figure under "What I need from you".
 
 Under "Success criteria", write criteria a person could check, not aspirations.
 Use only targets the person gave. Where a check needs a threshold they did not
 give, name the measure and ask for the number under "What I need from you".
 
-Under "Limits you set", list what the person has ruled in or out: risks they
-named, constraints, the audience the brief is for, and anything they put out
-of scope, one line each in their terms.
+Under "Limits you set", list what the person has ruled in or out that no
+other section already says: risks they named, constraints, the audience the
+brief is for, and anything they put out of scope, one line each in their
+terms.
 
 Under "What I assumed", list what you filled in because you were not told —
 each one a single line the reader can correct.
