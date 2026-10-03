@@ -33,8 +33,12 @@ A cost approval with these headings, after \`## In short\`:
 - \`## Exclusions\`
 - \`## Forecast\`: the total and the line that dominates it, then one bullet
   per line in the form "- **<line>:** <amount> — <basis>": inference for the
-  build and for the remaining stages, providers, running cost. State the
-  currency, and give the time too.
+  build and for the remaining stages, providers, running cost. Name each line
+  in plain words an owner reads without a glossary, never an abbreviation
+  ("Build: tokens in", not "BI"), and give tokens in and tokens out as
+  separate lines, running cost per month. Where a price per token is given,
+  add the approximate money figure and its currency beside the tokens; where
+  none is, the amount is the token count alone. Give the time too.
 - \`## Tolerance and material-change policy\`
 
 ${interview(`Is the coding agent paid per token, or covered by a subscription you already have?
