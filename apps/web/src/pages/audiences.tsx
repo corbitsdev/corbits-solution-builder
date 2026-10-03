@@ -29,6 +29,7 @@ import { SlidePreview } from "../slide-preview.tsx";
 import { packageNudge, packageReplyProblem, packageRequest } from "../package-request.ts";
 import { mockupShots, placeMockups, type MockupShot } from "../mockup-shots.ts";
 import { isHtmlDocument } from "./workspace/guidance.ts";
+import { appSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
@@ -463,7 +464,7 @@ export function AudiencePackages({
     // project and the theme render_deck should draw with. Best effort — a
     // brief that cannot be read never stops a package being asked for.
     const brief = await api.deckBrief(detail.project.id, audience.role).catch(() => null);
-    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design, brief) });
+    await api.sendStageMail(tenantId, deployment.address, { subject: appSubject("package", name), body: packageRequest(audience, design, brief) });
     let reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     // Not every reply is a package (#220): one with no deck outline is
@@ -473,7 +474,7 @@ export function AudiencePackages({
     let problem = packageReplyProblem(name, reply.body);
     if (problem) {
       const seenBefore = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
-      await api.sendStageMail(tenantId, deployment.address, { body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
+      await api.sendStageMail(tenantId, deployment.address, { subject: appSubject("package", name), body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
       reply = await awaitPackageReply(tenantId, deployment.address, seenBefore, name, () => cancelledRef.current);
       if (cancelledRef.current) return;
       problem = packageReplyProblem(name, reply.body);

@@ -27,6 +27,7 @@ import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { appSubject } from "./composed-mail.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -320,6 +321,7 @@ export function BuildPanel({
         manifest: packaged.manifest,
       });
       await api.sendStageMail(tenantId, address, {
+        subject: appSubject("brief", String(attempt.attempt)),
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
@@ -357,7 +359,6 @@ export function BuildPanel({
             </div>
           ) : null}
           <StageConversation
-            stage={8}
             messages={messages}
             value={composer}
             onValueChange={setComposer}

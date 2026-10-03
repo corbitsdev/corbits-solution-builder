@@ -783,7 +783,6 @@ export function StageWorkspace({
 
   const conversation = (
     <StageConversation
-      stage={stage}
       messages={foldedMessages}
       value={composer}
       onValueChange={setComposer}

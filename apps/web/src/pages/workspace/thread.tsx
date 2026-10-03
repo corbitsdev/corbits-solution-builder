@@ -4,7 +4,8 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
+import { appEventLine, composedMailFold } from "./composed-mail.ts";
+import { pairReplies } from "../../withdrawn-turns.ts";
 import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -125,7 +126,6 @@ function messageText(message: UiChatMessage): string {
  * working-and-Stop behavior.
  */
 export function StageConversation({
-  stage,
   messages,
   value,
   onValueChange,
@@ -145,7 +145,6 @@ export function StageConversation({
   draftRefs = EMPTY_REFS,
   onOpenVersion,
 }: {
-  stage: number;
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
@@ -180,6 +179,7 @@ export function StageConversation({
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const answeredBy = useMemo(() => pairReplies(messages).answeredBy, [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
     // A turn in flight has no row of its own yet, so the transcript would sit
@@ -245,27 +245,16 @@ export function StageConversation({
             }
             const text = messageText(message);
             const you = message.role === "user";
-            // Stage 5 asks for each stakeholder's package itself, and the
-            // package lands in its own tab: the chat records both as events,
-            // not as the person's words or a document pasted in the thread.
-            const asked = you ? /^Write the package for: ([^,\n]+)/.exec(text) : null;
-            const wrote = !you && stage === 5 ? /^#{2,3}\s+Audience:\s*(.+)$/m.exec(text) : null;
-            // Stage 8's record of an attempt is the app briefing the
-            // supervisor; the attempt itself is in the evidence pane.
-            const briefed = you ? /^Build attempt (\d+) has ended and its work is recorded\./.exec(text) : null;
-            if (asked || wrote || briefed) {
+            const source = byId.get(message.id);
+            const line = source ? appEventLine(source, byId.get(answeredBy.get(message.id) ?? "")) : null;
+            if (line) {
               return (
                 <div key={message.id} className="event conv-event">
-                  {briefed
-                    ? `Recorded attempt ${briefed[1]!} for the build supervisor`
-                    : asked
-                      ? `Asked for the package for ${asked[1]!.trim()}`
-                      : `Wrote the package for ${wrote![1]!.trim()}`}
+                  {line}
                 </div>
               );
             }
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
-            const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
