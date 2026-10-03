@@ -136,6 +136,11 @@ version you last wrote, and edits for the passages that change. Send whole
 content only when most of the document changes. Never create a second
 artifact for the same document. If a write is refused, read the artifact once
 with artifact_read and try again.
+
+Every message from the person is about that document. Apply what they say to
+it with artifact_write, then answer them. If you do not hold the artifact's id
+and current version in this conversation, for example after a hand-off, find
+it with artifact_search for your stage's kind and read it once first.
 `.trim();
 
 /** The artifact kind a role drafts is named by the app package's `ArtifactKind`;

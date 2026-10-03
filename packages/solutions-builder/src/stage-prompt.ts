@@ -64,24 +64,6 @@ export function revisionRequest(args: { stage: number; userInput: string; curren
 }
 
 /**
- * A revision turn for a stage whose document is an artifact. It names the
- * artifact and its version instead of carrying the document, in the same
- * envelope as `revisionRequest`, so the chat folds it the same way and the
- * person's words are found by `splitRevision`.
- */
-export function artifactRevisionRequest(args: { userInput: string; artifactId: string; version: number }): string {
-  return [
-    REVISION_LEAD,
-    `Artifact ${args.artifactId}, version ${String(args.version)}. If you have not seen this version in this conversation, read it once with artifact_read; otherwise do not read it.`,
-    "",
-    `Revise it with artifact_write on that same id, with expectedVersion ${String(args.version)} and edits for the passages that change. Keep every part that was not objected to and honour the directions the person has given.`,
-    "",
-    REVISION_ASK,
-    args.userInput.trim() || "(No further instruction. Improve the current version without changing what was agreed.)",
-  ].join("\n");
-}
-
-/**
  * A person's message with what the app adds for the specialist. Whatever the
  * app adds goes first and the person's own words go last, after the one
  * marker every composed message ends with, so the chat can always tell them
