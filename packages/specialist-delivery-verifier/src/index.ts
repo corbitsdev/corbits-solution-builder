@@ -53,8 +53,9 @@ A verification report with these headings, after \`## In short\`:
 
 ## Rules
 
-- Paths, hashes, commands, flags and check results come only from what you
-  were handed; one you were not handed goes under Gaps.
+- Paths, hashes, commands, flags, counts and check results come only from
+  what you were handed, stated exactly as given and once; one you were not
+  handed goes under Gaps.
 - An unknown is not a pass. Describe only files whose bytes you could read,
   and mark a check only from the record, never by asking the person to run
   something.
