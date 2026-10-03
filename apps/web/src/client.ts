@@ -395,7 +395,7 @@ export type Wait = {
    * Set only for stage 9's delivery gate: a stock hub approval on the
    * specialist's own `deliver` tool call, not a workflow signal (CL-8566).
    * Its presence is what tells `decide()` to resolve it through the
-   * approval routes instead of `deliverGate`.
+   * approval routes.
    */
   approvalId?: string;
   /** The tool name `approvalId` was raised for, e.g. "run_shell" or "deliver" — lets the queue offer "Allow for this build" only where a standing grant makes sense. */
@@ -513,24 +513,6 @@ export type ProjectDetail = {
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
-  /**
-   * Always empty now: recorded approvals rode the lifecycle run's own event
-   * fold (`./run-fold.ts`'s `projectApprovals`, deleted with the run —
-   * CL-8612 contract v6). `ApprovalsRecord` (`pages/workspace/gate.tsx`)
-   * renders nothing on an empty list, so the historical-record surface just
-   * has nothing to show until a mail-agent-shaped decision log replaces it.
-   */
-  approvals: {
-    id: string;
-    runId: string;
-    stage: number;
-    command: string;
-    decision: string;
-    audienceName: string | null;
-    rationale: string | null;
-    createdAt: string;
-    versions: { versionId: string; contentHash: string }[];
-  }[];
 };
 
 export type { Quote, StageTurn };

@@ -92,9 +92,6 @@ import {
 } from "./workspace-chrome.tsx";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 
-export { StageDocument, DocumentBody } from "./document.jsx";
-export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
-
 /** Stages whose draft is prose read in the two-pane document, rather than
  * one of the specialised panels (design, audiences, build) or the final
  * decisions stage. */

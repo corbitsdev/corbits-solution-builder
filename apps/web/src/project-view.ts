@@ -139,6 +139,5 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     done,
     soloApproval,
     nodes,
-    approvals: [],
   };
 }
