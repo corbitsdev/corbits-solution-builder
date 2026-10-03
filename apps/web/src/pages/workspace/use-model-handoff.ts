@@ -45,7 +45,9 @@
  * line, so the rare duplicate shows once even though two mails went out.
  */
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiFailure } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { isHtmlDocument } from "./guidance.ts";
 
@@ -264,6 +266,7 @@ export function useModelSwitch(args: {
   readonly projectId: string;
   readonly stage: number;
 }): ModelSwitchState {
+  const queryClient = useQueryClient();
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -271,7 +274,9 @@ export function useModelSwitch(args: {
     setSwitching(true);
     setError(null);
     try {
-      await api.switchStageAgent(args.projectId, args.stage, offeringId);
+      const deployment = await api.switchStageAgent(args.projectId, args.stage, offeringId);
+      // The live pick moves now, not at the stage agent's next backstop read.
+      queryClient.setQueryData(keys.stageAgent.status(args.projectId, args.stage), deployment.address);
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
