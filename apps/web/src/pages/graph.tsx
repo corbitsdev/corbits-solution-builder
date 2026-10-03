@@ -7,9 +7,10 @@
  */
 import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
+import { AddMaterial, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
@@ -382,8 +383,18 @@ function ArtifactReader({
  */
 /** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
 function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [busy, setBusy] = useState(false);
   const size = formatSize(node.sizeBytes);
+  const download = async () => {
+    setBusy(true);
+    try {
+      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, `${node.title}.pptx`);
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="deck-file">
       <p className="inline-note">
@@ -393,22 +404,12 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
       <div className="button-row">
         <Button
           variant="primary"
-          loading={state.busy}
-          onClick={() => {
-            setState({ busy: true, error: null });
-            api
-              .artifactContent(tenantId, node.id)
-              .then((result) => {
-                downloadArtifact(result.content, `${node.title}.pptx`);
-                setState({ busy: false, error: null });
-              })
-              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
-          }}
+          loading={busy}
+          onClick={() => void download()}
         >
           Download slides (.pptx)
         </Button>
       </div>
-      {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
 }
@@ -419,8 +420,18 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * source tree is not a document.
  */
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [busy, setBusy] = useState(false);
   const size = formatSize(node.sizeBytes);
+  const download = async () => {
+    setBusy(true);
+    try {
+      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, `${node.title}.tar.gz`);
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="deck-file">
       <p className="inline-note">
@@ -431,22 +442,12 @@ export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: st
       <div className="button-row">
         <Button
           variant="primary"
-          loading={state.busy}
-          onClick={() => {
-            setState({ busy: true, error: null });
-            api
-              .artifactContent(tenantId, node.id)
-              .then((result) => {
-                downloadArtifact(result.content, `${node.title}.tar.gz`);
-                setState({ busy: false, error: null });
-              })
-              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
-          }}
+          loading={busy}
+          onClick={() => void download()}
         >
           Download the build (.tar.gz)
         </Button>
       </div>
-      {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
 }

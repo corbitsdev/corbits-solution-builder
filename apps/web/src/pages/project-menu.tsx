@@ -25,6 +25,7 @@ import {
   MenuTrigger,
 } from "@corbits/react-ui";
 import { useEffect, useState, type ReactElement } from "react";
+import { toast } from "sonner";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo } from "../client.js";
 import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -58,7 +59,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */
-export function downloadDocuments(project: MenuProject): Promise<string> {
+export function downloadDocuments(project: MenuProject): Promise<{ message: string; complete: boolean }> {
   return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob });
 }
 
@@ -152,7 +153,9 @@ export function ProjectMenu({
           <MenuItem
             onSelect={() =>
               void act(async () => {
-                onNotice(await downloadDocuments(project));
+                const { message, complete } = await downloadDocuments(project);
+                if (complete) onNotice(message);
+                else toast(message);
               })
             }
           >
@@ -345,9 +348,8 @@ export function ProjectInfoDialog({
     if (ok) onClose();
   };
 
-  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
-  // is assembled in the browser and saved as a download, reported in main's
-  // diction through main's notice line; failures ride main's error Banner.
+  // The bundle is assembled in the browser and saved as a download (CL-8756);
+  // its result and any failure are toasts.
   const exportProject = async () => {
     if (exporting) return;
     setExporting(true);
