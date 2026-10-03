@@ -360,6 +360,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
+            draftPane={false}
             rows={
               <>
                 {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}

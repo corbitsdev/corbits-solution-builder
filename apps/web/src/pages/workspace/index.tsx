@@ -970,6 +970,7 @@ export function StageWorkspace({
       }
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
+      draftPane={DOCUMENT_STAGES.has(stage) || stage === 4}
     />
   );
   const conversation = conversationWith(stage === 4 && approveAllowed ? approveRow : null);

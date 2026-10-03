@@ -35,13 +35,13 @@ export function withoutSwitchMarker(message: ChatMessage): string {
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
-function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
+function toUiMessages(messages: readonly ChatMessage[], draftPane: boolean): UiChatMessage[] {
   return messages.map((message) => {
     const body = withoutSwitchMarker(message);
     return {
       id: message.id,
       role: message.author === "me" ? "user" : "agent",
-      parts: [{ type: "text", text: message.author === "me" ? body : conversationLead(body) }],
+      parts: [{ type: "text", text: message.author === "me" || !draftPane ? body : conversationLead(body) }],
       createdAt: message.at,
     };
   });
@@ -168,6 +168,7 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  draftPane = true,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -202,11 +203,15 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** Whether a reply's draft has a pane that shows it. Stage 5's packages,
+   *  stage 8's build and stage 9's delivery are not the reply's draft, so a
+   *  draft-shaped reply there is shown whole, never pointed at. */
+  draftPane?: boolean;
 }) {
   const opening = pending && !messages.some((message) => message.author === "agent");
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
-    const list = toUiMessages(messages);
+    const list = toUiMessages(messages, draftPane);
     // A turn in flight has no row of its own yet, so the transcript would sit
     // unchanged after the person hits send. This is the one message the thread
     // shows that the host has not recorded.
@@ -219,7 +224,7 @@ export function StageConversation({
       });
     }
     return eventMessages(list, events);
-  }, [messages, pending, events]);
+  }, [messages, pending, events, draftPane]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
