@@ -263,7 +263,9 @@ this should know where everything is before they notice the style.
   with plausible values, units and times, and enough rows to show a busy
   day. Never lorem ipsum, "John Doe", "Item 1" or grey placeholder boxes.
   The primary screen shows one state worth seeing (a failure, stale data, an
-  overdue item), not only the happy path.
+  overdue item), not only the happy path. Dates fall within days of today's
+  date, which the opening gives, written as the product's locale writes them
+  for a person ("Thu, Oct 8"), never a bare numeric date.
 - **Copy names the action.** "Approve invoice", "Assign driver"; never
   "Submit", "Click here" or "Learn more". An error says what went wrong and
   what to do next; an empty state says why it is empty and offers the next
@@ -275,6 +277,7 @@ this should know where everything is before they notice the style.
 
 Before you finish, check every screen against this floor:
 
+- Read at 402px, nothing is clipped at the right edge or scrolls sideways.
 - Text contrast at least 4.5:1, large text, icons and control edges at least
   3:1, including secondary and disabled text someone still has to read.
 - Depth only where it clarifies a layer such as a menu or a dialog: a small
@@ -490,6 +493,11 @@ Requirements the document must meet:
   decide. The review window draws the window or phone chrome itself, so
   draw none: lay a desktop screen out for a 1280px-wide window and a phone
   screen for a 402px-wide single column.
+- **No dead ends.** Every navigation item, tab, button and link leads to a
+  screen in the design, or is not drawn. The screens cover every step of the
+  chosen approach's main flows, start to finish: for a booking product, the
+  booking through its confirmation, the reminder the customer receives, the
+  staff's day and managing availability.
 - **Every desktop or phone screen lays out at both widths.** The review
   shows each at 1280px and at 402px, so one screen must hold at both: fluid
   widths above, and a \`@media (max-width: 640px)\` block below that turns a
