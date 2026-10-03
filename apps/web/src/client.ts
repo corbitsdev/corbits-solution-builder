@@ -2077,7 +2077,7 @@ export const api = {
   stageWorkArtifact: async (
     tenantId: string,
     kind: string,
-  ): Promise<{ id: string; version: number; content: string } | null> => {
+  ): Promise<{ id: string; version: number; content: string; updatedAt: string } | null> => {
     const transport = createHubTransport();
     const written = (await listArtifacts(transport, tenantId, { kind }))
       .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
@@ -2085,7 +2085,7 @@ export const api = {
     if (!written) return null;
     const artifact = await installerGetArtifact(transport, tenantId, written.id);
     if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
-    return { id: artifact.id, version: artifact.version, content: artifact.content };
+    return { id: artifact.id, version: artifact.version, content: artifact.content, updatedAt: artifact.updatedAt };
   },
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
     // The project's own tenant, else the workspace for an older project's
