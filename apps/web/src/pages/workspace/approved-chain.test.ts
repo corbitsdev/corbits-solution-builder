@@ -63,17 +63,18 @@ describe("renderApprovedChain", () => {
         { node: { id: "b", title: "Problem brief", kind: "problem_brief", stage: 1 }, content: "## In short\n- leads" },
       ],
       3,
+      "",
     );
     expect(text).toContain("--- MATERIAL THE PERSON PROVIDED: Opening ---");
     expect(text).toContain("--- APPROVED INPUT: Problem brief (stage 1, problem_brief) ---");
   });
 
   test("nothing to hand over renders nothing", () => {
-    expect(renderApprovedChain([], 2)).toBe("");
+    expect(renderApprovedChain([], 2, "")).toBe("");
   });
 
   test("the transcript splits an opening back into the record and the stage's own lead", () => {
-    const chain = renderApprovedChain([{ node: { id: "b", title: "Brief", kind: "problem_brief", stage: 1 }, content: "body" }], 2);
+    const chain = renderApprovedChain([{ node: { id: "b", title: "Brief", kind: "problem_brief", stage: 1 }, content: "body" }], 2, "");
     const split = splitChain(`Language: write in English.\n\n${chain}\n\n## In short\n- the constraints`);
     expect(split?.before).toBe("Language: write in English.");
     expect(split?.chain).toContain("--- APPROVED INPUT: Brief (stage 1, problem_brief) ---");
