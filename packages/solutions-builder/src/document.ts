@@ -6,6 +6,13 @@
  * it out of the draft and speaks it: a question sitting unread under a heading
  * has not been asked.
  */
+import { withoutEstimateBlock } from "./estimate.js";
+import { withoutStackBlock } from "./stack.js";
+
+/** A draft as a person reads it: the blocks written for the app are left out. */
+export function readableDocument(document: string): string {
+  return withoutStackBlock(withoutEstimateBlock(document));
+}
 
 /**
  * The digest a specialist opens its draft with.

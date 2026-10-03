@@ -167,6 +167,15 @@ export function stackSectionOf(markdown: string): string | null {
   return section.text.slice(0, match.index + match[0].length);
 }
 
+/** The markdown a person reads: the stack block is data for the Stack check. */
+export function withoutStackBlock(markdown: string): string {
+  const section = stackSectionText(markdown);
+  const match = section ? STACK_BLOCK_RE.exec(section.text) : null;
+  if (!section || !match) return markdown;
+  const open = section.start + match.index;
+  return markdown.slice(0, open) + markdown.slice(open + match[0].length);
+}
+
 export function parseStackRecord(markdown: string): StackRecord | null {
   const section = stackSectionText(markdown);
   if (!section) return null;

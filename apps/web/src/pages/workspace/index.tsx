@@ -47,6 +47,7 @@ import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
+import { readableDocument } from "@solutions-builder/app/document";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -775,7 +776,7 @@ export function StageWorkspace({
               paneClassName="artifact-page"
             />
           ) : (
-            <Markdown source={artifacts.activeContent} />
+            <Markdown source={readableDocument(artifacts.activeContent)} />
           )}
         </div>
       </div>
