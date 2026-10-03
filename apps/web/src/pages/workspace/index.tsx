@@ -91,7 +91,6 @@ function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, Arti
 }
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
-import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
@@ -634,14 +633,8 @@ export function StageWorkspace({
     }
   };
 
-  // Whether this project already has history to catch up on — the only
-  // honest basis for the reconnect copy below. A brand-new project already
-  // has its opening statement (and, if it attached a file, the extracted
-  // reading beside it), so those two kinds don't count as history; anything
-  // else — a draft, a turn — means there's something to resume.
-  const resuming =
-    detail.nodes.some((node) => node.kind !== MATERIAL_KIND && node.kind !== MATERIAL_READING_KIND) ||
-    detail.stage > 1;
+  // Only a stage whose specialist has run before is reconnected to.
+  const resuming = agent.addresses.length > 0;
 
   // The confirmed current stage for the opening screen's own reads: the
   // resolved workflow stage once known, else the same non-deploying
