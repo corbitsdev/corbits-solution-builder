@@ -365,7 +365,7 @@ export function Stage6Panel({
     return (
       <div className="stage6-companion">
         <div className="docmeta">
-          <select aria-label="Stage 6 document" value={page} onChange={(event) => setPage(event.target.value)}>
+          <select aria-label="Build plan document" value={page} onChange={(event) => setPage(event.target.value)}>
             {PAGES.map((entry) => (
               <option key={entry.key} value={entry.key}>
                 {entry.label}
@@ -446,7 +446,7 @@ export function Stage6Panel({
                 {page === "requirements" ? " · Requirements Author" : ` · ${STAGE6_PANEL_ROLES.find((role) => role.key === page)?.label}`}
               </span>
               <div className="document-tools">
-                <select aria-label="Stage 6 document" value={page} onChange={(event) => setPage(event.target.value)}>
+                <select aria-label="Build plan document" value={page} onChange={(event) => setPage(event.target.value)}>
                   {PAGES.map((entry) => (
                     <option key={entry.key} value={entry.key}>
                       {entry.label}

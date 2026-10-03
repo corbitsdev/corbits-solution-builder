@@ -15,15 +15,14 @@ import type { JSX, ReactNode } from "react";
 import { DEL, END, INS } from "./revisions.js";
 
 /**
- * Inline spans: code, bold, italic, with tracked changes threaded through them.
+ * Inline spans: code, bold, italic, links, with tracked changes threaded through them.
  * Formatting is matched first so a change that starts outside a bold run and
  * ends inside it still renders as bold; the change state carries across.
  */
-function inline(text: string, keyPrefix: string): ReactNode[] {
+function inline(text: string, keyPrefix: string, state = { open: null as string | null }): ReactNode[] {
   const out: ReactNode[] = [];
   // One pass, longest markers first, so `**` never matches as two `*`.
-  const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
-  const state = { open: null as string | null };
+  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
   let last = 0;
   let match: RegExpExecArray | null;
   let index = 0;
@@ -34,6 +33,19 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     const key = `${keyPrefix}-${index++}`;
     if (token.startsWith("`")) {
       out.push(<code key={key}>{token.slice(1, -1).replace(MARKS, "")}</code>);
+    } else if (match[2] !== undefined && match[3] !== undefined) {
+      // A model wrote this href: only http(s) may navigate; anything else shows as its words.
+      const label = inline(match[2], key, state);
+      const href = match[3].replace(MARKS, "");
+      if (href.startsWith("https://") || href.startsWith("http://")) {
+        out.push(
+          <a key={key} href={href} target="_blank" rel="noopener noreferrer">
+            {label}
+          </a>,
+        );
+      } else {
+        out.push(...label);
+      }
     } else if (token.startsWith("**")) {
       out.push(<strong key={key}>{marked(token.slice(2, -2), key, state)}</strong>);
     } else {
@@ -74,16 +86,24 @@ function marked(text: string, keyPrefix: string, state: { open: string | null })
 type Block =
   | { kind: "heading"; level: 2 | 3 | 4; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "list"; ordered: boolean; start: number; items: string[] }
   | { kind: "quote"; text: string }
   | { kind: "code"; text: string }
+  | { kind: "table"; head: string[]; rows: string[][] }
   | { kind: "rule" };
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
+function cells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
 
 function parse(source: string): Block[] {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; start: number; items: string[] } | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
@@ -129,6 +149,20 @@ function parse(source: string): Block[] {
       continue;
     }
 
+    if (TABLE_ROW.test(line) && TABLE_DELIMITER.test(lines[index + 1] ?? "")) {
+      flush();
+      const head = cells(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && TABLE_ROW.test(lines[index]!)) {
+        rows.push(cells(lines[index]!));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push({ kind: "table", head, rows });
+      continue;
+    }
+
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       flush();
@@ -147,15 +181,17 @@ function parse(source: string): Block[] {
     }
 
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
     if (bullet || numbered) {
       flushParagraph();
       const ordered = numbered !== null;
-      const item = (bullet ?? numbered)![1]!;
+      const item = bullet ? bullet[1]! : numbered![2]!;
       if (list && list.ordered === ordered) list.items.push(item);
       else {
         flushList();
-        list = { ordered, items: [item] };
+        // A model separates numbered items with blank lines or nested bullets,
+        // which splits the list; its own numbers keep the count going.
+        list = { ordered, start: numbered ? Number(numbered[1]) : 1, items: [item] };
       }
       continue;
     }
@@ -188,7 +224,7 @@ export function Markdown({ source }: { source: string }): JSX.Element {
           }
           case "list":
             return block.ordered ? (
-              <ol key={key}>
+              <ol key={key} start={block.start}>
                 {block.items.map((item, at) => (
                   <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`)}</li>
                 ))}
@@ -207,6 +243,29 @@ export function Markdown({ source }: { source: string }): JSX.Element {
               <pre key={key}>
                 <code>{block.text}</code>
               </pre>
+            );
+          case "table":
+            return (
+              <div key={key} className="prose-table">
+                <table>
+                  <thead>
+                    <tr>
+                      {block.head.map((cell, at) => (
+                        <th key={`${key}-h${at}`}>{inline(cell, `${key}-h${at}`)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, r) => (
+                      <tr key={`${key}-r${r}`}>
+                        {block.head.map((_, c) => (
+                          <td key={`${key}-r${r}-${c}`}>{inline(row[c] ?? "", `${key}-r${r}-${c}`)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case "rule":
             return <hr key={key} />;
