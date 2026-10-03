@@ -42,9 +42,18 @@ function splitIdsBlock(text: string): { readonly ids: string; readonly rest: str
   return { ids: lines.slice(0, end).join("\n").trim(), rest: lines.slice(end).join("\n").trim() };
 }
 
-/** A stage's opening: the record the app sends the specialist when the stage starts, never something the person said. */
+/** The stage a person-side message opened, or null when it opened none. */
+function openedStage(message: Pick<ChatMessage, "author" | "subject">): number | null {
+  if (message.author !== "me" || message.subject === undefined) return null;
+  const opening = OPENING_SUBJECT.exec(message.subject);
+  return opening ? Number(opening[1]) : null;
+}
+
+/** A stage's opening from stage 2 on: the approved record the app sends the
+ *  specialist, never something the person said. Stage 1's opening is the
+ *  person's own problem statement and stays theirs. */
 export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
-  return message.author === "me" && message.subject !== undefined && OPENING_SUBJECT.test(message.subject);
+  return (openedStage(message) ?? 0) > 1;
 }
 
 /**
@@ -55,7 +64,8 @@ export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">)
 export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | "subject">): ComposedFold | null {
   if (message.author !== "me") return null;
   const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
-  if (opening) {
+  // Stage 1 opens with the person's own words, shown as they wrote them.
+  if (opening && Number(opening[1]) > 1) {
     return { summary: `What stage ${opening[1]!} opened with`, body: withoutSendBackRef(message.body), lead: null };
   }
   const isCue = SEND_BACK_REF.test(message.body);

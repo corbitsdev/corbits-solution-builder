@@ -579,7 +579,7 @@ export function StageDocument({
                   : attached.length > 0
                   ? "What should change about this?"
                   : openQuestion
-                    ? "Message the specialist…"
+                    ? `Message the ${agentFor(node.stage as Stage).title.toLowerCase()}…`
                     : "What should change? Add as much as you like."
             }
             attachments={attached.map((entry, index) => ({

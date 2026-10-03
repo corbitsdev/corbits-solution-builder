@@ -37,6 +37,7 @@ describe("composedMailFold", () => {
 describe("isStageOpening", () => {
   test("only the app's opening mail counts, never a person's or a specialist's", () => {
     expect(isStageOpening({ author: "me", subject: "[opening:prj_1:4] GUI design" })).toBe(true);
+    expect(isStageOpening({ author: "me", subject: "[opening:prj_1:1] Problem discovery" })).toBe(false);
     expect(isStageOpening({ author: "me", subject: "Re: the brief" })).toBe(false);
     expect(isStageOpening({ author: "me" })).toBe(false);
     expect(isStageOpening({ author: "agent", subject: "[opening:prj_1:4] GUI design" })).toBe(false);
