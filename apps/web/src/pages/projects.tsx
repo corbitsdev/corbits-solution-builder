@@ -9,6 +9,7 @@
 import { ChatInput } from "@corbits/react-ui";
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
 import { Banner, Button, stageName } from "../components.jsx";
@@ -17,7 +18,8 @@ import { Banner, Button, stageName } from "../components.jsx";
 // stage/turn/done come from project-list.ts helpers and spend copy from
 // project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
 import { readImportPayload } from "../project-import.js";
-import { displayDone, displayStage, displayTurn } from "../project-list.js";
+import { displayTurn } from "../project-list.js";
+import { keys } from "../queries/keys.ts";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -283,34 +285,17 @@ function ProjectCard({
   onError: (cause: unknown) => void;
   onNotice: (message: string) => void;
 }) {
-  // INTEGRATE (CL-8756): the list no longer carries a stage — the project
-  // workflow is the only authority, so each card resolves its own stage
-  // read-only (displayStage) plus done (displayDone) and whose turn it is off
-  // the stage mail thread (displayTurn). `null` while unresolved or when the
-  // workflow could not be read at all; `stageFailed` tells those apart so the
-  // card offers a Retry rather than showing a stage number.
-  const [stage, setStage] = useState<number | null>(null);
-  const [stageFailed, setStageFailed] = useState(false);
-  const [stageAttempt, setStageAttempt] = useState(0);
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    setStage(null);
-    setStageFailed(false);
-    setDone(false);
-    let cancelled = false;
-    void displayStage(project.id, api.projectWorkflowView).then((resolved) => {
-      if (cancelled) return;
-      if (resolved === null) {
-        setStageFailed(true);
-        return;
-      }
-      setStage(resolved);
-      setDone(displayDone(project.id));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [project.id, stageAttempt]);
+  // The list carries no stage: the project workflow is the only authority,
+  // so each card reads it. No workflow yet, or a run that has not written its
+  // first state (stage 0), has not started; a read that failed offers Retry.
+  const workflow = useQuery({
+    queryKey: keys.workflowView.card(project.id),
+    queryFn: () => api.projectWorkflowView(project.id),
+    retry: false,
+  });
+  const stage = workflow.data && workflow.data.stage >= 1 ? workflow.data.stage : null;
+  const done = workflow.data?.done ?? false;
+  const stageFailed = workflow.isError;
   // INTEGRATE (CL-8756): main's turn arms are dropped here too — the summary
   // turn is only "writing"|"idle" — so the card reads whose turn it is off the
   // current stage's mail thread instead. Never for an archived project or
@@ -449,7 +434,7 @@ function ProjectCard({
 
       <div className="card-foot">
         <span>
-          {cardFootStage(stage, done, stageFailed)}
+          {workflow.isPending ? null : cardFootStage(stage, done, stageFailed)}
           {stageFailed ? (
             <>
               {" "}
@@ -458,7 +443,7 @@ function ProjectCard({
                 className="link-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  setStageAttempt((attempt) => attempt + 1);
+                  void workflow.refetch();
                 }}
               >
                 Retry
