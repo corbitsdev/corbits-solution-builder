@@ -18,6 +18,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { hashFiles, shippedFiles, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
+export { shippedFiles } from "./verify.js";
 export type { ManifestFileEntry, TargetProbe } from "./verify.js";
 
 export const BUNDLE_MEDIA_TYPE = "application/gzip";
@@ -107,12 +108,11 @@ export function parseTargetProbe(raw: unknown): TargetProbe | null {
   return { target, command, port, routes, ...(path === undefined ? {} : { path }) };
 }
 
-/** Runs `tar` over the directory's shipped files (`shippedFiles`) and
- *  resolves with the gzip bytes. Shells out rather than reimplementing tar:
- *  every place this runs — a POSIX container image, or the host on macOS or
- *  Linux — has `tar` and `git` on PATH. */
-export async function tarDirectory(cwd: string, exclude: readonly string[]): Promise<Buffer> {
-  const files = await shippedFiles(cwd, new Set(exclude));
+/** Runs `tar` over the listed files (`shippedFiles`) and resolves with the
+ *  gzip bytes. Shells out rather than reimplementing tar: every place this
+ *  runs — a POSIX container image, or the host on macOS or Linux — has `tar`
+ *  and `git` on PATH. */
+export function tarDirectory(cwd: string, files: readonly string[]): Promise<Buffer> {
   return new Promise((res, reject) => {
     const child = spawn("tar", ["-czf", "-", "--null", "-T", "-"], { cwd });
     child.stdin.end(files.map((path) => `${path}\0`).join(""));
@@ -139,18 +139,18 @@ export async function tarDirectory(cwd: string, exclude: readonly string[]): Pro
 export async function buildManifest(
   attempt: string,
   targetDir: string,
-  exclude: readonly string[],
+  files: readonly string[],
   archive: { fileName: string; sizeBytes: number; sha256: string },
 ): Promise<DeliveryManifestContent> {
-  const hashed = await hashFiles(targetDir, await shippedFiles(targetDir, new Set(exclude)));
-  const files = hashed.slice(0, MANIFEST_FILE_CAP);
+  const hashed = await hashFiles(targetDir, files);
+  const listed = hashed.slice(0, MANIFEST_FILE_CAP);
   return {
     stage: 8,
     attempt,
     archive,
-    files,
+    files: listed,
     fileCount: hashed.length,
-    truncated: hashed.length > files.length,
+    truncated: hashed.length > listed.length,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -185,9 +185,9 @@ export async function verifyAndRecord(
 }
 
 /** The three heaviest top-level paths among the shipped files, sized. */
-async function largestTopLevel(dir: string, exclude: readonly string[]): Promise<string> {
+async function largestTopLevel(dir: string, files: readonly string[]): Promise<string> {
   const sizes = new Map<string, number>();
-  for (const path of await shippedFiles(dir, new Set(exclude))) {
+  for (const path of files) {
     const top = path.split("/")[0] ?? path;
     sizes.set(top, (sizes.get(top) ?? 0) + (await stat(join(dir, path))).size);
   }
@@ -228,19 +228,17 @@ export async function packageAttempt(input: {
   const exclude = [...new Set([...DEFAULT_EXCLUDES, ...(input.exclude ?? [])])];
   const targets = [...(input.targets ?? [])];
   const maxBytes = input.maxBytes ?? FALLBACK_MAX_ARCHIVE_BYTES;
-  const bytes = await tarDirectory(input.dir, exclude);
-  if (bytes.byteLength === 0) {
-    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
-  }
+  const files = await shippedFiles(input.dir, exclude);
+  const bytes = await tarDirectory(input.dir, files);
   if (bytes.byteLength > maxBytes) {
     throw new Error(
       `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit. ` +
-        `Largest: ${await largestTopLevel(input.dir, exclude)}. Retry the attempt so the worker adds its build output to .gitignore.`,
+        `Largest: ${await largestTopLevel(input.dir, files)}. Retry the attempt so the worker adds its build output to .gitignore.`,
     );
   }
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const manifest = await buildManifest(input.attempt, input.dir, exclude, { fileName, sizeBytes: bytes.byteLength, sha256 });
+  const manifest = await buildManifest(input.attempt, input.dir, files, { fileName, sizeBytes: bytes.byteLength, sha256 });
   const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { exclude, targets }, input.dir, input.ranOn ?? "sidecar");
   return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }

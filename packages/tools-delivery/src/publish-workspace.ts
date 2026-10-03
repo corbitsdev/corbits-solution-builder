@@ -57,6 +57,7 @@ import {
   MANIFEST_MEDIA_TYPE,
   packageAttempt,
   parseTargetProbe,
+  shippedFiles,
   tarDirectory,
   verifyAndRecord,
   type DeliveryManifestContent,
@@ -252,10 +253,8 @@ async function publishWorkspaceContent(
     };
   }
 
-  const bytes = await tarDirectory(targetDir, args.exclude);
-  if (bytes.byteLength === 0) {
-    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
-  }
+  const files = await shippedFiles(targetDir, args.exclude);
+  const bytes = await tarDirectory(targetDir, files);
 
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
     throw new Error(
@@ -288,7 +287,7 @@ async function publishWorkspaceContent(
       },
     });
 
-    const manifestContent = await buildManifest(variant, targetDir, args.exclude, {
+    const manifestContent = await buildManifest(variant, targetDir, files, {
       fileName: title,
       sizeBytes: bytes.byteLength,
       sha256,

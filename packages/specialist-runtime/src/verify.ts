@@ -71,31 +71,35 @@ export async function hashTree(dir: string, exclude: ReadonlySet<string>): Promi
   return hashFiles(dir, await walkFiles(dir, exclude));
 }
 
-/** Every regular file under `dir` that ships: what git would keep (tracked,
- *  or untracked and not ignored by any `.gitignore`), less any path segment
- *  named in `exclude`. Git decides, so the build output a toolchain's
- *  `.gitignore` names never reaches the archive; a directory that is not a
- *  repository is read through a throwaway one. */
-export async function shippedFiles(dir: string, exclude: ReadonlySet<string>): Promise<string[]> {
-  const listed = await listUnignored(dir);
-  const paths = [...new Set(listed.split("\0"))].filter((path) => path.length > 0 && !path.split("/").some((segment) => exclude.has(segment)));
-  const regular = await Promise.all(paths.map(async (path) => ((await lstat(join(dir, path)).catch(() => null))?.isFile() ? path : null)));
-  return regular.filter((path): path is string => path !== null).sort();
-}
-
-async function listUnignored(dir: string): Promise<string> {
-  const inRepo = await runGit(["-C", dir, "rev-parse", "--is-inside-work-tree"]).then(
-    (out) => out.trim() === "true",
-    () => false,
-  );
-  if (inRepo) return runGit(["-C", dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+/** Every regular file under `dir` that ships, sorted: what git leaves
+ *  unignored, judged only by the directory's own `.gitignore` files and
+ *  `exclude` (gitignore patterns). Listed through a throwaway repository, so
+ *  neither an enclosing one nor the host's global excludes decide. An empty
+ *  list is refused: an archive of nothing is not a build. */
+export async function shippedFiles(dir: string, exclude: readonly string[]): Promise<string[]> {
   const scratch = await mkdtemp(join(tmpdir(), "sb-ship-"));
+  let listed: string;
   try {
-    await runGit(["init", "-q", "--bare", scratch]);
-    return await runGit([`--git-dir=${scratch}`, `--work-tree=${dir}`, "ls-files", "-z", "--others", "--exclude-standard"]);
+    await runGit(["init", "-q", "--bare", "--template=", scratch]);
+    listed = await runGit([
+      "-c",
+      "core.excludesFile=",
+      `--git-dir=${scratch}`,
+      `--work-tree=${dir}`,
+      "ls-files",
+      "-z",
+      "--others",
+      "--exclude-standard",
+      ...exclude.map((pattern) => `--exclude=${pattern}`),
+    ]);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+  const paths = listed.split("\0").filter((path) => path.length > 0);
+  const stats = await Promise.all(paths.map((path) => lstat(join(dir, path))));
+  const files = paths.filter((_, at) => stats[at]!.isFile()).sort();
+  if (files.length === 0) throw new Error(`There is nothing to package in ${dir}: every file is excluded or ignored by a .gitignore.`);
+  return files;
 }
 
 function runGit(args: readonly string[]): Promise<string> {
