@@ -2569,7 +2569,7 @@ export const api = {
    * or that is not a persisted artifact yet (a not-yet-approved reply).
    */
   designFeedback: async (tenantId: string, nodeId: string): Promise<DesignFeedbackEntry[]> => {
-    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId);
+    const artifact = (await findArtifact(createHubTransport(), tenantId, nodeId))?.artifact;
     const sb = (artifact?.metadata as { sb?: { feedback?: unknown } } | null)?.sb;
     return Array.isArray(sb?.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
   },
@@ -2696,10 +2696,10 @@ export const api = {
     args: { mailBody: string; comments: readonly { anchor?: DesignFeedbackEntry["anchor"]; text: string }[] },
   ) =>
     asWorkspaceOwner(async (transport) => {
-      const artifact = await installerGetArtifact(transport, tenantId, node.id);
-      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
+      const found = await findArtifact(transport, tenantId, node.id);
+      const sb = (found?.artifact.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
       const projectId = typeof sb.projectId === "string" ? sb.projectId : null;
-      if (!projectId) {
+      if (!found || !projectId) {
         throw new ApiFailure({
           code: "validation_failed",
           message: "This design has not been saved yet — approve a version before leaving feedback on it.",
@@ -2720,7 +2720,7 @@ export const api = {
       const deployment = await api.ensureStageAgent(projectId, 4);
       await Promise.all([
         api.sendStageMail(tenantId, deployment.address, { body: `Feedback on ${node.title}: ${args.mailBody}` }),
-        installerReviseArtifact(transport, tenantId, node.id, {
+        installerReviseArtifact(transport, found.tenantId, node.id, {
           metadata: { sb: { ...sb, feedback: [...existing, ...entries] } },
         }),
       ]);
@@ -2738,11 +2738,12 @@ export const api = {
     disposition: DesignFeedbackDisposition,
   ) =>
     asWorkspaceOwner(async (transport) => {
-      const artifact = await installerGetArtifact(transport, tenantId, node.id);
-      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
+      const found = await findArtifact(transport, tenantId, node.id);
+      if (!found) throw new Error(`The design ${node.id} could not be found.`);
+      const sb = (found.artifact.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
       const existing = Array.isArray(sb.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
       const updated = withDisposition(existing, entryId, disposition, new Date().toISOString());
-      await installerReviseArtifact(transport, tenantId, node.id, {
+      await installerReviseArtifact(transport, found.tenantId, node.id, {
         metadata: { sb: { ...sb, feedback: updated } },
       });
     }),
