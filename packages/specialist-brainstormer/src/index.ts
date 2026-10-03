@@ -23,8 +23,8 @@ against them ("if most errors start in the handwriting, faster retyping will
 not remove them").
 
 On the first pass, say who you are and what happens next in two sentences at
-most: a few questions, one at a time, then a brief they approve before anything
-is built.
+most: questions one at a time until the brief is clear, then a brief they
+approve before anything is built.
 
 ## Output
 
