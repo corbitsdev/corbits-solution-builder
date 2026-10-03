@@ -382,6 +382,7 @@ export function GuideDock({
   note = null,
   at,
   stage,
+  now = null,
 }: {
   step: import("@solutions-builder/app/next-step").NextStep;
   onGo: (where: import("@solutions-builder/app/next-step").NextStep["where"]) => void;
@@ -399,8 +400,12 @@ export function GuideDock({
   at?: import("@solutions-builder/app/next-step").NextStep["where"];
   /** Which of the nine this project is on, for the ring. */
   stage?: number;
+  /** Where the stage stands now, as the workspace reads it from the thread. */
+  now?: { title: string; detail: string } | null;
 }) {
   const [open, setOpen] = useState(false);
+  const next = step.ending || at === step.where ? step.title : `Next: ${step.title}`;
+  const where = stage ? `Stage ${stage} of 9 · ${stageName(stage)}` : null;
   const panel = useRef<HTMLDivElement>(null);
   const fab = useRef<HTMLButtonElement>(null);
 
@@ -443,9 +448,7 @@ export function GuideDock({
           tabIndex={-1}
         >
           <div className="guide-panel-head">
-            <p className="guide-title">
-              {step.ending || at === step.where ? step.title : `Next: ${step.title}`}
-            </p>
+            <p className="guide-where">{where ?? "Where this stands"}</p>
             <button
               type="button"
               className="guide-close"
@@ -458,7 +461,17 @@ export function GuideDock({
               <X aria-hidden="true" />
             </button>
           </div>
-          <p className="guide-detail">{step.detail}</p>
+          {now ? (
+            <div className="guide-now">
+              <p className="guide-title">{now.title}</p>
+              <p className="guide-detail">{now.detail}</p>
+            </div>
+          ) : null}
+          <div className="guide-next">
+            <p className="guide-label">{step.ending ? "Where it ends" : "Next step"}</p>
+            <p className="guide-title">{step.title}</p>
+            <p className="guide-detail">{step.detail}</p>
+          </div>
 
           {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
 
@@ -492,17 +505,26 @@ export function GuideDock({
         type="button"
         className={`guide-fab${open ? " is-open" : ""}`}
         aria-expanded={open}
+        aria-haspopup="dialog"
+        // A ring alone read as a spinner: the tooltip and the number inside
+        // it say this is progress through the stages, and a guide.
+        title={`${where ? `${where}. ` : ""}${next}. Open the guide.`}
         onClick={() => setOpen(!open)}
       >
         <span key={step.title} className="guide-live">
           {stage ? <StageRing stage={stage} /> : <Compass aria-hidden="true" />}
+          {stage ? (
+            <span className="guide-fab-stage" aria-hidden="true">
+              {stage}
+            </span>
+          ) : null}
         </span>
-        {/* Closed, it is the ring and nothing else — a small mark of how far
-            through the nine stages this is, sitting out of the way. The words
-            are in the card it opens, so the corner of the window is not
-            carrying a sentence at all times. */}
+        {/* Closed, it is the ring and nothing else, sitting out of the way.
+            The words are in the card it opens, so the corner of the window is
+            not carrying a sentence at all times. */}
         <span className="sr-only">
-          {step.ending || at === step.where ? step.title : `Next: ${step.title}`}
+          {where ? `${where}. ` : ""}
+          {next}
         </span>
       </button>
     </div>
