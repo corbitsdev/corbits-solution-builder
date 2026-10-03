@@ -180,6 +180,7 @@ export const LEDGER: readonly Transition[] = [
     authority: ["project_owner", "technical_approver"],
     preconditions: [
       "approver names the exact artifact versions under review",
+      "stage 3 additionally names what is being built; a command-line tool or a service skips stage 4, which has no screens to design",
       "stage 5 additionally requires the recorded audience quorum with no reject or revise",
       "stage 6 requires technical approval of completeness and buildability",
     ],

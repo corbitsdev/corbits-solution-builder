@@ -81,6 +81,7 @@ export type StageDecisions = {
    *  this sends the workflow's own stage-9 `approve` — without it `done`
    *  never fires and the project never finishes. */
   readonly acceptDelivery: () => Promise<void>;
+  /** Stage 3's surface, or stage 7's target (the recorded surface until the person picks another). */
   readonly chosenTarget: string | null;
   readonly setChosenTarget: (target: string | null) => void;
   readonly sendTarget: number | null;
@@ -143,12 +144,14 @@ export function useStageDecisions({
   buildAttemptsLoaded?: boolean;
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
-  const [chosenTarget, setChosenTargetState] = useState<string | null>(null);
+  const [pickedTarget, setChosenTargetState] = useState<string | null>(null);
+  // Stage 3 asks what is being built; stage 7 starts from that answer.
+  const chosenTarget = pickedTarget ?? (stage === 7 ? (workflowView?.surface ?? null) : null);
   const [sendTarget, setSendTarget] = useState<number | null>(null);
   const [sendReason, setSendReason] = useState("");
   const [sendingBack, setSendingBack] = useState(false);
 
-  // Stage 7's chosen target resets whenever the stage changes so an earlier
+  // The chosen target resets whenever the stage changes so an earlier
   // project's choice never leaks into a new one.
   useEffect(() => {
     setChosenTargetState(null);
@@ -362,7 +365,7 @@ export function useStageDecisions({
    */
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
-    if (stage === 7 && !chosenTarget) return;
+    if ((stage === 3 || stage === 7) && !chosenTarget) return;
     // The workflow's own `stage6Rule` refuses a plan without a usable Stack
     // section (#55); this runs the same check first so the person reads
     // what is wrong in the plan's own terms before the approval is sent.

@@ -830,3 +830,60 @@ describe("initProjectState with a snapshot", () => {
     expect(initProjectState({ projectId: "p1", stages, snapshot }).decisions.length).toBe(1);
   });
 });
+
+describe("stage3Rule surface", () => {
+  const nine = initProjectState({ projectId: "p1", stages: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((stage) => ({ stage, authorizedPrincipalIds: [OWNER] })) });
+  let seq = 0;
+  function pass(state: ProjectState, evidence?: unknown): ProjectState {
+    const stage = state.stage;
+    const ref = { artifactId: `art-${String(stage)}`, version: 1, sha256: `sha-${String(stage)}` };
+    const opened = applyDecision(input(state, OWNER, { decisionId: `o${String(++seq)}`, kind: "open_review", projectId: "p1", stage, ...ref, at: AT }));
+    const reviewId = opened.reviews[stage]!.reviewId;
+    return applyDecision(
+      input(opened, OWNER, { decisionId: `a${String(++seq)}`, kind: "approve", projectId: "p1", stage, reviewId, ...ref, at: AT, ...(evidence !== undefined ? { evidence } : {}) }),
+    );
+  }
+  const atStage3 = (): ProjectState => pass(pass(nine));
+
+  test("a command-line tool passes over GUI design to stage 5, recording the skip", () => {
+    const next = pass(atStage3(), { surface: "cli" });
+    expect(next.stage).toBe(5);
+    expect(next.surface).toBe("cli");
+    expect(next.skipped).toEqual([4]);
+    expect(next.reviews[4]).toBeUndefined();
+    expect(next.decisions.at(-1)).toMatchObject({ kind: "approve", stage: 3, accepted: true, surface: "cli", skipped: [4] });
+  });
+
+  test("a service other software calls skips GUI design too; a website does not", () => {
+    expect(pass(atStage3(), { surface: "api" }).stage).toBe(5);
+    expect(pass(atStage3(), { surface: "web" })).toMatchObject({ stage: 4, surface: "web", skipped: [] });
+  });
+
+  test("an approval with no evidence, as recorded before the rule, walks every stage as it did", () => {
+    const next = pass(atStage3());
+    expect(next).toMatchObject({ stage: 4, surface: null, skipped: [] });
+    expect(next.decisions.at(-1)).not.toHaveProperty("surface");
+  });
+
+  test("an approval naming no known surface is refused surface_missing", () => {
+    const next = pass(atStage3(), { surface: "hologram" });
+    expect(next.stage).toBe(3);
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "surface_missing" });
+  });
+
+  test("a skipped stage is no send-back target; a send-back to 3 reopens what is being built", () => {
+    const atFive = pass(atStage3(), { surface: "cli" });
+    const toFour = applyDecision(input(atFive, OWNER, { decisionId: "sb4", kind: "send_back", projectId: "p1", stage: 5, targetStage: 4, reason: "redo", at: AT }));
+    expect(toFour.stage).toBe(5);
+    expect(toFour.decisions.at(-1)).toMatchObject({ accepted: false, reason: "invalid_target_stage" });
+    const toThree = applyDecision(input(atFive, OWNER, { decisionId: "sb3", kind: "send_back", projectId: "p1", stage: 5, targetStage: 3, reason: "it has screens", at: AT }));
+    expect(toThree).toMatchObject({ stage: 3, surface: null, skipped: [] });
+    expect(pass(toThree, { surface: "web" }).stage).toBe(4);
+  });
+
+  test("a snapshot written before surfaces were recorded revives with none", () => {
+    const { surface: _surface, skipped: _skipped, ...old } = atStage3();
+    const revived = initProjectState({ projectId: "p1", stages: [1, 2, 3].map((stage) => ({ stage, authorizedPrincipalIds: [OWNER] })), snapshot: old as ProjectState });
+    expect(revived).toMatchObject({ stage: 3, surface: null, skipped: [] });
+  });
+});

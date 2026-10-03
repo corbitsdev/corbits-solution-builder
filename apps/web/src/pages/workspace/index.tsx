@@ -111,6 +111,8 @@ export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
  * decisions stage. */
 const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 
+const SURFACE_NOTE = "Choose what the finished build is. A command or a service has no screens, so GUI design is skipped for it.";
+
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
 
@@ -552,6 +554,7 @@ export function StageWorkspace({
   const sendBackPopover = (
     <SendBackPopover
       stage={stage}
+      skipped={workflowView?.skipped ?? []}
       open={sendBackOpen}
       onDismiss={() => setSendBackOpen(false)}
       onPick={(target) => {
@@ -734,14 +737,14 @@ export function StageWorkspace({
               <Button variant="ghost" onClick={() => artifacts.select(null)}>
                 Back to {stageName(stage)}
               </Button>
-              {artifacts.activeNode.stage < stage ? (
+              {artifacts.activeNode.stage < stage && !workflowView?.skipped.includes(artifacts.activeNode.stage) ? (
                 <Button variant="ghost" disabled={decisions.sendingBack} onClick={() => setReaderSendBack((open) => !open)}>
                   Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
             </div>
           </div>
-          {readerSendBack && artifacts.activeNode.stage < stage ? (
+          {readerSendBack && artifacts.activeNode.stage < stage && !workflowView?.skipped.includes(artifacts.activeNode.stage) ? (
             <SendBackConfirm
               target={artifacts.activeNode.stage}
               busy={decisions.sendingBack}
@@ -1120,6 +1123,7 @@ export function StageWorkspace({
           {stage === 7 ? (
             <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
           ) : null}
+          {stage === 3 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} /> : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
             node={artifacts.activeNode}
@@ -1151,7 +1155,7 @@ export function StageWorkspace({
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
-            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded && (stage !== 3 || chosenTarget !== null)}
             busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
             newer={artifacts.newerVersion}

@@ -67,7 +67,9 @@ export function stageEvents(
       out.push({
         id: `ev:${decision.decisionId}`,
         at,
-        text: `Approved · ${decision.artifactId ? `${titleOf.get(decision.artifactId) ?? "the stage"} v${decision.version ?? ""}` : `stage ${stage}`}`,
+        text: `Approved · ${decision.artifactId ? `${titleOf.get(decision.artifactId) ?? "the stage"} v${decision.version ?? ""}` : `stage ${stage}`}${
+          decision.skipped?.length ? ` · ${decision.skipped.map((skipped) => stageName(skipped)).join(", ")} not needed` : ""
+        }`,
         tone: "line",
       });
     } else if (decision.kind === "send_back" && decision.stage === stage) {

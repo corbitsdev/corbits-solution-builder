@@ -163,17 +163,20 @@ export function SendBackDock({
  *  keyboard and discovery both. */
 export function SendBackPopover({
   stage,
+  skipped,
   open,
   onPick,
   onDismiss,
 }: {
   stage: number;
+  /** Stages the project's surface made not applicable: nothing to go back to. */
+  skipped: readonly number[];
   open: boolean;
   onPick: (target: number) => void;
   onDismiss: () => void;
 }) {
   if (!open || stage < 2) return null;
-  const targets = Array.from({ length: stage }, (_, index) => stage - index);
+  const targets = Array.from({ length: stage }, (_, index) => stage - index).filter((target) => !skipped.includes(target));
   return (
     <>
       <button type="button" className="sbpick-backdrop" aria-label="Dismiss" onClick={onDismiss} />

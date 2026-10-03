@@ -12,7 +12,7 @@
  * handed as its text, never its markup (#219), capped the way a hand-off is.
  */
 import { api, type ArtifactNode } from "../../client.js";
-import type { ReviewState } from "@solutions-builder/app/project-workflow/contracts";
+import { precedingStage, type ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { renderInputs, type Inputs } from "@solutions-builder/app/stage-prompt";
 import { DESIGN_TEXT_CAP, designAsText } from "../../design-handoff.ts";
@@ -27,7 +27,8 @@ export const CHAIN_END = "--- END OF THE RECORD; THIS STAGE'S OPENING FOLLOWS --
 
 /**
  * The nodes to hand a stage, in reading order: the material first, then
- * each earlier stage's approved artifact by stage, up to `stage - 2`. The
+ * each earlier stage's approved artifact by stage, up to the one before the
+ * previous stage (`precedingStage`, past any the surface skipped). The
  * previous stage's artifact is the opening itself, in the form that stage
  * expects (a design as text, the plan behind the frozen stack), so the
  * chain never repeats it.
@@ -36,6 +37,7 @@ export function approvedChainNodes(
   nodes: readonly ChainNode[],
   reviews: Readonly<Record<number, ReviewState | undefined>>,
   stage: number,
+  skipped: readonly number[] = [],
 ): ChainNode[] {
   // Stage 1 opens on the problem statement itself, so the record never
   // repeats it there; from stage 2 on it is material like any other.
@@ -47,7 +49,7 @@ export function approvedChainNodes(
     )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const approved: ChainNode[] = [];
-  for (let earlier = 1; earlier < stage - 1; earlier += 1) {
+  for (let earlier = 1; earlier < precedingStage(stage, skipped); earlier += 1) {
     const review = reviews[earlier];
     if (!review || review.status !== "approved") continue;
     const node = nodes.find((entry) => entry.artifactId === review.artifactId && entry.version === review.version);
@@ -89,8 +91,9 @@ export async function composeApprovedChain(deps: {
   readonly nodes: readonly ChainNode[];
   readonly reviews: Readonly<Record<number, ReviewState | undefined>>;
   readonly stage: number;
+  readonly skipped: readonly number[];
 }): Promise<string> {
-  const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
+  const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage, deps.skipped);
   const items: Inputs = [];
   for (const node of chain) {
     try {

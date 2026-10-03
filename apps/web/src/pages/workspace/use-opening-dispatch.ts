@@ -37,6 +37,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
 import { composeApprovedChain } from "./approved-chain.ts";
+import { precedingStage } from "@solutions-builder/app/project-workflow/contracts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -125,11 +126,11 @@ export function useOpeningDispatch({
   // Fallback source for a stage > 1 opening when `pendingOpening` was never
   // set in this mounted component — a reload, a re-opened project, or the
   // stage cursor advancing some other way. The previous stage's approved
-  // review IS the input to this one (CL-8687). No approved review at N-1
-  // means there is no input yet.
+  // review IS the input to this one (CL-8687), a stage the project's surface
+  // skipped passed over. No approved review there means there is no input yet.
   const previousApproved = (() => {
     if (stage <= 1 || !workflowView) return null;
-    const review = workflowView.reviews[stage - 1];
+    const review = workflowView.reviews[precedingStage(stage, workflowView.skipped)];
     if (!review || review.status !== "approved") return null;
     return { artifactId: review.artifactId, version: review.version };
   })();
@@ -184,7 +185,13 @@ export function useOpeningDispatch({
           // Every approved artifact before this stage, and the person's
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
-          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
+          const chain = await composeApprovedChain({
+            tenantId,
+            nodes: detail.nodes,
+            reviews: workflowView?.reviews ?? {},
+            stage,
+            skipped: workflowView?.skipped ?? [],
+          });
           // The workspace's language is in the specialist's own instructions
           // (`localizedRole`, client.ts), where a changed setting redeploys
           // it; the mail carries the record and the stage's lead, nothing else.
@@ -247,7 +254,8 @@ export function useOpeningDispatch({
           // (CL-8862) — the Architect may cite only these, never invent one.
           const requirementsBlock = stage === 6 && workflowView ? renderRequirementsBlock(workflowView.requirements) : null;
           // Stage 5 opens on the stage 4 design, usually an HTML mockup:
-          // handed over as its text, not its markup (#219).
+          // handed over as its text, not its markup (#219). With GUI design
+          // skipped it opens on the proposal, which passes through as is.
           const approved = stage === 5 ? designHandoff(result.content) : result.content;
           const body =
             stage === 8 && workflowView?.freeze
