@@ -32,6 +32,7 @@ import { isHtmlDocument } from "./workspace/guidance.ts";
 import { packageSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor, unrecordedPackageRequest } from "../package-reply.ts";
+import { useMountEffect } from "../use-mount-effect.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
@@ -401,7 +402,7 @@ export function AudiencePackages({
   // package is asked for again.
   const [resuming, setResuming] = useState(true);
   const resumedRef = useRef(false);
-  useEffect(() => {
+  useMountEffect(() => {
     cancelledRef.current = false;
     if (!resumedRef.current) {
       resumedRef.current = true;
@@ -410,8 +411,7 @@ export function AudiencePackages({
     return () => {
       cancelledRef.current = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  });
 
   const quorum = policy.audienceQuorum ?? 0;
 
