@@ -71,14 +71,18 @@ describe("EvaluatorStance", () => {
     expect(html).not.toContain("aria-expanded");
   });
 
-  // #157: one line in the approval bar, the notes behind a popover.
-  test("shows the stance as one line, with the notes in a popover the trigger controls", () => {
+  // #157: one line in the approval bar. The notes open in the row's own
+  // flow on a click, never as a tooltip laid over Approve.
+  test("shows the stance as one line, with closed notes in the row's flow that the trigger controls", () => {
     const html = render({ status: "verdict", verdict: { ready: false, notes: ["Success criteria are vague."] } });
     expect(html).toContain("Not approved by evaluator");
     expect(html).toContain('data-tone="not-ready"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('role="tooltip"');
-    expect(html).toContain("Success criteria are vague.");
+    expect(html).not.toContain("data-open");
+    expect(html).not.toContain('role="tooltip"');
+    const controls = /aria-controls="([^"]+)"/.exec(html)?.[1];
+    expect(controls).toBeDefined();
+    expect(html).toContain(`<div id="${controls}" class="evaluator-notes"><ul><li>Success criteria are vague.</li></ul></div>`);
     expect(render({ status: "verdict", verdict: { ready: true, notes: [] } })).toContain("Approved by evaluator");
   });
 
