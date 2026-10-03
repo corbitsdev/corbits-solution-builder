@@ -166,6 +166,15 @@ export function StageDocument({
     : [];
   const chosen = sections.some((section) => /^chosen approach\b/i.test(section.heading));
   const choosing = approaches.length > 0 && !chosen;
+  // The chooser in the composer records the choice: its "Chosen: …" turn is
+  // what `repairedChoiceDraft` reads. Chips offering the same approaches would
+  // ask the one question twice, under different names.
+  const approachNames = approaches.map((section) => approachName(section.heading)!.toLowerCase());
+  const offersApproaches = (options: readonly string[]) =>
+    options.filter((option) => {
+      const text = option.toLowerCase();
+      return /\bapproach\s+[ab]\b/.test(text) || approachNames.some((name) => text.includes(name));
+    }).length >= approaches.length;
   // A binary artifact is recognised by its bytes (a data: URL) or by the
   // kinds that are always files, so an as-yet-unloaded deck is a file card
   // from the first paint too.
@@ -434,6 +443,7 @@ export function StageDocument({
                   note={notes.get(message.id) ?? null}
                   draft={draftRefs.get(message.id) ?? null}
                   onOpenVersion={onSelectVersion}
+                  {...(canSubmit && choosing && message.id === lastTurnId ? { hideOptions: offersApproaches } : {})}
                   // Tapping a choice sends it, exactly as typing it would. That
                   // holds outside the interview too: a brainstormer proposing
                   // options is asking for a choice, whether or not a question
