@@ -9,7 +9,9 @@
  * stage, instead of making the person leave for the queue.
  */
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Textarea } from "@corbits/react-ui";
+import { keys } from "../../queries/keys.ts";
 import { listSpecialistDeployments } from "@solutions-builder/installer";
 import { agentFor } from "@solutions-builder/app/kit";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
@@ -136,9 +138,6 @@ function DeliveryDecision({
    *  can review and re-approve it rather than leaving stage 9 stuck. */
   onRejectSendBack: () => void;
 }) {
-  const [pending, setPending] = useState<PendingApproval | null>(null);
-  const [delivered, setDelivered] = useState<PendingApproval | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -146,71 +145,44 @@ function DeliveryDecision({
   // can still be looked up by id once it drops off the pending list. Held in
   // memory only — a reload before this fires just loses the "Delivered"
   // banner until the next delivery, never the delivery itself.
-  const [lastSeenApprovalId, setLastSeenApprovalId] = useState<string | null>(null);
+  const lastSeenApprovalId = useRef<string | null>(null);
   // The tenant the stage 9 specialist's approval is parked in: the
   // project's own, or the workspace for a specialist deployed before #29.
   // Learned from the deployment on each load, never assumed.
   const approvalTenant = useRef(tenantId);
 
-  // A stale in-flight poll must never overwrite what a later call (Accept's
-  // own `load()`, or a newer tick) already found — same shape as the
-  // verification effect below's `cancelled` guard, but as a sequence number
-  // since `load` can be in flight more than once concurrently.
-  const requestSeq = useRef(0);
-  // Mirrors `delivered` for the interval's closure — once the manifest is
-  // delivered there is nothing left to poll for.
-  const deliveredRef = useRef(false);
-
-  const load = async () => {
-    if (deliveredRef.current) return;
-    const seq = ++requestSeq.current;
-    const transport = createHubTransport();
-    try {
-      // The approval is parked in the tenant the stage 9 specialist runs in:
-      // the project's own, or the workspace for one deployed before #29.
+  // Polls while a decision is pending, the same cadence every other panel's
+  // pending-approval poll uses — a manifest that only loaded once at mount
+  // never told anyone it had arrived (defect: an empty pane until reload).
+  // Stops once delivered: there is nothing left to poll for.
+  const query = useQuery({
+    queryKey: keys.approvals.delivery(tenantId, projectId),
+    queryFn: async (): Promise<{ pending: PendingApproval | null; delivered: PendingApproval | null }> => {
+      const transport = createHubTransport();
       const deployments = await listSpecialistDeployments(transport, projectId);
       const stage9 = deployments.find((deployment) => deployment.stage === 9);
       approvalTenant.current = stage9?.tenantId ?? tenantId;
       const approvals = await pendingApprovals(approvalTenant.current, transport);
-      if (seq !== requestSeq.current) return;
       // Matched on the deployment's anchor identity, not a nested tool run's
       // own `runId` — see `pending-approvals.ts`'s `deliveryApprovalFor`.
       const found = stage9 ? deliveryApprovalFor(approvals, stage9.deploymentId) : null;
       if (found) {
-        setLastSeenApprovalId(found.id);
-        setPending(found);
-        setDelivered(null);
-        setLoaded(true);
-        return;
+        lastSeenApprovalId.current = found.id;
+        return { pending: found, delivered: null };
       }
-      setPending(null);
-      if (lastSeenApprovalId) {
-        const resolved = await approvalById(approvalTenant.current, lastSeenApprovalId, transport).catch(() => null);
-        if (seq !== requestSeq.current) return;
-        const isDelivered = resolved !== null && resolved.status === "approved";
-        setDelivered(isDelivered ? resolved : null);
-        deliveredRef.current = isDelivered;
-      }
-    } catch (cause) {
-      if (seq === requestSeq.current) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      if (seq === requestSeq.current) setLoaded(true);
-    }
-  };
-
-  // Polls while a decision is pending, the same cadence every other panel's
-  // pending-approval poll uses — a manifest that only loaded once at mount
-  // never told anyone it had arrived (defect: an empty pane until reload).
-  // Stops once delivered — `load` itself also short-circuits, but skipping
-  // the call here means a pending timer never has to make the round trip.
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => {
-      if (!deliveredRef.current) void load();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, projectId]);
+      const resolved = lastSeenApprovalId.current
+        ? await approvalById(approvalTenant.current, lastSeenApprovalId.current, transport).catch(() => null)
+        : null;
+      return { pending: null, delivered: resolved?.status === "approved" ? resolved : null };
+    },
+    refetchInterval: (current) => (current.state.data?.delivered ? false : POLL_INTERVAL_MS),
+  });
+  const pending = query.data?.pending ?? null;
+  const delivered = query.data?.delivered ?? null;
+  const loaded = !query.isPending;
+  const loadError = query.error ? (query.error instanceof ApiFailure ? query.error.detail.message : String(query.error)) : null;
+  const load = query.refetch;
+  const shownError = error ?? loadError;
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
@@ -287,7 +259,7 @@ function DeliveryDecision({
     <div className="doc" data-tour="document-body">
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
-      {error ? <Banner tone="error" title={error} /> : null}
+      {shownError ? <Banner tone="error" title={shownError} /> : null}
       {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (

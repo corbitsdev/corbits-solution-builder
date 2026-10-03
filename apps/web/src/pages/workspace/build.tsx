@@ -21,6 +21,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
+import { useMailboxNudge } from "../../queries/use-mailbox.ts";
+
+const NO_MESSAGES: ChatMessage[] = [];
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
@@ -167,13 +172,11 @@ export function BuildPanel({
   onAttach?: (files: FileList) => void;
 }) {
   const [address, setAddress] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [log, setLog] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
@@ -210,21 +213,17 @@ export function BuildPanel({
     return () => window.removeEventListener("focus", onFocus);
   }, [checkWorker]);
 
-  const load = useCallback(async () => {
-    if (!address) return;
-    try {
-      setMessages(await api.readStageThread(tenantId, [address]));
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  }, [address, tenantId]);
-
+  const backstop = useMailboxNudge(address ? tenantId : null);
+  const thread = useQuery({
+    queryKey: keys.thread.of(tenantId, address ? [address] : []),
+    queryFn: () => api.readStageThread(tenantId, [address!]),
+    enabled: address !== null,
+    refetchInterval: backstop,
+  });
+  const messages = thread.data ?? NO_MESSAGES;
   useEffect(() => {
-    if (!address) return;
-    void load();
-    const timer = setInterval(() => void load(), 3_000);
-    return () => clearInterval(timer);
-  }, [address, load]);
+    if (thread.error) setError(thread.error instanceof ApiFailure ? thread.error.detail.message : String(thread.error));
+  }, [thread.error]);
 
   // The project detail (and so `detail.nodes`) follows this stage's thread:
   // a supervisor reply is the only cue that the status document changed.
@@ -242,30 +241,15 @@ export function BuildPanel({
 
   // The log of the attempt in view: polled while it runs, read once when it
   // has ended. Both pipes and the worker's turn reports, in arrival order.
-  useEffect(() => {
-    if (!current) {
-      setLog("");
-      return;
-    }
-    let cancelled = false;
-    const read = async () => {
-      try {
-        const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (!cancelled) setLog(result.log);
-      } catch {
-        // The next poll says.
-      }
-    };
-    void read();
-    if (current.state !== "running") return () => {
-      cancelled = true;
-    };
-    const timer = setInterval(() => void read(), 2_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [detail.project.id, current?.attempt, current?.state]);
+  // A failed read keeps the last log; the next poll says.
+  const log =
+    useQuery({
+      queryKey: [...keys.buildAttempts.log(detail.project.id, current?.attempt ?? 0), current?.state],
+      queryFn: async () => (await api.buildAttempt(detail.project.id, current!.attempt)).log,
+      enabled: current !== null,
+      refetchInterval: current?.state === "running" ? 2_000 : false,
+      placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === current?.attempt ? previous : undefined),
+    }).data ?? "";
 
   const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -329,7 +313,7 @@ export function BuildPanel({
           verification: packaged.verification,
         }),
       });
-      await Promise.all([load(), refreshAttempts()]);
+      await Promise.all([thread.refetch(), refreshAttempts()]);
       onChanged();
     });
 
@@ -367,7 +351,7 @@ export function BuildPanel({
               void run("message", async () => {
                 if (!address) return;
                 await api.sendStageMail(tenantId, address, { body });
-                await load();
+                await thread.refetch();
               });
             }}
             working={busy !== null}
