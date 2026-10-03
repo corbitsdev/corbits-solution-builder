@@ -85,9 +85,11 @@ export function useProjectArtifacts(
   // draft before it is approved.
   const draftNode: ArtifactNode | null = useMemo(() => {
     if (!draftMessage || draftKind === null) return null;
+    // A saved draft's own version is 1 wherever it sits, so the newest is
+    // found by when it was written.
     const head = nodes
       .filter((node) => node.stage === stage && node.kind === draftKind)
-      .sort((a, b) => a.version - b.version)
+      .sort((a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt))
       .at(-1);
     // Opening the reply's review saves it as a version just after it lands;
     // once saved, the reply is that version, not one past it. Matched on the
