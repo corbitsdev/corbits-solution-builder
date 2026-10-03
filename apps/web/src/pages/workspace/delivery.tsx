@@ -184,7 +184,8 @@ function DeliveryDecision({
   // Polls while a decision is pending, the same cadence every other panel's
   // pending-approval poll uses — a manifest that only loaded once at mount
   // never told anyone it had arrived (defect: an empty pane until reload).
-  // Stops once delivered: there is nothing left to poll for.
+  // Stops once delivered, or once the workflow says it finished: there is
+  // nothing left to poll for.
   const query = useQuery({
     queryKey: keys.approvals.delivery(tenantId, projectId),
     queryFn: async (): Promise<{ pending: PendingApproval | null; delivered: PendingApproval | null }> => {
@@ -205,7 +206,7 @@ function DeliveryDecision({
         : null;
       return { pending: null, delivered: resolved?.status === "approved" ? resolved : null };
     },
-    refetchInterval: (current) => (current.state.data?.delivered ? false : POLL_INTERVAL_MS),
+    refetchInterval: (current) => (finished || current.state.data?.delivered ? false : POLL_INTERVAL_MS),
   });
   const pending = query.data?.pending ?? null;
   const delivered = query.data?.delivered ?? null;
