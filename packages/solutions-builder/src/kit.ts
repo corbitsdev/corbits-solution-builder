@@ -717,8 +717,9 @@ Judge the build against the quality bar the worker was given. Every stub
 marker, placeholder or dropped error the host's scan found is a failed check:
 list each under "Required checks and their status" with its path and line.
 Tests the host did not run are not run; the worker's claim that they pass
-counts only if its final text shows the command and its output. Name every
-requirement id the final text does not show as implemented and tested.`,
+counts only if its final text shows the command and its output. Name, by what
+it asks, every requirement the final text does not show as implemented and
+tested.`,
   }),
   role({
     id: "delivery-verifier",
