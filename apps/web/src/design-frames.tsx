@@ -159,6 +159,38 @@ function DesktopScreen({
   );
 }
 
+/**
+ * One screen in a phone. A screen that lays itself out wider than the phone
+ * is drawn at its own width and scaled to fit, as the pane does (#268):
+ * cut at the right edge, its overflow could not be seen at all.
+ */
+function PhoneScreen({
+  screen,
+  registerFrame,
+}: {
+  screen: PhoneSurface;
+  registerFrame?: (id: string, element: HTMLIFrameElement | null) => void;
+}) {
+  const natural = useNaturalWidth(screen.html, IPHONE_17_PRO.width);
+  const scale = fitDesignScale(natural, IPHONE_17_PRO.width);
+  return (
+    <IPhoneFrame title={screen.title}>
+      <iframe
+        ref={(element) => registerFrame?.(screen.id, element)}
+        className={scale < 1 ? "design-fit-frame" : "design-phone-screen"}
+        title={`${screen.title}, on an ${IPHONE_17_PRO.name}`}
+        srcDoc={screen.html}
+        sandbox=""
+        style={
+          scale < 1 && natural !== null
+            ? { width: `${String(natural)}px`, height: `${String(100 / scale)}%`, transform: `scale(${String(scale)})` }
+            : undefined
+        }
+      />
+    </IPhoneFrame>
+  );
+}
+
 export function DesignFrames({
   framed,
   frameKey,
@@ -187,15 +219,7 @@ export function DesignFrames({
       {framed.phones.length > 0 ? (
         <div className="phone-rack" aria-label="Phone screens">
           {framed.phones.map((phone) => (
-            <IPhoneFrame key={`${frameKey}:${phone.id}`} title={phone.title}>
-              <iframe
-                ref={(element) => registerFrame?.(phone.id, element)}
-                className="design-phone-screen"
-                title={`${phone.title}, on an ${IPHONE_17_PRO.name}`}
-                srcDoc={phone.html}
-                sandbox=""
-              />
-            </IPhoneFrame>
+            <PhoneScreen key={`${frameKey}:${phone.id}`} screen={phone} {...(registerFrame ? { registerFrame } : {})} />
           ))}
         </div>
       ) : null}
