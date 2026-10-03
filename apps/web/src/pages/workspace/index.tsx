@@ -998,6 +998,7 @@ export function StageWorkspace({
               <AudiencePackages
                 detail={detail}
                 tenantId={tenantId}
+                messages={foldedMessages}
                 onChanged={() => {
                   void refreshWorkflow();
                   void loadThread();
