@@ -143,6 +143,7 @@ export function StageDocument({
   tools?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
   useEffect(() => {
     if (seed && seed.text.trim()) setMessage(seed.text);
@@ -540,28 +541,47 @@ export function StageDocument({
             </div>
           ) : canSubmit ? (
             <div className="stage-action composer-approve">
-              <span className="composer-approve-lead">
-                <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
-                {advisory}
-              </span>
+              <span className="composer-approve-lead">{advisory}</span>
               <span
                 data-tour="submit"
                 data-ready={evaluation?.ready ? "true" : undefined}
                 className={evaluation?.ready ? "is-ready approve" : "approve"}
               >
-                <Button
-                  variant="ghost"
-                  loading={busy === "submit"}
-                  onClick={() => {
-                    // Quoted passages are for the stage being sent for
-                    // approval; once it is, nothing is left to restore.
-                    clearQuotedDraft(tenantId, node.stage);
-                    onSubmit();
-                  }}
-                >
-                  <Check aria-hidden="true" />
-                  {soloApproval ? "Approve and continue" : "Send for approval"}
-                </Button>
+                {confirming ? (
+                  <span className="approve-confirm" role="group" aria-label="Confirm">
+                    <span>
+                      {advisory && !evaluation?.ready
+                        ? "Continue anyway?"
+                        : soloApproval
+                          ? "Approve this and move on?"
+                          : "Send this for approval?"}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      loading={busy === "submit"}
+                      onClick={() => {
+                        // Quoted passages are for the stage being sent for
+                        // approval; once it is, nothing is left to restore.
+                        clearQuotedDraft(tenantId, node.stage);
+                        setConfirming(false);
+                        onSubmit();
+                      }}
+                    >
+                      Yes
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirming(false)}>
+                      No
+                    </Button>
+                  </span>
+                ) : (
+                  <>
+                    <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
+                    <Button variant="ghost" loading={busy === "submit"} onClick={() => setConfirming(true)}>
+                      <Check aria-hidden="true" />
+                      {soloApproval ? "Approve" : "Send for approval"}
+                    </Button>
+                  </>
+                )}
               </span>
             </div>
           ) : null}

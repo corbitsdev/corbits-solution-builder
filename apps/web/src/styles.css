@@ -2109,7 +2109,17 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
+/* Approving is a two-step: the ask and its button, then a confirm in place. */
+.composer-approve .approve,
+.composer-approve .approve-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
 .composer-approve-lead {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
