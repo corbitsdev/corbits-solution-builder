@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-plan-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The four senior-engineer panel principals that review the stage 6 plan, each with its own prompt key and model binding.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}
