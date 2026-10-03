@@ -19,6 +19,7 @@ import { quorumState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "../../client.js";
 import type { GuideGuidance } from "../../components.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.js";
+import { decodeEntities } from "../../html-entities.ts";
 
 /** One live artifact version, as the guide reads it. */
 export type GuideVersion = {
@@ -112,13 +113,6 @@ const MARKUP_KINDS = new Set(["design_artifact"]);
  *  cheap even on pathological markup. */
 const MARKUP_INPUT_CAP = 50_000;
 
-/** A numeric entity's character, or U+FFFD for one no string can hold (out of
- *  range, a surrogate half, or NUL). */
-function codePoint(value: number): string {
-  if (!Number.isFinite(value) || value <= 0 || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) return "\uFFFD";
-  return String.fromCodePoint(value);
-}
-
 /** Whether content is an HTML page, looking past a leading comment, XML
  *  declaration or ```html fence. */
 function looksLikeMarkup(content: string): boolean {
@@ -131,29 +125,19 @@ function looksLikeMarkup(content: string): boolean {
   return /^<(?:!doctype|[a-z][a-z0-9-]*)[\s>/]/i.test(head);
 }
 
-const ENTITIES: Readonly<Record<string, string>> = { lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-
 /** Markup's words, for designs written as HTML: the guide reads what a page
  *  says, not how it is laid out. Anything else is returned as it is. */
 export function textOf(content: string, kind?: string): string {
   if (!(kind !== undefined && MARKUP_KINDS.has(kind)) && !looksLikeMarkup(content)) return content;
-  return content
+  const words = content
     .slice(0, MARKUP_INPUT_CAP)
     // The cap can cut through a tag; its half is not text.
     .replace(/<[^>]*$/, "")
     .replace(/^\s*```html\s*|\s*```\s*$/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, " ")
-    .replace(/<(?:"[^"]*"|'[^']*'|[^'">])*>/g, " ")
-    .replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (entity, name: string) => {
-      if (name.startsWith("#x") || name.startsWith("#X")) return codePoint(Number.parseInt(name.slice(2), 16));
-      if (name.startsWith("#")) return codePoint(Number.parseInt(name.slice(1), 10));
-      const lower = name.toLowerCase();
-      if (lower === "amp") return "&";
-      return ENTITIES[lower] ?? entity;
-    })
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/<(?:"[^"]*"|'[^']*'|[^'">])*>/g, " ");
+  return decodeEntities(words).replace(/\s+/g, " ").trim();
 }
 
 /** What the guide is actually sent: each version as text, cut to its share,
