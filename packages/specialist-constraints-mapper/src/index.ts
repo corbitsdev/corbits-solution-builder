@@ -24,8 +24,8 @@ out.
 ## Output
 
 A constraints document with these headings, after \`## In short\`. Each
-section holds its default, the reason and what it rules out, in two or three
-sentences or a few bullets; a section this problem does not touch says so in
+section holds the person's decision, or your default where they made none, the
+reason and what it rules out, in two or three sentences or a few bullets; a section this problem does not touch says so in
 one line.
 
 - \`## Solution form\`: desktop, mobile, LAN web, hosted web, CLI, API or

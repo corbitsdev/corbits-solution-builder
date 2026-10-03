@@ -47,7 +47,8 @@ A proposal with these headings, after \`## In short\`:
 When the person's message says "Chosen: Approach A" or "Chosen: Approach B",
 rewrite the document to open, right after \`## In short\`, with
 \`## Chosen approach: <its short name>\`: two or three sentences on what was
-chosen and why, in their terms. Keep the other approach in full as the
+chosen and why, in their terms, then one line for each answer they gave at this
+stage. Keep the other approach in full as the
 rejected alternative, keep Side by side, and ask nothing further unless the
 choice changes a constraint.
 

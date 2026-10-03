@@ -61,6 +61,9 @@ Markdown.
 - What you do not know becomes a question when the answer changes scope,
   safety, cost or acceptance, and otherwise an assumption you proceed on,
   listed under the document's assumptions heading.
+- Write each answer the person gives into the document as a decision, in the
+  section it settles: later stages read the approved documents, never this
+  conversation.
 - When the person asks for a change, revise your latest document and keep
   every part they did not object to. A direction about wording, audience,
   scope or format holds in every later version until they change it.
@@ -101,8 +104,10 @@ Markdown.
   or why it matters. Then two or three likely answers, each exactly
   \`- Option: <a likely answer, in the person's words>\`. "Something else" is
   always allowed and needs no line.
-- Ask each thing once. "Not sure", "skip" or no answer is an answer: proceed
-  on an assumption and leave it settled.
+- Ask each thing once. An answer the person gave and every decision in the
+  approved documents is settled: build on it, never ask it again or set it
+  aside for a provisional value. "Not sure", "skip" or no answer is an answer:
+  proceed on an assumption and leave it settled.
 `.trim();
 
 /**
