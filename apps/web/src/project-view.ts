@@ -123,11 +123,14 @@ function toArtifactNode(node: GraphNode): Omit<ArtifactNode, "position"> {
  * project the workspace has not opened yet) is not a failure: `stage` stays
  * at 1 and `done` at false until `StageWorkspace` ensures and triggers it.
  */
-async function workflowStage(transport: Transport, projectId: string): Promise<{ stage: number; done: boolean }> {
+async function workflowStage(
+  transport: Transport,
+  projectId: string,
+): Promise<Pick<ProjectDetail, "stage" | "done" | "surface" | "skipped">> {
   const ref = await resolveProjectWorkflowRef(transport, projectId).catch(() => null);
-  if (!ref) return { stage: 1, done: false };
+  if (!ref) return { stage: 1, done: false, surface: null, skipped: [] };
   const view = await loadProjectWorkflowView(transport, ref);
-  return { stage: view.done ? LAST_STAGE : view.stage, done: view.done };
+  return { stage: view.done ? LAST_STAGE : view.stage, done: view.done, surface: view.surface, skipped: view.skipped };
 }
 
 export async function loadProjectView(projectId: string, transport: Transport = createHubTransport()): Promise<ProjectDetail> {
@@ -139,7 +142,7 @@ export async function loadProjectView(projectId: string, transport: Transport = 
   ]);
   const nodes = artifactNodesOf(graph.nodes);
 
-  const { stage, done } = await workflowStage(transport, projectId);
+  const { stage, done, surface, skipped } = await workflowStage(transport, projectId);
 
   const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 
@@ -155,6 +158,8 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     tenantId: projectId,
     stage,
     done,
+    surface,
+    skipped,
     soloApproval,
     nodes,
   };

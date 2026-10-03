@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { STAGES } from "@solutions-builder/app/ledger";
 import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
+import type { Surface } from "@solutions-builder/app/project-workflow/contracts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu } from "./pages/project-menu.jsx";
@@ -176,14 +177,17 @@ function ProjectLoadFailure({
  * The nine stages as blocks: done ones in ink and clickable, the current
  * one widened into a pill that carries its name, the rest quiet. The segment being looked at, when it is a done stage
  * opened from here, is ringed -- the track still says how far the project
- * has come; the ring says where the eyes are.
+ * has come; the ring says where the eyes are. A stage the project's
+ * surface made not applicable is a muted, hollow block that opens nothing.
  */
 function StageStepper({
   steps,
+  skipped,
   viewed,
   onStepClick,
 }: {
   steps: readonly WorkflowStep[];
+  skipped: readonly number[];
   viewed: number | null;
   onStepClick?: (stage: number) => void;
 }) {
@@ -194,8 +198,9 @@ function StageStepper({
           key={step.number}
           aria-current={step.status === "current" ? "step" : undefined}
           {...(viewed === step.number ? { "data-viewed": "" } : {})}
+          {...(skipped.includes(step.number) ? { "data-skipped": "" } : {})}
         >
-          {step.status === "completed" && onStepClick ? (
+          {step.status === "completed" && !skipped.includes(step.number) && onStepClick ? (
             <button type="button" title={step.label} onClick={() => onStepClick(step.number)}>
               <span className="sr-only">{step.label}</span>
             </button>
@@ -210,10 +215,17 @@ function StageStepper({
   );
 }
 
-function stageSteps(stage: number): WorkflowStep[] {
+const SURFACE_NOUN: Readonly<Record<Surface, string>> = {
+  cli: "a command-line tool",
+  web: "a website",
+  api: "a service other software calls",
+  desktop: "an installed app",
+};
+
+function stageSteps(stage: number, surface: Surface | null, skipped: readonly number[]): WorkflowStep[] {
   return STAGES.map((number) => ({
     number,
-    label: stageName(number),
+    label: skipped.includes(number) && surface ? `${stageName(number)} — not needed for ${SURFACE_NOUN[surface]}` : stageName(number),
     status: number < stage ? "completed" : number === stage ? "current" : "pending",
   }));
 }
@@ -341,7 +353,8 @@ export function AppBar({
         {inProject ? (
           <>
             <StageStepper
-              steps={stageSteps(detail.stage)}
+              steps={stageSteps(detail.stage, detail.surface, detail.skipped)}
+              skipped={detail.skipped}
               viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
               {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
             />

@@ -56,7 +56,11 @@ three kinds:
 
 Every refusal appends `{ accepted:false, reason }`; duplicate `decisionId` is
 refused `duplicate`. `stageRules` (`contracts.ts`) is the seam for
-per-stage approval rules: stage 5's stakeholder quorum, stage 6's Stack
+per-stage approval rules: stage 3's surface (what is being built: `cli`,
+`web`, `api` or `desktop`; a `cli` or `api` approval records `skipped: [4]`,
+advances straight to stage 5 and refuses a send-back to 4; an approval
+with no evidence predates the rule and skips nothing), stage 5's
+stakeholder quorum, stage 6's Stack
 section (the plan must carry a `## Stack` block citing minted requirement
 ids, #55) and stage 7's cost/target freeze.
 

@@ -47,6 +47,8 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     audienceDecisions: {},
     audiencePackages: {},
     stage5Quorum: null,
+    surface: null,
+    skipped: [],
     ...overrides,
   };
 }

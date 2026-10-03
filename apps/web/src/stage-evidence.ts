@@ -121,12 +121,19 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
 }
 
 /** Builds the `approve` decision's evidence for a stage, or `undefined` for
- *  a stage with no evidence to carry (every stage but 6 and 7 -- stage 5's
- *  rule reads `ProjectState` directly, CL-8870). Stage 6 always carries its
+ *  a stage with no evidence to carry (every stage but 3, 6 and 7 -- stage
+ *  5's rule reads `ProjectState` directly, CL-8870). Stage 3 always carries
+ *  the surface chosen, even none: an approval with no evidence there is a
+ *  recorded pre-surface one, and the reducer's `stage3Rule` refuses a
+ *  fresh one that names no surface. Stage 6 always carries its
  *  plan's Stack, parsed or not: the reducer's `stage6Rule` is what refuses
  *  a plan without one (#55), and an approval with no evidence at all is
  *  what a recorded pre-rule approval looks like, not a fresh one. */
-export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage6Evidence | Stage7Evidence | undefined> {
+export async function stageEvidence(
+  stage: number,
+  deps: StageEvidenceDeps,
+): Promise<{ readonly surface: string | null } | Stage6Evidence | Stage7Evidence | undefined> {
+  if (stage === 3) return { surface: deps.chosenTarget };
   if (stage === 6) return { stack: parseStackRecord(deps.planText ?? "") ?? ({} as StackRecord) };
   if (stage === 7) return stage7Evidence(deps);
   return undefined;

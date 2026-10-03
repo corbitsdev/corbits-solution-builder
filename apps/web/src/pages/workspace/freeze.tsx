@@ -1,5 +1,5 @@
 /**
- * Stage 7's target picker.
+ * The target picker: stage 3 asks what is being built, stage 7 confirms it.
  *
  * Freezing the packet used to be its own workflow signal (`build.freeze`)
  * parked on a lifecycle run. Under the mail-chat contract (CL-8612) there is
@@ -27,9 +27,11 @@ export function targetOpeningLine(target: string): string {
 export function TargetPicker({
   chosen,
   onChange,
+  note = "Choose how the finished build will be used. Only a website or a service is actually checked today — the others are honest about not being verified yet.",
 }: {
   chosen: string | null;
   onChange: (target: string) => void;
+  note?: string;
 }) {
   const [changing, setChanging] = useState(false);
   const chosenOption = chosen ? SELECTABLE_TARGETS.find((option) => option.target === chosen) : undefined;
@@ -55,10 +57,7 @@ export function TargetPicker({
       <p id="build-target-question" className="text-sm font-medium">
         How will this be used?
       </p>
-      <p className="inline-note">
-        Choose how the finished build will be used. Only a website or a service is actually
-        checked today — the others are honest about not being verified yet.
-      </p>
+      <p className="inline-note">{note}</p>
       <div className="grid gap-2">
         {SELECTABLE_TARGETS.map((option) => (
           <label key={option.target} className="flex items-start gap-2">

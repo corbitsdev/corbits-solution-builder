@@ -23,6 +23,7 @@ import {
   type QuorumState,
   type ReviewState,
   type StageNumber,
+  type Surface,
 } from "@solutions-builder/app/project-workflow/contracts";
 import type { RequirementEntry } from "@solutions-builder/app/stack";
 
@@ -64,6 +65,10 @@ export type ProjectWorkflowView = {
   /** `audiencePolicy`/`audienceDecisions`/`audiencePackages` folded through
    *  `quorumState`; null until `audiencePolicy` is captured. */
   readonly stage5Quorum: QuorumState | null;
+  /** What is being built, as stage 3's approval named it; null before then. */
+  readonly surface: Surface | null;
+  /** Stages that surface makes not applicable. */
+  readonly skipped: readonly StageNumber[];
 };
 
 const EMPTY_STATE: ProjectState = {
@@ -80,6 +85,8 @@ const EMPTY_STATE: ProjectState = {
   audiencePolicy: null,
   audienceDecisions: {},
   audiencePackages: {},
+  surface: null,
+  skipped: [],
 };
 
 function outputOf(events: readonly WorkflowRunEvent[], stepId: string): unknown {
@@ -177,6 +184,9 @@ export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView 
     audienceDecisions: state.audienceDecisions,
     audiencePackages,
     stage5Quorum: state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions, audiencePackages) : null,
+    // A run deployed before surfaces were recorded carries neither field.
+    surface: state.surface ?? null,
+    skipped: state.skipped ?? [],
   };
 }
 

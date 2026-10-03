@@ -1,5 +1,6 @@
 import { mintRequirementEntries } from "../requirements.js";
 import { checkStackCitations, type RequirementEntry, type RequirementKind, type StackChoice, type StackRecord } from "../stack.js";
+import type { TargetModality } from "../targets.js";
 
 export type StageNumber = number;
 /** `mint_requirements` (CL-8862) mints `ProjectState.requirements` once, from
@@ -43,6 +44,10 @@ export interface DecisionRecord {
   };
   /** Stage 7 approvals only: the target the freeze was made for. */
   readonly target?: string;
+  /** Stage 3 approvals that named one: the deliverable's surface, and the
+   *  stages it made not applicable. */
+  readonly surface?: Surface;
+  readonly skipped?: readonly StageNumber[];
   /** `audience` decisions only: which stakeholder, and their own
    *  proceed/revise/reject and optional note. */
   readonly audience?: string;
@@ -104,6 +109,29 @@ export interface FrozenReference {
  *  noticed at stage 7 when there is nothing left to freeze. */
 export interface Stage6Evidence {
   readonly stack: StackRecord;
+}
+
+/** What is being built, as the person names it when approving the solution
+ *  proposal: the build targets a person can pick. */
+export const SURFACES = ["cli", "web", "api", "desktop"] as const satisfies readonly Exclude<TargetModality, "other">[];
+export type Surface = (typeof SURFACES)[number];
+
+/** Stage 3 approve evidence: the deliverable's surface. */
+export interface Stage3Evidence {
+  readonly surface: Surface;
+}
+
+/** GUI design draws screens. A command-line tool and a service other
+ *  software calls have none, so a design there mocks up nothing the build
+ *  ships. */
+const NOT_APPLICABLE: Readonly<Record<Surface, readonly StageNumber[]>> = { cli: [4], api: [4], web: [], desktop: [] };
+
+/** The stage whose approved artifact `stage` opens on: the nearest earlier
+ *  one the recorded surface did not skip. */
+export function precedingStage(stage: StageNumber, skipped: readonly StageNumber[]): StageNumber {
+  let previous = stage - 1;
+  while (skipped.includes(previous)) previous -= 1;
+  return previous;
 }
 
 /** Stage 7 approve evidence: the chosen build target plus a frozen reference
@@ -182,6 +210,13 @@ export interface ProjectState {
    *  while it names the entry here for its stakeholder (#50). Empty before
    *  any stage-5 review has opened. */
   readonly audiencePackages: Readonly<Record<string, AudiencePackageRef>>;
+  /** The deliverable's surface, recorded by the stage 3 approval that named
+   *  it; null before then, for an approval recorded before surfaces were
+   *  asked, and after a send-back to stage <= 3. */
+  readonly surface: Surface | null;
+  /** Stages the recorded surface makes not applicable: passed over on
+   *  approval and never a send-back target. Cleared with `surface`. */
+  readonly skipped: readonly StageNumber[];
 }
 
 interface DecisionCommon {
@@ -268,7 +303,8 @@ export type RefusalCode =
   | "stack_uncited"
   | "stack_unknown_requirement"
   | "not_audience_stage"
-  | "unknown_audience";
+  | "unknown_audience"
+  | "surface_missing";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -403,6 +439,8 @@ export interface ApplyDecisionInput {
   readonly audiencePolicy: AudiencePolicy | null;
   readonly audienceDecisions: Readonly<Record<string, AudienceVote>>;
   readonly audiencePackages: Readonly<Record<string, AudiencePackageRef>>;
+  readonly surface: Surface | null;
+  readonly skipped: readonly StageNumber[];
 }
 
 /** Structural check for `OpenReviewPayload["policy"]` at stage 5. */
@@ -512,6 +550,20 @@ function isStackRecordShape(value: unknown): value is StackRecord {
   return Array.isArray(value.deferred) && value.deferred.every((d) => typeof d === "string");
 }
 
+/** Structural check for `ApprovePayload["evidence"]` at stage 3. */
+export function isStage3Evidence(value: unknown): value is Stage3Evidence {
+  return isRecord(value) && SURFACES.includes(value.surface as Surface);
+}
+
+/**
+ * Stage 3: an approval names what is being built. One with no `evidence`
+ * at all was recorded before surfaces were asked, replayed onto a fresh run
+ * (#51) or adopted from a legacy project: it stands as accepted, with no
+ * surface and nothing skipped, so its project walks every stage as it did.
+ */
+const stage3Rule: StageRule = (_state, payload) =>
+  payload.evidence === undefined || isStage3Evidence(payload.evidence) ? null : "surface_missing";
+
 /** Structural check for `ApprovePayload["evidence"]` at stage 6. */
 export function isStage6Evidence(value: unknown): value is Stage6Evidence {
   return isRecord(value) && isStackRecordShape(value.stack);
@@ -583,11 +635,12 @@ const stage6Rule: StageRule = (state, payload) => {
 /**
  * Seam for stage-specific approval rules, consulted after every
  * structural/reference check on an `approve` decision passes and before the
- * reducer commits the approval: stage 5's stakeholder quorum, stage 6's
- * Stack section (#55) and stage 7's cost/target freeze (CL-8690/CL-8691).
+ * reducer commits the approval: stage 3's surface, stage 5's stakeholder
+ * quorum, stage 6's Stack section (#55) and stage 7's cost/target freeze
+ * (CL-8690/CL-8691).
  */
 export type StageRule = (state: ProjectState, payload: ApprovePayload, principalId: string) => RefusalCode | null;
-export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 5: stage5Rule, 6: stage6Rule, 7: stage7Rule };
+export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 3: stage3Rule, 5: stage5Rule, 6: stage6Rule, 7: stage7Rule };
 
 /** Why `allowed.approve` is false, or null once it is true. `no_open_review`
  *  is the ordinary state before the client has named anything reviewable; a
@@ -633,6 +686,7 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
   not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
+  surface_missing: "Choose what is being built before approving.",
 };
 
 /** `approveReason`'s code, in plain language -- the one place stage 5's
@@ -668,6 +722,8 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
     audiencePolicy: input.audiencePolicy,
     audienceDecisions: input.audienceDecisions,
     audiencePackages: input.audiencePackages,
+    surface: input.surface,
+    skipped: input.skipped,
   };
 }
 
@@ -867,6 +923,8 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     };
     const quorum =
       state.stage === 5 && state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages) : null;
+    const surface = state.stage === 3 ? (isStage3Evidence(payload.evidence) ? payload.evidence.surface : null) : state.surface;
+    const skipped = state.stage === 3 ? (surface ? NOT_APPLICABLE[surface] : []) : state.skipped;
     const freeze: Freeze | null =
       state.stage === 7 && isStage7Evidence(payload.evidence)
         ? { target: payload.evidence.target, frozen: payload.evidence.frozen, stack: payload.evidence.stack, decisionId: payload.decisionId }
@@ -884,18 +942,18 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
       sha256: payload.sha256,
       ...(quorum ? { quorum: { proceeded: quorum.proceeded, required: quorum.required, blocked: quorum.blocked, stale: quorum.stale } } : {}),
       ...(freeze && freeze !== state.freeze ? { target: freeze.target } : {}),
+      ...(state.stage === 3 && surface ? { surface, skipped } : {}),
     };
-    const currentIndex = state.stageOrder.indexOf(state.stage);
-    const nextStage = state.stageOrder[currentIndex + 1];
+    const nextStage = state.stageOrder.slice(state.stageOrder.indexOf(state.stage) + 1).find((s) => !skipped.includes(s));
     if (nextStage === undefined) {
-      return { ...state, reviews: approvedReviews, decisions: [...state.decisions, record], done: true, freeze };
+      return { ...state, reviews: approvedReviews, decisions: [...state.decisions, record], done: true, freeze, surface, skipped };
     }
-    return { ...state, stage: nextStage, reviews: approvedReviews, decisions: [...state.decisions, record], freeze };
+    return { ...state, stage: nextStage, reviews: approvedReviews, decisions: [...state.decisions, record], freeze, surface, skipped };
   }
 
   // send_back
   const targetStage = payload.targetStage ?? (state.stage === state.stageOrder[state.stageOrder.length - 1] ? state.stageOrder[state.stageOrder.length - 2] : undefined);
-  if (targetStage === undefined || targetStage > state.stage || !state.stageOrder.includes(targetStage)) {
+  if (targetStage === undefined || targetStage > state.stage || !state.stageOrder.includes(targetStage) || state.skipped.includes(targetStage)) {
     return refused(state, payload, principalId, "invalid_target_stage");
   }
   const reviews: Record<StageNumber, ReviewState | undefined> = { ...state.reviews };
@@ -927,6 +985,9 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   const audiencePolicy = targetStage <= 5 ? null : state.audiencePolicy;
   const audienceDecisions = targetStage <= 5 ? {} : state.audienceDecisions;
   const audiencePackages = targetStage <= 5 ? {} : state.audiencePackages;
+  // Reopening the proposal reopens what is being built.
+  const surface = targetStage <= 3 ? null : state.surface;
+  const skipped = targetStage <= 3 ? [] : state.skipped;
   return {
     ...state,
     stage: targetStage,
@@ -937,6 +998,8 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     audiencePolicy,
     audienceDecisions,
     audiencePackages,
+    surface,
+    skipped,
   };
 }
 
@@ -983,7 +1046,14 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
   const authorizedPrincipals: Record<StageNumber, readonly string[]> = {};
   for (const s of payload.stages) authorizedPrincipals[s.stage] = s.authorizedPrincipalIds;
   if (isProjectStateSnapshot(payload.snapshot) && payload.snapshot.projectId === payload.projectId) {
-    return { ...payload.snapshot, authorizedPrincipals, stageOrder: payload.stages.map((s) => s.stage) };
+    // A snapshot written before surfaces were recorded carries neither field.
+    return {
+      ...payload.snapshot,
+      surface: payload.snapshot.surface ?? null,
+      skipped: payload.snapshot.skipped ?? [],
+      authorizedPrincipals,
+      stageOrder: payload.stages.map((s) => s.stage),
+    };
   }
   return {
     projectId: payload.projectId,
@@ -999,5 +1069,7 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     audiencePolicy: null,
     audienceDecisions: {},
     audiencePackages: {},
+    surface: null,
+    skipped: [],
   };
 }

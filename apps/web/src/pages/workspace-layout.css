@@ -80,6 +80,13 @@
   transition: padding 0.2s ease-out;
 }
 
+/* Not applicable to what is being built: hollow, so it reads as passed
+   over rather than done or still ahead. */
+.topbar-project .stepper li[data-skipped] > span {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--wb-border);
+}
+
 /* A done stage opened from the track: ringed, while the pill stays on the
    current stage so progress still reads. */
 .topbar-project .stepper li[data-viewed] > button {

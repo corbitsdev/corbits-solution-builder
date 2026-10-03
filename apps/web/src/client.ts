@@ -11,6 +11,7 @@ import { agentById, agentFor, evaluatorFor, panelPrincipals, type AgentRole } fr
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
+import type { Surface } from "@solutions-builder/app/project-workflow/contracts";
 import { newestRun, runStateOf, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
@@ -530,6 +531,9 @@ export type ProjectDetail = {
   stage: number;
   /** Whether the project workflow has converged (stage 9 approved). */
   done: boolean;
+  /** What is being built, as the workflow recorded it at stage 3, and the stages that makes not applicable. */
+  surface: Surface | null;
+  skipped: readonly number[];
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
