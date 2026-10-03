@@ -47,7 +47,7 @@ import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -685,16 +685,16 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      // A document kept in an artifact is named, not pasted: the specialist
-      // already holds it, or reads it once.
+      // A stage whose document is an artifact gets the person's words as
+      // they wrote them: the specialist's instructions say every message is
+      // about that document. A draft that lives only in the mail, from before
+      // the tools, still travels with the instruction to revise it, as alpha
+      // main's rounds did (#431); stages 8 and 9 revise nothing.
       const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
       const turn = withAttachedDocuments(body, stageDocuments);
       const mail =
-        work?.state === "ready"
-          ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
+        usesArtifact && work !== null && work.state !== "none"
+          ? turn
           : revising
             ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
             : turn;
