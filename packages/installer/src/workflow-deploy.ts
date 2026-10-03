@@ -308,7 +308,7 @@ export async function deploymentUsabilityFor(
   if (sidecar.recover !== undefined && sidecar.sidecarsLostBefore !== undefined) {
     const found = (await workflowsFor(transport, tenantId).deployments()).find((entry: HubDeployment) => entry.id === deploymentId);
     if (isLive(found) && !deploymentPlaceableHere(found, sidecar)) {
-      const placing = await sidecar.recover(tenantId, [deploymentId]).catch(() => [] as readonly string[]);
+      const placing = await sidecar.recover(tenantId, [deploymentId]);
       if (placing.includes(deploymentId)) {
         const placement = await waitForDeploymentPlacement(transport, tenantId, deploymentId, wait);
         if (placement.outcome === "placed") return (await runHasEnded(transport, tenantId, deploymentId, runId)) ? "ended" : "usable";
