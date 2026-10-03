@@ -1109,6 +1109,7 @@ export function StageWorkspace({
         guidance={guide.guidance}
         explaining={guide.explaining}
         note={guide.note}
+        now={agentAddress ? { title: guidance.title, detail: guidance.detail } : null}
       />
 
       {agentAddress && openingDispatch.error ? (

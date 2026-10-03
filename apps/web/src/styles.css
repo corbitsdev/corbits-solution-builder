@@ -3431,9 +3431,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: inline-flex;
   box-shadow: var(--shadow-panel, 0 8px 24px rgb(0 0 0 / 0.14));
   align-items: center;
-  gap: var(--space-2);
   max-width: 100%;
-  padding: var(--space-2) var(--space-4);
   border: 0;
   /* A pill: fully rounded, not a step on the scale. */
   border-radius: 999px;
@@ -3460,6 +3458,35 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 16px;
   height: 16px;
   flex: none;
+}
+
+/* The stage number sits inside the ring, so the ring reads as progress
+   through the nine rather than as something loading. */
+.guide-fab .guide-live {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+}
+
+.guide-fab .stage-ring {
+  width: 28px;
+  height: 28px;
+}
+
+.guide-fab-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.guide-fab:focus-visible {
+  outline: 2px solid var(--wb-ring);
+  outline-offset: 3px;
 }
 
 
@@ -3492,6 +3519,30 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .guide-title {
   margin: 0;
   font-weight: 500;
+}
+
+.guide-where,
+.guide-label {
+  margin: 0;
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--wb-muted-foreground);
+}
+
+.guide-where {
+  align-self: center;
+}
+
+.guide-now,
+.guide-next {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.guide-next {
+  border-top: 1px solid var(--wb-border);
+  padding-top: var(--space-2);
 }
 
 .guide-detail {
