@@ -42,6 +42,7 @@ import {
   upgradeWorkspace as installerUpgradeWorkspace,
   vendoredMemberFiles,
   waitForDeploymentPlacement,
+  waitForPark,
   type PlacementResult,
   workflowsFor,
   workspaceOwnedCredentialIds,
@@ -120,7 +121,6 @@ import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
 import { beginBusy } from "./busy.ts";
-import { subscribeMailbox } from "./mailbox-events.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
@@ -555,10 +555,11 @@ const UNTITLED = "Untitled project";
 const URL_TOKEN = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S*$/i;
 
 /**
- * The fallback name until the namer names the project for real
- * (`nameProject`): the opening statement's first clause, links dropped,
- * trimmed to about five words, never the whole paragraph. Links are dropped
- * before the clause is cut, since a URL's own dots would otherwise end it.
+ * The fallback name until the project workflow's `name` step names the
+ * project for real (`adoptGeneratedTitle`): the opening statement's first
+ * clause, links dropped, trimmed to about five words, never the whole
+ * paragraph. Links are dropped before the clause is cut, since a URL's own
+ * dots would otherwise end it.
  */
 export function titleFromProblem(problem: string): string {
   const line = problem.trim().split("\n")[0]!.trim();
@@ -580,123 +581,23 @@ async function openingOf(transport: Transport, projectId: string): Promise<{ bod
   return { body: artifact.content, createdAt: node.createdAt };
 }
 
-const NAMER_ROLE_KEY = "namer";
-
-/** The namer's role -- named explicitly so a rename of the kit role fails
- *  loudly here rather than silently deploying the wrong prompt. */
-const NAMER_ROLE = agentById(NAMER_ROLE_KEY);
-if (!NAMER_ROLE) {
-  throw new Error(`kit role "${NAMER_ROLE_KEY}" is missing`);
-}
-
-/** How long the namer may take to reply, and how often its thread is reread
- *  when no mailbox event has arrived (the stream can drop one). */
-const NAME_REPLY_BUDGET_MS = 180_000;
-const NAME_BACKSTOP_MS = 10_000;
-
-/** The subject that marks the one mail asking the namer to name `projectId`. */
-function nameSubject(projectId: string): string {
-  return `[name:${projectId}]`;
-}
-
-type Namer = SpecialistDeployment & { readonly workspaceTenantId: string };
-
-/** The workspace's one namer, memoised while it stays the live deployment. */
-let namerCall: Promise<Namer> | null = null;
+/** Projects whose `name` reply this session has already settled, so a poll does not re-read the record. */
+const titlesSettled = new Set<string>();
 
 /**
- * The namer every project shares: one deployment in the workspace tenant,
- * apart from any project's workflow run, so naming never adds a sidecar per
- * project. `ensureSpecialistDeployment` resolves its "project" to a tenant,
- * and the workspace is one.
+ * Writes the `name` step's reply as the project's title, only while the title
+ * is still the fallback `createProject` derived from the opening: a title a
+ * person chose, or one already adopted, is never overwritten.
  */
-const ensureNamer = async (): Promise<Namer> => {
-  if (namerCall) {
-    const remembered = await namerCall;
-    if (await memoStillLive(remembered.workspaceTenantId, 1 as Stage, NAMER_ROLE_KEY, remembered)) return remembered;
-    namerCall = null;
+async function adoptGeneratedTitle(transport: Transport, projectId: string, generated: string): Promise<void> {
+  if (titlesSettled.has(projectId)) return;
+  const [record, opening] = await Promise.all([installerRequireProject(transport, projectId), openingOf(transport, projectId)]);
+  const title = generated.slice(0, TITLE_MAX).trim();
+  if (opening && title && record.title === titleFromProblem(opening.body)) {
+    await installerUpdateProject(transport, projectId, { title });
   }
-  const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-    const deployment = await ensureSpecialistDeployment(
-      transport,
-      await hostSidecar(),
-      await lifecycleClosureSource(),
-      lifecycleGitPush,
-      workspaceTenantId,
-      1 as Stage,
-      specialistHubOrigin(),
-      false,
-      NAMER_ROLE_KEY,
-      await localizedRole(transport, workspaceTenantId, NAMER_ROLE),
-    );
-    const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-    if (placement.outcome !== "placed") throw placementFailure("the namer", placement);
-    return { ...deployment, workspaceTenantId };
-  });
-  namerCall = call;
-  try {
-    return await call;
-  } catch (cause) {
-    if (namerCall === call) namerCall = null;
-    throw cause;
-  }
-};
-
-/**
- * The namer's reply to the mail marked `subject`, matched by id: the hub
- * records the Message-ID it minted for that mail on its Sent copy
- * (`triggerMessageId`) and the reply names it in `inReplyTo` -- the id pass
- * of `pairReplies`, never queue order or text. The thread is reread on each
- * mailbox event and every `NAME_BACKSTOP_MS`; past `NAME_REPLY_BUDGET_MS` it
- * throws, saying how far the request got.
- */
-async function namerReply(namer: Namer, subject: string): Promise<ChatMessage> {
-  const deadline = Date.now() + NAME_REPLY_BUDGET_MS;
-  let wake = () => {};
-  const subscription = subscribeMailbox(namer.workspaceTenantId, () => wake());
-  try {
-    for (;;) {
-      const thread = await api.readStageThread(namer.workspaceTenantId, [namer.address]);
-      const request = thread.find((message) => message.author === "me" && message.subject === subject);
-      const triggerId = request?.triggerMessageId;
-      const reply = triggerId ? thread.find((message) => message.author === "agent" && message.inReplyTo === triggerId) : undefined;
-      if (reply) return reply;
-      const left = deadline - Date.now();
-      if (left <= 0) {
-        const stage = !request ? "its Sent copy was never found" : !triggerId ? "the hub did not record it as delivered" : "no reply names it";
-        throw new Error(`the namer did not answer ${subject} within ${NAME_REPLY_BUDGET_MS / 1000}s: ${stage}`);
-      }
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-        setTimeout(resolve, Math.min(left, NAME_BACKSTOP_MS));
-      });
-    }
-  } finally {
-    subscription.unsubscribe();
-  }
+  titlesSettled.add(projectId);
 }
-
-/**
- * Names a just-created project from its opening statement: the workspace's
- * namer is mailed the statement once and replies with one line. The title is
- * written through the installer only while the record still carries
- * `fallback`, so a title a person chose meanwhile is never overwritten. Any
- * failure leaves `fallback` and is logged with its reason.
- */
-const nameProject = async (projectId: string, problem: string, fallback: string): Promise<void> => {
-  try {
-    const namer = await ensureNamer();
-    const subject = nameSubject(projectId);
-    await api.sendStageMail(namer.workspaceTenantId, namer.address, { body: JSON.stringify({ problemStatement: problem }), subject });
-    const title = (await namerReply(namer, subject)).body.trim();
-    if (!title || title.length > TITLE_MAX || title.includes("\n")) throw new Error(`the namer's reply is not a title: ${title.slice(0, 120)}`);
-    const transport = createHubTransport();
-    const record = await installerRequireProject(transport, projectId);
-    if (record.title === fallback) await installerUpdateProject(transport, projectId, { title });
-  } catch (cause) {
-    console.warn(`[projects] ${projectId} keeps its title "${fallback}":`, cause instanceof ApiFailure ? cause.detail.message : cause);
-  }
-};
 
 function projectSlug(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -1159,6 +1060,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
       authorizedPrincipalIds,
     }));
     const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+    const opening = await openingOf(transport, projectId);
     // What the ensure step is doing, under the busy strip's clock: a click
     // that waits on it (a decision, a vote) otherwise showed only its own
     // name for as long as a history replayed (#295).
@@ -1177,7 +1079,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
         projectId,
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
-        { onProgress, ...extra },
+        { ...(opening ? { problemStatement: opening.body } : {}), onProgress, ...extra },
       );
     } finally {
       release();
@@ -1584,7 +1486,7 @@ export const api = {
       // written straight to the workspace tenant's own artifact store, the
       // same way `attachMaterial` writes any other material, so
       // `projectOpening` can read it back with no run to fold.
-      const opened = await openCreatedProject({
+      return await openCreatedProject({
         projectId: project.id,
         open: async () => {
           if (problem) {
@@ -1611,10 +1513,6 @@ export const api = {
         },
         retryable: (cause) => cause instanceof ApiFailure && cause.detail.retryable,
       });
-      // Not awaited: the project opens under its fallback title, and the
-      // project list's poll picks up the generated one when it lands.
-      if (problem && !payload.title?.trim()) void nameProject(project.id, problem, title);
-      return opened;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -2631,7 +2529,9 @@ export const api = {
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
-      return loadProjectWorkflowView(transport, ref);
+      const view = await loadProjectWorkflowView(transport, ref);
+      if (view.generatedTitle) await adoptGeneratedTitle(transport, projectId, view.generatedTitle);
+      return view;
     }),
   /**
    * Delivers one decision as the loop's `project.decision` signal,
@@ -2669,6 +2569,9 @@ export const api = {
       // byte-identical retry is accepted by the hub as a no-op, so it never
       // reaches this catch at all.
       //
+      // A fresh run names its project before its loop first parks, and a
+      // decision delivered before that park kills the run.
+      await waitForPark(transport, ref);
       // Signalled in the tenant the ref names (#163): the project's own for
       // a deployment made since #29, the workspace for a legacy one still
       // live there. The workspace's route answers 404 for a project-tenant
