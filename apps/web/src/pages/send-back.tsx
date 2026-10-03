@@ -47,7 +47,7 @@ export function SendBackPicker({
       <select id={id} className="setting-select decision-target" value={target} onChange={(event) => onChange(Number(event.target.value))}>
         {stages.map((candidate) => (
           <option key={candidate} value={candidate}>
-            Stage {candidate} — {stageName(candidate)}
+            {stageName(candidate)}
             {candidate === stage ? " (this stage again)" : RETURN_TO[candidate] ? `, to ${RETURN_TO[candidate]}` : ""}
           </option>
         ))}

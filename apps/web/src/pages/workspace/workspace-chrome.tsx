@@ -184,7 +184,7 @@ export function SendBackPopover({
         {targets.map((target) => (
           <button key={target} type="button" className="sbpick-row" onClick={() => onPick(target)}>
             <span className="sbpick-name">
-              Stage {target} · {stageName(target)}
+              {stageName(target)}
             </span>
             <span className="sbpick-why">
               {target === stage ? "this stage again" : RETURN_TO[target] ? `to ${RETURN_TO[target]}` : ""}
@@ -376,7 +376,7 @@ export function WaitingSection({
     <section aria-label="What is happening now" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div
         role="progressbar"
-        aria-label={`Stage ${stage} of 9 · ${stageName(stage)}`}
+        aria-label={`Progress: ${stageName(stage)}`}
         aria-valuetext={
           progress && progress.total !== null
             ? `Question ${progress.ordinal} of ${progress.total}`
@@ -399,7 +399,7 @@ export function WaitingSection({
         />
       </div>
       <p className="inline-note">
-        Stage {stage} of 9 · {stageName(stage)} — {STAGE_GOAL[stage]}
+        {stageName(stage)} — {STAGE_GOAL[stage]}
       </p>
       <div className="inline-note" role="status">
         {hasMessages ? (

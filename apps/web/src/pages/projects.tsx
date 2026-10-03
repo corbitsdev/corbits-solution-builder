@@ -32,6 +32,7 @@ import {
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
+import { stageName } from "../stage-names.ts";
 
 function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
@@ -52,9 +53,9 @@ export function importNotice(fileName: string, brought: ImportOutcome): string {
   const landing = brought.landing;
   if (landing) {
     if (landing.stopped) {
-      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at stage ${String(landing.landed)}`}: ${landing.stopped}.`);
+      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at ${stageName(landing.landed)}`}: ${landing.stopped}.`);
     } else if (landing.landed !== null) {
-      parts.push(`Its history was replayed; it is at stage ${String(landing.landed)}.`);
+      parts.push(`Its history was replayed; it is at ${stageName(landing.landed)}.`);
     }
     parts.push(...landing.notes);
   }
@@ -475,7 +476,7 @@ function ProjectCard({
 /** The same nine-segment language the topbar stepper speaks, one per card. */
 function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   return (
-    <div className="card-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
+    <div className="card-track" role="img" aria-label={stage ? `Progress: ${stageName(stage)}` : "Progress unknown"}>
       {Array.from({ length: 9 }, (_, index) => {
         const at = index + 1;
         return <span key={at} className={stageTrackSegClass(at, stage, done)} />;

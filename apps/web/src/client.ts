@@ -164,6 +164,7 @@ import {
   type ModelMoveDirection,
   type ResolvedCatalogRow,
 } from "./provider-catalog.ts";
+import { stageName } from "./stage-names.ts";
 
 export type { ActiveModel, ResolvedCatalogRow } from "./provider-catalog.ts";
 
@@ -1970,7 +1971,7 @@ export const api = {
       if (!kind) {
         throw new ApiFailure({
           code: "validation_failed",
-          message: `Stage ${stage} has no draft document to approve.`,
+          message: `${stageName(stage)} has no draft document to approve.`,
           correlationId: "-",
           retryable: false,
         });
@@ -1980,7 +1981,7 @@ export const api = {
         kind,
         content,
         sourceVersionIds,
-        title: `Stage ${stage} draft`,
+        title: `${stageName(stage)} draft`,
         // Stamped with the stage's own specialist so `reviewableArtifact`
         // recognises the write as the draft's persisted form: found on
         // the next load instead of persisted again, and superseded only
@@ -2303,7 +2304,7 @@ export const api = {
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
       return deployment;
     });
     call.catch(() => ensureStageAgentCalls.delete(key));
@@ -2337,7 +2338,7 @@ export const api = {
         stageUsesArtifactTools(stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
       activeModelCacheClear();
       return deployment;
     });

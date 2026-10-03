@@ -255,21 +255,8 @@ export function Field({
   );
 }
 
-const STAGE_NAMES = [
-  "Problem discovery",
-  "Solution shape",
-  "Solution proposal",
-  "GUI design",
-  "Concept approval",
-  "Build plan",
-  "Cost approval",
-  "Build and test",
-  "Deliver",
-];
-
-export function stageName(stage: number | null): string {
-  return stage === null ? "Not started" : (STAGE_NAMES[stage - 1] ?? `Stage ${stage}`);
-}
+import { stageName } from "./stage-names.ts";
+export { stageName };
 
 export function shortHash(hash: string): string {
   return `${hash.slice(0, 12)}…`;
@@ -405,7 +392,7 @@ export function GuideDock({
 }) {
   const [open, setOpen] = useState(false);
   const next = step.ending || at === step.where ? step.title : `Next: ${step.title}`;
-  const where = stage ? `Stage ${stage} of 9 · ${stageName(stage)}` : null;
+  const where = stage ? stageName(stage) : null;
   const panel = useRef<HTMLDivElement>(null);
   const fab = useRef<HTMLButtonElement>(null);
 
@@ -547,7 +534,7 @@ export function StageRing({ stage, total = 9 }: { stage: number; total?: number 
       className="stage-ring"
       viewBox="0 0 20 20"
       role="img"
-      aria-label={`Stage ${stage} of ${total}`}
+      aria-label={`Progress: ${stageName(stage)}`}
     >
       <circle cx="10" cy="10" r={radius} className="stage-ring-track" />
       <circle

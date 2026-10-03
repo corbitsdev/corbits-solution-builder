@@ -15,6 +15,7 @@ import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { reviewDocument, type StageDocument } from "./document-mentions.ts";
+import { stageName } from "../../stage-names.ts";
 
 export const PANEL_ROLES: readonly { key: string; label: string }[] = [
   { key: "application", label: "Application" },
@@ -188,7 +189,7 @@ export function PanelReviewsCompanion({
   return (
     <div className="stage6-companion">
       <div className="docmeta">
-        <select aria-label={`Stage ${String(stage)} review`} value={page} onChange={(event) => setPage(event.target.value)}>
+        <select aria-label={`${stageName(stage)} review`} value={page} onChange={(event) => setPage(event.target.value)}>
           {PANEL_ROLES.map((entry) => (
             <option key={entry.key} value={entry.key}>
               {entry.label} review
