@@ -129,7 +129,7 @@ export function useStageDecisions({
   draftKind: string | null;
   foldedMessages: ChatMessage[];
   refreshWorkflow: () => Promise<void>;
-  markStage: (stage: number) => void;
+  markStage: (stage: number, done?: boolean) => void;
   queueOpening: (stage: number, body: string) => void;
   onError: (message: string | null) => void;
   onRemediation: (remediation: Remediation | undefined) => void;
@@ -488,6 +488,9 @@ export function useStageDecisions({
         await refreshWorkflow();
         return;
       }
+      // The workflow confirmed the final approval: the conversation closes
+      // now, not on whichever later read first sees the finished run.
+      markStage(LAST_STAGE, true);
       await refreshWorkflow();
     } catch (cause) {
       onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
