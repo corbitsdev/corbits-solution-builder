@@ -208,7 +208,7 @@ export function watchEvaluator(
       return;
     }
     try {
-      await deps.sendMail(tenantId, deployed, { body, subject: "Stage 1 draft for review" });
+      await deps.sendMail(tenantId, deployed, { body, subject: "Problem discovery draft for review" });
     } catch (cause) {
       // Shown now, not after retries: a send is not re-tried blindly, since a
       // failed one can still leave its Sent copy, which the next wake finds.

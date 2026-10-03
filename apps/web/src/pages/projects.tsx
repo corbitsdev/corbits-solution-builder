@@ -11,7 +11,7 @@ import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
-import { Banner, Button } from "../components.jsx";
+import { Banner, Button, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
@@ -52,9 +52,9 @@ export function importNotice(fileName: string, brought: ImportOutcome): string {
   const landing = brought.landing;
   if (landing) {
     if (landing.stopped) {
-      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at stage ${String(landing.landed)}`}: ${landing.stopped}.`);
+      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at ${stageName(landing.landed)}`}: ${landing.stopped}.`);
     } else if (landing.landed !== null) {
-      parts.push(`Its history was replayed; it is at stage ${String(landing.landed)}.`);
+      parts.push(`Its history was replayed; it is at ${stageName(landing.landed)}.`);
     }
     parts.push(...landing.notes);
   }
@@ -475,7 +475,7 @@ function ProjectCard({
 /** The same nine-segment language the topbar stepper speaks, one per card. */
 function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   return (
-    <div className="card-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
+    <div className="card-track" role="img" aria-label={stage ? `${stageName(stage)} · ${stage} of 9` : "Stage unknown"}>
       {Array.from({ length: 9 }, (_, index) => {
         const at = index + 1;
         return <span key={at} className={stageTrackSegClass(at, stage, done)} />;

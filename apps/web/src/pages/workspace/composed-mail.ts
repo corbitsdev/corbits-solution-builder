@@ -10,6 +10,7 @@
  * renders what this returns.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
+import { stageName } from "../../components.jsx";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
 
 export type ComposedFold = {
@@ -51,7 +52,7 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (message.author !== "me") return null;
   const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
   if (opening) {
-    return { summary: `What stage ${opening[1]!} opened with`, body: withoutSendBackRef(message.body), lead: null };
+    return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
   }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);
