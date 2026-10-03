@@ -19,8 +19,10 @@ import { parsed } from "./validation.js";
 
 const TitleBody = type({ problemStatement: "string > 0" });
 
-/** A title is one short line; this bounds a model that ignores that. */
-const TITLE_MAX_TOKENS = 64;
+/** Room for a reasoning model to think before its one short line: at 64 its
+ *  thinking used the whole budget and the reply came back empty. The client
+ *  still keeps only a 3-8 word title. */
+const TITLE_MAX_TOKENS = 1024;
 
 export function registerProjectTitleRoutes(api: Hono) {
   api.post("/projects/:id/title", async (context) => {
