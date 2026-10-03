@@ -564,7 +564,7 @@ export function StageWorkspace({
     onDetailChanged: onChanged,
     onRequirementsReminted: (block) =>
       void send(
-        `The requirements document was revised and the requirement ids were re-issued from it. Cite these ids in the plan from now on; a number from an earlier version may now mean something else.\n\n${block}`,
+        `The requirements document was revised and the requirement ids were re-issued from it. Use these ids in the plan's traceability table from now on; a number from an earlier version may now mean something else.\n\n${block}`,
       ),
   });
   const {
