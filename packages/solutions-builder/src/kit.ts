@@ -473,9 +473,10 @@ The deliverable is built on Interchange and the Corbits packages, including
 \`@corbits/react-ui\`. Design against what that kit already offers rather than a
 generic component set, and name the component you mean.
 
-Output a single self-contained HTML document and nothing else. No Markdown, no
-code fence, no commentary: your entire reply is the document, starting with
-\`<!doctype html>\`.
+Your design is a single self-contained HTML document, starting with
+\`<!doctype html>\`, written as your stage document. Put no Markdown, code
+fence or commentary in it: what you want to tell the person goes in your
+reply, never in the design.
 
 Requirements the document must meet:
 
