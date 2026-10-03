@@ -11,7 +11,7 @@
  * records the vote, not a gate -- `stage5Rule` (`project-workflow/contracts.ts`)
  * is the only place quorum is enforced.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
@@ -32,7 +32,6 @@ import { isHtmlDocument } from "./workspace/guidance.ts";
 import { packageSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor, unrecordedPackageRequest } from "../package-reply.ts";
-import { useMountEffect } from "../use-mount-effect.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { unrecordedPackageRevisions } from "../package-revisions.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
@@ -406,7 +405,9 @@ export function AudiencePackages({
   // package is asked for again.
   const [resuming, setResuming] = useState(true);
   const resumedRef = useRef(false);
-  useMountEffect(() => {
+  // Mounting the view resumes; unmounting it cancels what is in flight.
+  const mountedRef = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
     cancelledRef.current = false;
     if (!resumedRef.current) {
       resumedRef.current = true;
@@ -415,7 +416,7 @@ export function AudiencePackages({
     return () => {
       cancelledRef.current = true;
     };
-  });
+  }, []);
 
   const quorum = policy.audienceQuorum ?? 0;
 
@@ -865,7 +866,7 @@ export function AudiencePackages({
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
   return (
-    <div data-tour="audience-packages">
+    <div ref={mountedRef} data-tour="audience-packages">
       {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
       {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
       {audiences.length === 0 ? <Banner title="No stakeholders are named for this project" /> : null}
