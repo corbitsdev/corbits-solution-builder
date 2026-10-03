@@ -36,7 +36,7 @@ import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
-import { composeApprovedChain, withImportedHistory } from "./approved-chain.ts";
+import { composeApprovedChain } from "./approved-chain.ts";
 import { importedHistory } from "./imported-history.ts";
 
 export type OpeningDispatch = {
@@ -185,13 +185,12 @@ export function useOpeningDispatch({
           // Every approved artifact before this stage, and the person's
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
-          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
+          const history = await importedHistory(tenantId, detail.nodes, stage);
+          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage, history });
           // The workspace's language is in the specialist's own instructions
           // (`localizedRole`, client.ts), where a changed setting redeploys
           // it; the mail carries the record and the stage's lead, nothing else.
-          const history = await importedHistory(tenantId, detail.nodes, stage);
-          const record = withImportedHistory(chain, history);
-          const body = record ? `${record}\n\n${opening}` : opening;
+          const body = chain ? `${chain}\n\n${opening}` : opening;
           await api.sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` });
           if (cancelled) return;
           // Marked as opened only now that the send is confirmed —

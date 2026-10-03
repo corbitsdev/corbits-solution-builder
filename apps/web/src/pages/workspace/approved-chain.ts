@@ -61,17 +61,10 @@ export function chainContent(content: string): string {
   return isHtmlDocument(content) ? designAsText(content, DESIGN_TEXT_CAP) : content;
 }
 
-/** The chain as the specialist reads it, or "" when there is nothing to hand over. */
-export function renderApprovedChain(items: Inputs, stage: number): string {
-  if (items.length === 0) return "";
-  return `${CHAIN_LEAD}\n\n${renderInputs(items, stage)}\n\n${CHAIN_END}`;
-}
-
-/** The chain with an imported stage's history inside it, so the transcript folds both away from the person's own words. */
-export function withImportedHistory(chain: string, history: string): string {
-  if (!history) return chain;
-  if (!chain) return `${CHAIN_LEAD}\n\n${history}\n\n${CHAIN_END}`;
-  return chain.replace(CHAIN_END, `${history}\n\n${CHAIN_END}`);
+/** The chain as the specialist reads it, an imported stage's history last, or "" when there is nothing to hand over. */
+export function renderApprovedChain(items: Inputs, stage: number, history: string): string {
+  const parts = [items.length > 0 ? renderInputs(items, stage) : "", history].filter(Boolean);
+  return parts.length > 0 ? [CHAIN_LEAD, ...parts, CHAIN_END].join("\n\n") : "";
 }
 
 /** An opening mail split for the transcript: what precedes the chain, the chain, and the stage's own lead. Null for any other message. */
@@ -96,6 +89,8 @@ export async function composeApprovedChain(deps: {
   readonly nodes: readonly ChainNode[];
   readonly reviews: Readonly<Record<number, ReviewState | undefined>>;
   readonly stage: number;
+  /** An imported stage's history (`importedHistory`), inside the chain so the transcript folds it away with the rest. */
+  readonly history: string;
 }): Promise<string> {
   const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
   const items: Inputs = [];
@@ -111,5 +106,5 @@ export async function composeApprovedChain(deps: {
       // Unreadable: not handed over, not described.
     }
   }
-  return renderApprovedChain(items, deps.stage);
+  return renderApprovedChain(items, deps.stage, deps.history);
 }
