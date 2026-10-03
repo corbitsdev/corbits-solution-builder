@@ -47,7 +47,8 @@ import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -110,6 +111,13 @@ export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
  * one of the specialised panels (design, audiences, build) or the final
  * decisions stage. */
 const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
+
+/** A drafting stage's artifact, as last read: there is none yet, it was
+ *  read, or it exists and could not be read, which is shown, not hidden. */
+type WorkArtifact =
+  | { readonly state: "none" }
+  | { readonly state: "ready"; readonly artifact: { readonly id: string; readonly version: number; readonly content: string } }
+  | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
@@ -285,9 +293,52 @@ export function StageWorkspace({
   // A stage 6 revision that dropped the plan's Stack block gets the last
   // valid one carried in (#437), so the gate's banner is for a plan that
   // never had one.
+  // A drafting stage with artifact tools keeps its document in an artifact
+  // the specialist writes; the host reads the newest one of the stage's kind
+  // rather than trusting what the reply says it wrote. It is read again as
+  // the thread moves, and polled while a reply is pending so the pane follows
+  // the specialist's writes. A stage with no artifact yet, such as a project
+  // drafted before the tools, keeps reading its draft from the mail.
+  const usesArtifact = stageUsesArtifactTools(stage as Stage);
+  const workKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const awaitingReply = foldedMessages.at(-1)?.author === "me";
+  const [work, setWork] = useState<WorkArtifact | null>(null);
+  const [workTick, setWorkTick] = useState(0);
+  useEffect(() => {
+    if (!usesArtifact || !awaitingReply) return;
+    const timer = setInterval(() => setWorkTick((tick) => tick + 1), 5000);
+    return () => clearInterval(timer);
+  }, [usesArtifact, awaitingReply]);
+  useEffect(() => {
+    if (!usesArtifact || !workKind) {
+      setWork(null);
+      return;
+    }
+    let cancelled = false;
+    api.stageWorkArtifact(tenantId, workKind).then(
+      (artifact) => {
+        if (!cancelled) setWork(artifact ? { state: "ready", artifact } : { state: "none" });
+      },
+      (cause: unknown) => {
+        if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [usesArtifact, workKind, tenantId, foldedMessages, workTick]);
+  const workDraft = useMemo(() => {
+    if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
+    if (work.state === "unreadable" || !latestSpecialistMessage) return null;
+    return { ...latestSpecialistMessage, body: work.artifact.content };
+  }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
+  const workUnreadable = work?.state === "unreadable" ? work.message : null;
+  useEffect(() => {
+    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
+  }, [workUnreadable]);
   const draftMessage = useMemo(
-    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
-    [stage, foldedMessages, guidance.draft],
+    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
+    [stage, foldedMessages, workDraft],
   );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
@@ -338,12 +389,21 @@ export function StageWorkspace({
   // line naming it, on every document stage and on a reload alike, since
   // both the mail and the lineage are records.
   const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
+  // A reply that wrote the artifact is short; the version line it carries is
+  // still the artifact's, so the lineage is matched against the document.
+  const referenceMessages = useMemo(
+    () =>
+      work?.state === "ready" && latestSpecialistMessage
+        ? foldedMessages.map((message) => (message.id === latestSpecialistMessage.id ? { ...message, body: work.artifact.content } : message))
+        : foldedMessages,
+    [work, latestSpecialistMessage, foldedMessages],
+  );
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(foldedMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
         : undefined,
-    [stage, draftKind, foldedMessages, liveVersions],
+    [stage, draftKind, referenceMessages, liveVersions],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
@@ -608,9 +668,16 @@ export function StageWorkspace({
       // With a Markdown draft on the table, the turn carries it and the
       // instruction to revise it, as alpha main's rounds did (#431); a design
       // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
+      // A document kept in an artifact is named, not pasted: the specialist
+      // already holds it, or reads it once.
       const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
       const turn = withAttachedDocuments(body, stageDocuments);
-      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
+      const mail =
+        work?.state === "ready"
+          ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
+          : revising
+            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
+            : turn;
       await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
