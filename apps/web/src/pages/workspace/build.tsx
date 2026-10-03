@@ -447,9 +447,23 @@ export function BuildPanel({
             {current ? (
               <>
                 <h2>Attempt {String(current.attempt)} — what the worker wrote</h2>
-                <pre ref={logRef} className="build-log" aria-live="polite" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
-                  {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
-                </pre>
+                {current.state === "ended" && current.outcome?.finalText.trim() ? (
+                  // Once the worker is done its final text is a report, written
+                  // in Markdown; the stream it came from stays one click away.
+                  <>
+                    <Markdown source={current.outcome.finalText} />
+                    <details className="build-log-fold">
+                      <summary>Full log</summary>
+                      <pre ref={logRef} className="build-log" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
+                        {log || "The worker wrote nothing."}
+                      </pre>
+                    </details>
+                  </>
+                ) : (
+                  <pre ref={logRef} className="build-log" aria-live="polite" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
+                    {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
+                  </pre>
+                )}
                 {current.outcome ? (
                   <p className="inline-note">
                     {current.outcome.available
@@ -469,7 +483,7 @@ export function BuildPanel({
                   </div>
                 ) : null}
                 {canRecord ? (
-                  <div className="document-tools">
+                  <div className="build-record">
                     <input
                       className="field"
                       aria-label="Start command"
