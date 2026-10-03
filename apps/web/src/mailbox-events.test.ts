@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   nextBackoffMs,
-  shouldFallbackRefetch,
   shouldRefetch,
   subscribeMailbox,
   type EventSourceLike,
@@ -37,20 +36,6 @@ describe("shouldRefetch", () => {
 
   test("ignores an event with no op", () => {
     expect(shouldRefetch({ id: "INBOX:12" })).toBe(false);
-  });
-});
-
-describe("shouldFallbackRefetch", () => {
-  test("refetches when the stream is closed", () => {
-    expect(shouldFallbackRefetch({ open: false, msSinceLastLoad: 0 })).toBe(true);
-  });
-
-  test("skips when open and recently loaded", () => {
-    expect(shouldFallbackRefetch({ open: true, msSinceLastLoad: 20_000 })).toBe(false);
-  });
-
-  test("refetches when open but the 60s ceiling has passed", () => {
-    expect(shouldFallbackRefetch({ open: true, msSinceLastLoad: 60_000 })).toBe(true);
   });
 });
 

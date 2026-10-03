@@ -6,7 +6,9 @@
  * window where the address is known but something built on it is disabled.
  */
 import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiFailure, type Remediation } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import { describeFailure } from "./failure-message.ts";
 
 export type StageAgentState = {
@@ -30,13 +32,7 @@ export type StageAgentState = {
   readonly retry: () => void;
 };
 
-// Re-entering a stage this session has already resolved an agent for: a
-// thin snapshot so a remount can render its address immediately instead of
-// `null` while the mount effect below re-confirms it off the hub. Never the
-// source of truth -- every mount still attaches or deploys before trusting
-// it, and the CL-8654 re-check effect below keeps following the live pick
-// regardless of what this held.
-const agentSnapshots = new Map<string, { stage: number; address: string }>();
+const RECHECK_MS = 30_000;
 
 export function useStageAgent(
   projectId: string,
@@ -50,10 +46,7 @@ export function useStageAgent(
    *  wait-for-`workflowResolved` behavior as before. */
   earlyStage: number | null,
 ): StageAgentState {
-  const [agent, setAgent] = useState<{ stage: number; address: string } | null>(
-    () => agentSnapshots.get(`${projectId}:${stage}`) ?? null,
-  );
-  const [addresses, setAddresses] = useState<{ stage: number; list: readonly string[] } | null>(null);
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [remediation, setRemediation] = useState<Remediation | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
@@ -64,105 +57,73 @@ export function useStageAgent(
   // (CL-8721).
   const deployStage = workflowResolved ? stage : earlyStage;
 
+  // The live pick, re-checked rather than memoised: two sessions racing to
+  // open this stage can each deploy a specialist, the hub releases the
+  // loser, and a session holding the loser's address would otherwise mail
+  // into the void forever (CL-8654). Before an address is known only a
+  // "deployed" status counts, as an instant paint on re-entry; once one is,
+  // the hub's live pick is followed wherever it moves. The cache outlives the
+  // mount, so re-entering a stage renders its address at once.
+  const statusKey = keys.stageAgent.status(projectId, deployStage ?? 0);
+  const status = useQuery({
+    queryKey: statusKey,
+    queryFn: async () => {
+      const held = queryClient.getQueryData<string | null>(statusKey) ?? null;
+      const current = await api.stageAgentStatus(projectId, deployStage!).catch(() => null);
+      if (!current) return held;
+      return held !== null || current.status === "deployed" ? current.address : null;
+    },
+    enabled: deployStage !== null,
+    refetchInterval: RECHECK_MS,
+    gcTime: Infinity,
+  });
+
+  // The attach above is display-only, never a substitute for ensure: the
+  // hub's persisted "deployed" status can outlive a dead sidecar (e.g. after
+  // a host restart), so only `ensureStageAgent` can tell "live" from "needs
+  // reviving". It runs every mount, in the background, never awaited before
+  // rendering but never skipped either (CL-8935).
   useEffect(() => {
     if (deployStage === null) return;
     let cancelled = false;
-    const requestedStage = deployStage;
+    const key = keys.stageAgent.status(projectId, deployStage);
     setError(null);
     setRemediation(undefined);
-    (async () => {
-      // Re-entering a stage already deployed and live: attach with the same
-      // non-deploying read `stageAgentStatus` (CL-8654's own re-check) uses,
-      // for an instant paint, instead of waiting on `ensureStageAgent`'s
-      // deploy-and-wait path to render anything.
-      //
-      // This attach is display-only, never a substitute for ensure: the
-      // hub's persisted "deployed" status can outlive a dead sidecar (e.g.
-      // after a host restart), so a plain read can never tell "live" from
-      // "needs reviving onto a fresh deployment" on its own -- only
-      // `ensureStageAgent` does that. So `ensureStageAgent` still runs every
-      // mount, in the background, after the instant paint above -- never
-      // awaited before rendering, but never skipped either (CL-8935, fixing
-      // a regression from #669 where a "deployed" attach returned early and
-      // left the composer pointed at a dead sidecar until a manual retry).
-      if (attempt === 0) {
-        const attached = await api.stageAgentStatus(projectId, requestedStage).catch(() => null);
+    api
+      .ensureStageAgent(projectId, deployStage)
+      .then(async (deployment) => {
+        await queryClient.cancelQueries({ queryKey: key });
+        queryClient.setQueryData(key, deployment.address);
+      })
+      .catch((cause: unknown) => {
         if (cancelled) return;
-        if (attached && attached.status === "deployed") {
-          const next = { stage: requestedStage, address: attached.address };
-          setAgent(next);
-          agentSnapshots.set(`${projectId}:${requestedStage}`, next);
-        }
-      }
-      await api
-        .ensureStageAgent(projectId, requestedStage)
-        .then((deployment) => {
-          if (!cancelled) {
-            const next = { stage: requestedStage, address: deployment.address };
-            setAgent(next);
-            agentSnapshots.set(`${projectId}:${requestedStage}`, next);
-          }
-        })
-        .catch((cause: unknown) => {
-          if (cancelled) return;
-          setError(describeFailure(cause));
-          setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
-        });
-    })();
+        setError(describeFailure(cause));
+        setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
+      });
     return () => {
       cancelled = true;
     };
-  }, [projectId, deployStage, attempt]);
+  }, [projectId, deployStage, attempt, queryClient]);
 
-  // Re-checking the agent itself rather than its thread: two sessions racing
-  // to open this stage can each deploy a specialist, the hub releases the
-  // loser, and a session that memoised the loser's address would otherwise
-  // mail into the void forever (CL-8654). When the live pick has moved to a
-  // different deployment, follow it.
-  useEffect(() => {
-    if (!agent || agent.stage !== stage) return;
-    const recheck = () => {
-      void api
-        .stageAgentStatus(projectId, stage)
-        .then((current) => {
-          if (current && current.address !== agent.address) {
-            const next = { stage, address: current.address };
-            setAgent(next);
-            agentSnapshots.set(`${projectId}:${stage}`, next);
-          }
-        })
-        .catch(() => {});
-    };
-    const timer = setInterval(recheck, 3_000);
-    return () => clearInterval(timer);
-  }, [agent, projectId, stage]);
+  const address = deployStage === stage ? (status.data ?? null) : null;
 
-  // The full address history, refreshed on the same cadence as the live-pick
-  // recheck above — a fresh redeploy (that recheck landing a new
-  // `agent.address`) is exactly when this list must widen to include it, or
-  // the merged thread read would miss the new deployment's own mail.
-  useEffect(() => {
-    if (!agent || agent.stage !== stage) return;
-    let cancelled = false;
-    const load = () => {
-      void api
-        .stageAgentAddresses(projectId, stage)
-        .then((list) => {
-          if (!cancelled) setAddresses({ stage, list: list.length > 0 ? list : [agent.address] });
-        })
-        .catch(() => {});
-    };
-    load();
-    const timer = setInterval(load, 3_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [agent, projectId, stage]);
+  // The full address history. It widens only when a redeploy lands a new
+  // live address, so it is keyed by that address and read once per address.
+  const history = useQuery({
+    queryKey: keys.stageAgent.addresses(projectId, stage, address ?? ""),
+    queryFn: async () => {
+      const list = await api.stageAgentAddresses(projectId, stage);
+      return list.length > 0 ? list : [address!];
+    },
+    enabled: address !== null,
+    staleTime: Infinity,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === projectId && previousQuery.queryKey[2] === stage ? previous : undefined,
+  });
 
   return {
-    address: agent?.stage === stage ? agent.address : null,
-    addresses: addresses?.stage === stage ? addresses.list : agent?.stage === stage ? [agent.address] : [],
+    address,
+    addresses: address === null ? [] : (history.data ?? [address]),
     error,
     remediation,
     retry: () => setAttempt((value) => value + 1),

@@ -6,8 +6,9 @@
  * away), every 20 s otherwise, and once more on every thread change, which
  * is when the mailbox stream has just said something landed.
  */
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import { UNKNOWN_RUN, type SpecialistRun } from "../../specialist-run-state.ts";
 
 const ACTIVE_POLL_MS = 3_000;
@@ -20,29 +21,14 @@ export function useSpecialistRunState(
   mailPending: boolean,
   threadKey: string,
 ): SpecialistRun {
-  const [state, setState] = useState<SpecialistRun>(UNKNOWN_RUN);
-
-  useEffect(() => {
-    if (!agentAddress) {
-      setState(UNKNOWN_RUN);
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const read = async () => {
-      const next = await api.stageSpecialistRunState(projectId, stage);
-      if (cancelled) return;
-      setState(next);
-      const active = next.state === "working" || mailPending;
-      timer = setTimeout(() => void read(), active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
-    };
-    void read();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
+  const query = useQuery({
     // `threadKey` re-reads on every thread change: a landed reply or a sent turn.
-  }, [projectId, stage, agentAddress, mailPending, threadKey]);
-
-  return state;
+    queryKey: [...keys.stageAgent.run(projectId, stage, agentAddress ?? ""), threadKey],
+    queryFn: () => api.stageSpecialistRunState(projectId, stage),
+    enabled: agentAddress !== null,
+    // Only the same deployment's last answer stands in while a thread change re-reads.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[4] === agentAddress ? previous : undefined),
+    refetchInterval: (current) => (current.state.data?.state === "working" || mailPending ? ACTIVE_POLL_MS : IDLE_POLL_MS),
+  });
+  return agentAddress ? (query.data ?? UNKNOWN_RUN) : UNKNOWN_RUN;
 }

@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
-import { subscribeMailbox } from "../../mailbox-events.ts";
+import { useWaitingReplies } from "./use-waiting-replies.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
@@ -125,37 +125,16 @@ export function usePanelReviews({
 
   // Waiting reviews read their thread back: a mailbox nudge wakes this at
   // once and an interval backstops a missed one; nothing is resent.
-  const waiting = PANEL_ROLES.filter((role) => reviews[role.key]?.status === "waiting" && reviews[role.key]?.address);
-  const anyWaiting = waiting.length > 0;
-  useEffect(() => {
-    if (!anyWaiting) return;
-    const check = () => {
-      for (const role of PANEL_ROLES) {
-        const state = reviews[role.key];
-        if (!state || state.status !== "waiting" || !state.address) continue;
-        const { address, requestedAt } = state;
-        void api
-          .readStageThread(tenantId, [address])
-          .then((thread) => {
-            const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
-            if (reply) update(role.key, (prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply: reply.body } : prev));
-          })
-          .catch((cause: unknown) =>
-            update(role.key, (prev) =>
-              prev.status === "waiting" ? { ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) } : prev,
-            ),
-          );
-      }
-    };
-    check();
-    const subscription = subscribeMailbox(tenantId, check);
-    const timer = setInterval(check, 8_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyWaiting, tenantId]);
+  const waiting = PANEL_ROLES.flatMap((role) => {
+    const state = reviews[role.key];
+    return state?.status === "waiting" && state.address ? [{ key: role.key, address: state.address, requestedAt: state.requestedAt }] : [];
+  });
+  useWaitingReplies(
+    tenantId,
+    waiting,
+    (key, reply) => update(key, (prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
+    (key, error) => update(key, (prev) => (prev.status === "waiting" ? { ...prev, status: "error", error } : prev)),
+  );
 
   return { reviews, requestReview, stateOf: (roleKey: string) => reviews[roleKey] ?? IDLE };
 }

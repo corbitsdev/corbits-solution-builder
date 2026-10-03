@@ -1,7 +1,7 @@
 /**
  * The stage's mail thread: read on the mailbox stream's nudge (CL-8694 — a
  * specialist reply lands as a `create` event the moment it's sent), with a
- * 20s fallback poll covering the stream being down so a dropped connection
+ * fallback poll covering the stream being down so a dropped connection
  * never strands the person waiting on a reply that already arrived.
  *
  * The read spans every address the stage specialist has ever run at
@@ -11,10 +11,12 @@
  * history, not a different conversation (CL-8927). A send always targets
  * `agentAddress` alone.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
+import { keys } from "../../queries/keys.ts";
+import { useMailboxNudge } from "../../queries/use-mailbox.ts";
 
 export type StageThreadState = {
   readonly messages: ChatMessage[];
@@ -27,6 +29,8 @@ export type StageThreadState = {
   readonly reload: () => Promise<void>;
 };
 
+const NO_MESSAGES: ChatMessage[] = [];
+
 export function useStageThread(
   tenantId: string,
   agentAddress: string | null,
@@ -34,77 +38,36 @@ export function useStageThread(
   onNudge: () => void,
   onError: (message: string) => void,
 ): StageThreadState {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const lastLoadAt = useRef(0);
-  const addressesRef = useRef<readonly string[]>(agentAddresses);
-  addressesRef.current = agentAddresses;
-  const addressesKey = agentAddresses.join(",");
+  // The workflow's own decisions (an approval landing, a send-back) land as
+  // run events on this same tenant mailbox stream, so a nudge re-reads the
+  // workflow view too.
+  const backstop = useMailboxNudge(agentAddress ? tenantId : null, onNudge);
+  const addresses = agentAddresses.length > 0 ? agentAddresses : agentAddress ? [agentAddress] : [];
+  const query = useQuery({
+    queryKey: [...keys.thread.of(tenantId, addresses), agentAddress],
+    queryFn: async () => ({ messages: await api.readStageThread(tenantId, [...addresses]), loadedFor: agentAddress }),
+    enabled: agentAddress !== null,
+    refetchInterval: backstop,
+    // A redeploy of the same stage's specialist only adds an address, so its
+    // history stays on screen while the wider read lands; a disjoint set is
+    // a different specialist and starts empty.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === tenantId && (previousQuery.queryKey[2] as string[]).some((address) => addresses.includes(address))
+        ? previous
+        : undefined,
+  });
 
+  useEffect(() => {
+    if (!query.error) return;
+    const cause = query.error;
+    onError(`The conversation for this stage could not be read: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.error]);
+
+  const { refetch } = query;
   const reload = useCallback(async () => {
-    if (!agentAddress) return;
-    const loadedAddress = agentAddress;
-    const addresses = addressesRef.current.length > 0 ? [...addressesRef.current] : [agentAddress];
-    try {
-      const result = await api.readStageThread(tenantId, addresses);
-      setMessages(result);
-      setLoadedFor(loadedAddress);
-      lastLoadAt.current = Date.now();
-    } catch (cause) {
-      onError(
-        `The conversation for this stage could not be read: ${
-          cause instanceof ApiFailure ? cause.detail.message : String(cause)
-        }`,
-      );
-    }
-  }, [agentAddress, tenantId, onError]);
+    if (agentAddress) await refetch();
+  }, [agentAddress, refetch]);
 
-  // A genuinely different stage (a disjoint address set — a different
-  // specialist asset entirely) starts with no known thread state: clear the
-  // previous stage's messages rather than let them linger until the next
-  // poll resolves. A redeploy of the SAME stage's specialist only adds an
-  // address to the set (the old ones are still valid history), so that case
-  // is deliberately not cleared — the merged reload below still picks up the
-  // rest of the history alongside the new address's mail.
-  const previousAddressesRef = useRef<readonly string[]>([]);
-  useEffect(() => {
-    const previous = previousAddressesRef.current;
-    previousAddressesRef.current = agentAddresses;
-    const disjoint =
-      previous.length > 0 && agentAddresses.length > 0 && !agentAddresses.some((address) => previous.includes(address));
-    if (disjoint) {
-      setMessages([]);
-      setLoadedFor(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addressesKey]);
-
-  useEffect(() => {
-    if (!agentAddress) return;
-    void reload();
-    // The workflow's own decisions (an approval landing, a send-back) land as
-    // run events on this same tenant mailbox stream — the nudge that already
-    // wakes the thread read is just as much a reason to re-read the workflow
-    // view, so both go on every nudge rather than leaving the view to the
-    // slower backstop poll alone.
-    const subscription = subscribeMailbox(tenantId, () => {
-      void reload();
-      onNudge();
-    });
-    const timer = setInterval(() => {
-      const open = subscription.isOpen();
-      const msSinceLastLoad = Date.now() - lastLoadAt.current;
-      if (shouldFallbackRefetch({ open, msSinceLastLoad })) {
-        void reload();
-        onNudge();
-      }
-    }, 20_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentAddress, addressesKey, tenantId, reload, onNudge]);
-
-  return { messages, loadedFor, reload };
+  return { messages: query.data?.messages ?? NO_MESSAGES, loadedFor: query.data?.loadedFor ?? null, reload };
 }
