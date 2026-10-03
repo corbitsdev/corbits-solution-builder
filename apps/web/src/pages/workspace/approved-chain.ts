@@ -67,6 +67,13 @@ export function renderApprovedChain(items: Inputs, stage: number): string {
   return `${CHAIN_LEAD}\n\n${renderInputs(items, stage)}\n\n${CHAIN_END}`;
 }
 
+/** The chain with an imported stage's history inside it, so the transcript folds both away from the person's own words. */
+export function withImportedHistory(chain: string, history: string): string {
+  if (!history) return chain;
+  if (!chain) return `${CHAIN_LEAD}\n\n${history}\n\n${CHAIN_END}`;
+  return chain.replace(CHAIN_END, `${history}\n\n${CHAIN_END}`);
+}
+
 /** An opening mail split for the transcript: what precedes the chain, the chain, and the stage's own lead. Null for any other message. */
 export function splitChain(text: string): { readonly before: string; readonly chain: string; readonly after: string } | null {
   const start = text.indexOf(CHAIN_LEAD);
