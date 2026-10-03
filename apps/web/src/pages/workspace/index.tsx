@@ -1195,10 +1195,6 @@ export function StageWorkspace({
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
         <>
-          {stage === 7 ? (
-            <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
-          ) : null}
-          {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
             node={artifacts.activeNode}
             versions={artifacts.selected.versions}
@@ -1216,6 +1212,14 @@ export function StageWorkspace({
                 : null
             }
             advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+            lead={
+              stage === 7 ? (
+                <>
+                  <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
+                  <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
+                </>
+              ) : null
+            }
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
             onRevise={(message, quotes) => {
