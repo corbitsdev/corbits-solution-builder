@@ -108,7 +108,7 @@ const QUALITY_BAR = [
 ].join("\n");
 
 /**
- * The prompt the worker is handed:the plan says what to do, the
+ * The prompt the worker is handed: the plan says what to do, the
  * requirements it cites say when it is done, the design says what it looks
  * like, and the frozen stack says what it is built with. Assembled once per
  * attempt and written beside the attempt's directory, so the packet an
