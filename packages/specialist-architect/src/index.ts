@@ -93,7 +93,8 @@ auth, seed data, tests), not a stand-in workflow.
 
 A build plan with these headings, after \`## In short\`:
 
-- \`## Frozen source references\`: the requirements document first.
+- \`## Source versions\`: the approved documents the plan is written against,
+  the requirements document first.
 - \`## Architecture\`
 - \`## Stack\`: see below.
 - \`## Components and interfaces\`: each interface with an owner and an
