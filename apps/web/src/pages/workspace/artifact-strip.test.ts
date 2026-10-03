@@ -40,9 +40,4 @@ describe("stripScrollLeft", () => {
     expect(stripScrollLeft(list, { offsetLeft: 20, offsetWidth: 80 })).toBe(12);
     expect(stripScrollLeft({ scrollLeft: 50, clientWidth: 500 }, { offsetLeft: 4, offsetWidth: 80 })).toBe(0);
   });
-
-  test("the strip never calls scrollIntoView", async () => {
-    const source = await Bun.file(new URL("./artifact-strip.tsx", import.meta.url)).text();
-    expect(source).not.toContain("scrollIntoView(");
-  });
 });

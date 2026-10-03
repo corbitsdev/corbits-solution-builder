@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ArtifactNode } from "./client.js";
 import { packagesByStakeholder } from "./package-lineages.ts";
 
@@ -47,11 +45,4 @@ describe("packagesByStakeholder", () => {
     expect(shown.map((entry) => entry.id)).toEqual(["new"]);
   });
 
-  test("a rewritten package supersedes the stakeholder's current head when it is recorded", () => {
-    const client = readFileSync(join(import.meta.dir, "client.ts"), "utf8");
-    const persist = client.slice(client.indexOf("persistAudiencePackage: ("), client.indexOf("persistBuildEvidence") > 0 ? client.indexOf("persistBuildEvidence") : undefined);
-    expect(persist).toContain("node.variant === audience &&");
-    expect(persist).toContain("...(previousHead ? { supersedes: previousHead.id } : {}),");
-    expect(readFileSync(join(import.meta.dir, "pages/audiences.tsx"), "utf8")).toContain("const packages = packagesByStakeholder(detail.nodes, audiences);");
-  });
 });

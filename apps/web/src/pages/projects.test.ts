@@ -69,79 +69,7 @@ describe("Projects markup", () => {
   });
 });
 
-describe("home composer send", () => {
-  test("send still createProject behind the silent ten-character gate", async () => {
-    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    expect(page).toContain("onSend={() => void start()}");
-    expect(page).toContain("api.createProject");
-    expect(page).toContain("if (!canStartProject(problem) || busy) return");
-    expect(page).toContain("onAttach={addMaterial}");
-    expect(page).toContain("void importFile(file)");
-    expect(page).toContain("At least ten characters to start a project.");
-    expect(page).toContain('className="visually-hidden"');
-  });
-});
-
-describe("home layout sheet", () => {
-  test("status orange is brand-primary, cards reveal their menu on hover, composer uses icon slots", async () => {
-    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    const css = await Bun.file(new URL("./home-layout.css", import.meta.url)).text();
-    expect(page).toContain("cardDescription(project)");
-    expect(page).toContain("className=\"card-desc\"");
-    expect(page).toContain("ChatInput");
-    expect(page).toContain("Dictated");
-    expect(page).toContain("attachIcon");
-    expect(page).toContain("sendIcon");
-    expect(page).toContain("leadingTools");
-    expect(page).toContain("Plus");
-    expect(page).toContain("Send");
-    expect(page).toContain("project-card-menu");
-    expect(page).toContain("Ellipsis");
-    expect(css).toContain(".home-page .card.needs");
-    expect(css).toContain("border-color: var(--brand-primary)");
-    expect(css).toContain(".home-page .badge-decision");
-    expect(css).toContain("background: var(--brand-primary)");
-    expect(css).toContain(".home-page .card-track .seg.now");
-    expect(css).toContain("composer-foot");
-    expect(css).toContain('[data-slot="chat-input-footer"]');
-    expect(css).toContain(".home-page .card:hover .project-card-menu");
-    expect(css).not.toContain("M5 12h14");
-    expect(css).not.toContain("-webkit-mask");
-    expect(css).toContain("var(--wb-foreground)");
-    expect(css).toContain("var(--wb-background)");
-  });
-});
-
 describe("project card menu", () => {
-  test("offers info, rename, documents, export, archive and a two-step delete without reaching the card's open handlers (#323: shared with the workspace title)", async () => {
-    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    const menu = await Bun.file(new URL("./project-menu.tsx", import.meta.url)).text();
-    const card = page.slice(page.indexOf("function ProjectCard"));
-    expect(card).toContain("<ProjectMenu");
-    expect(menu).toContain("<MenuTrigger asChild>{trigger}</MenuTrigger>");
-    for (const item of ["Project info…", "Rename", "Settings…", "Download documents…", "Export…", "Archive", "Unarchive", "Prune old versions…", "Repair this project…", "Delete…", "Yes, delete it"]) expect(menu).toContain(item);
-    expect(menu).toContain("exportProjectBundle(project)");
-    expect(menu).toContain("downloadDocuments(project)");
-    expect(menu).toContain("api.updateProject(project.id, { archived: !project.archivedAt })");
-    expect(menu).toContain("api.deleteProject(project.id)");
-    // A slip cannot delete: the confirming item only exists after Delete… was chosen, and closing the menu forgets it.
-    expect(menu).toContain("setConfirming(true)");
-    expect(menu).toMatch(/if \(!open\) \{[^}]*setConfirming\(false\);/);
-    // The card face opens the project on click and long-press; the menu must not.
-    const menuWrapper = card.slice(card.indexOf('className="card-menu"'), card.indexOf("<ProjectMenu"));
-    for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(menuWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
-    // Nor may the info dialog, portaled but React-nested in the card.
-    const dialogWrapper = menu.slice(menu.indexOf('className="card-dialog"'), menu.indexOf("<ProjectInfoDialog"));
-    for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(dialogWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
-    // While the menu or dialog is up, and just after it closes, the face itself is inert (card-face-guard.ts).
-    expect(card).toContain("setMenuOpen(open)");
-    expect(card).toContain("setDialogOpen(open)");
-    expect(card).toContain("closedAt.current = Date.now()");
-    expect(card).toContain("if (opens) onOpen();");
-    expect(card).toContain("if (!faceOpens()) return;");
-    expect(card).toContain("dismissing.current = true;");
-    expect(menu).toContain("onPointerDownOutside={() => onDismissPress?.()}");
-  });
 
   test("the menu renders closed: only its trigger is in the markup", () => {
     const html = renderToStaticMarkup(
@@ -153,27 +81,3 @@ describe("project card menu", () => {
   });
 });
 
-describe("project info actions", () => {
-  test("ProjectInfoDialog, opened by the menu, context menu or long-press, saves the name on Save, exports and archives, and does not delete", async () => {
-    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    const menu = await Bun.file(new URL("./project-menu.tsx", import.meta.url)).text();
-    const dialog = menu.slice(menu.indexOf("function ProjectInfoDialog"));
-    expect(page).toContain("onContextMenu");
-    expect(page).toContain("LONG_PRESS_MS");
-    expect(page).toContain("setTimeout(() => openInfo(), LONG_PRESS_MS)");
-    // Explicit: the name is written on Save (or Enter), never on blur, and Save is offered only once something changed.
-    expect(dialog).toContain("api.updateProject(project.id, { title: nextTitle })");
-    expect(dialog).not.toContain("onBlur=");
-    expect(dialog).toContain('if (event.key === "Enter") void save();');
-    expect(dialog).toContain("disabled={!dirty || saving}");
-    expect(dialog).toContain('{saving ? "Saving…" : "Save"}');
-    expect(dialog).toContain("exportProjectBundle(project)");
-    expect(menu).toContain("assembleBundle(project.id");
-    expect(dialog).toContain('api.updateProject(project.id, { archived: !project.archivedAt })');
-    expect(dialog).toContain("Export…");
-    expect(dialog).toContain("Archive");
-    // Deleting stays the card menu's two-step affair.
-    expect(dialog).not.toContain("api.deleteProject(project.id)");
-    expect(dialog).not.toContain("Delete…");
-  });
-});

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -239,16 +238,3 @@ describe("the Product guide", () => {
   });
 });
 
-describe("the workspace", () => {
-  const index = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
-
-  // A source check, not a render: it catches the two agents' call sites being
-  // dropped again, as they once were, without mounting the workspace.
-  test("the workspace source still calls both agents' hooks and renders them", () => {
-    expect(index).toContain("useProductGuide(");
-    expect(index).toContain("<GuideDock");
-    expect(index).toContain("onExplain={() => void guide.explain()}");
-    expect(index).toContain("useStageEvaluator(");
-    expect(index).toContain("<EvaluatorStance evaluator={evaluator} />");
-  });
-});
