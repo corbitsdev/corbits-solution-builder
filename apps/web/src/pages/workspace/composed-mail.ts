@@ -10,6 +10,7 @@
  * renders what this returns.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
+import { personWordsIn } from "@solutions-builder/app/stage-prompt";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
 import { shortPromptHash } from "../../design-disposition.ts";
 
@@ -83,4 +84,16 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (!hasIds) return { summary: null, body: "", lead: stripped };
   const { ids, rest } = splitIdsBlock(stripped);
   return { summary: "The requirement ids, as minted", body: ids, lead: rest || null };
+}
+
+/** How a message the app composed shows in either chat view: hidden, or as one
+ *  event line with the sent text folded beneath; null for an ordinary turn. */
+export function appView(
+  message: Pick<ChatMessage, "author" | "subject" | "body">,
+): "hidden" | { readonly line: string; readonly detail: string } | null {
+  if (isStageOpening(message)) return "hidden";
+  if (isEvaluatorNotes(message)) {
+    return { line: "Evaluator notes sent to the specialist", detail: personWordsIn(message.body)?.words ?? message.body };
+  }
+  return null;
 }

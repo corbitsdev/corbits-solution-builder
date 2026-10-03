@@ -4,7 +4,7 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold, isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
+import { appView, composedMailFold } from "./composed-mail.ts";
 import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -252,15 +252,14 @@ export function StageConversation({
             // The opening is what the specialist is sent to start the stage;
             // the person never said it, and the document strip already shows
             // what it carried.
-            if (source && isStageOpening(source)) return null;
-            // The evaluator's notes the app sent the specialist are an event
-            // in the stage, never the person's words.
-            if (source && isEvaluatorNotes(source)) {
+            const view = source ? appView(source) : null;
+            if (view === "hidden") return null;
+            if (view) {
               return (
                 <div key={message.id} className="event conv-event">
                   <details className="bubble-fold">
-                    <summary>Evaluator notes sent to the specialist</summary>
-                    <Markdown source={personWordsIn(source.body)?.words ?? source.body} />
+                    <summary>{view.line}</summary>
+                    <Markdown source={view.detail} />
                   </details>
                 </div>
               );
