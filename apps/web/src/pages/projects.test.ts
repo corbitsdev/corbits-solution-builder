@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ProjectSummary } from "../client.ts";
 import { Projects } from "./projects.tsx";
+
+function projectsPage(props: Parameters<typeof Projects>[0]) {
+  return createElement(QueryClientProvider, { client: new QueryClient() }, createElement(Projects, props));
+}
 
 function summary(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
   return {
@@ -23,7 +28,7 @@ function summary(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
 describe("Projects markup", () => {
   test("live cards render a card-desc from the list title, keep create/import, and carry the options menu", () => {
     const html = renderToStaticMarkup(
-      createElement(Projects, {
+      projectsPage({
         projects: [summary()],
         onOpen: () => undefined,
         onChanged: () => undefined,
@@ -46,7 +51,7 @@ describe("Projects markup", () => {
 
   test("card-desc uses the stored problem one-liner when the list carries it", () => {
     const html = renderToStaticMarkup(
-      createElement(Projects, {
+      projectsPage({
         projects: [summary({ description: "Move payroll cutoff + reconciliation off the legacy batch system." })],
         onOpen: () => undefined,
         onChanged: () => undefined,
@@ -58,7 +63,7 @@ describe("Projects markup", () => {
 
   test("an empty list still uses the mockup empty card", () => {
     const html = renderToStaticMarkup(
-      createElement(Projects, {
+      projectsPage({
         projects: [],
         onOpen: () => undefined,
         onChanged: () => undefined,
@@ -73,7 +78,7 @@ describe("project card menu", () => {
 
   test("the menu renders closed: only its trigger is in the markup", () => {
     const html = renderToStaticMarkup(
-      createElement(Projects, { projects: [summary()], onOpen: () => undefined, onChanged: () => undefined }),
+      projectsPage({ projects: [summary()], onOpen: () => undefined, onChanged: () => undefined }),
     );
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).not.toContain("Yes, delete it");

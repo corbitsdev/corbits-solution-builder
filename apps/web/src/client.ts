@@ -425,7 +425,7 @@ export type ProjectSummary = {
   title: string;
   /** First non-empty line of the stored opening problem, or null when none was written. */
   description: string | null;
-  /** Always null off `listProjectSummaries` -- `project-list.ts`'s `displayStage` reads the project workflow's own stage per card, or null when it could not be read. */
+  /** Always null off `listProjectSummaries` -- each project card reads the project workflow's own stage. */
   stage: number | null;
   archivedAt: string | null;
   /** A stock hub approval (stage 9's delivery) is pending on this project. */
