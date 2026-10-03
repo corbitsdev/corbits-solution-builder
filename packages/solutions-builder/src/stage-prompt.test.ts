@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
+import { composedTurn, ensureChoiceSection, personWordsIn, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
     const out = withChoiceReminder(3, "Chosen: Approach A (Extend the worker)");
     expect(out).toContain("Chosen: Approach A (Extend the worker)");
     expect(out).toContain("## Chosen approach: Extend the worker");
+    expect(personWordsIn(out)?.words).toBe("Chosen: Approach A (Extend the worker)");
   });
 
   test("ordinary stage-3 replies and other stages pass through untouched", () => {
@@ -56,5 +57,19 @@ describe("revisionRequest carries the current version, as alpha main's round did
     expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
     expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
     expect(splitRevision("Drop the mobile form.")).toBeNull();
+  });
+});
+
+describe("a composed message keeps the person's words last, after one marker", () => {
+  test("the words are found through every layer the app adds", () => {
+    const attached = composedTurn(["## Attached: Review\n\nFindings."], "Use the review.");
+    const revised = revisionRequest({ stage: 1, userInput: attached, currentDocument: "## In short\n- x" });
+    expect(personWordsIn(revised)?.words).toBe("Use the review.");
+    expect(personWordsIn(revised)?.added).toContain("## Attached: Review");
+  });
+
+  test("a message with nothing added is the person's alone", () => {
+    expect(composedTurn([], "Just this.")).toBe("Just this.");
+    expect(personWordsIn("Just this.")).toBeNull();
   });
 });
