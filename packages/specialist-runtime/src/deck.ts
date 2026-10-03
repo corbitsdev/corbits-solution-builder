@@ -230,7 +230,8 @@ export function deckFrom(args: {
   if (slides.length === 0) return null;
   return {
     projectTitle: args.projectTitle,
-    audience: args.audience,
+    // The owner is "You" as a name; mid-sentence ("for you") it reads in lower case.
+    audience: args.audience.trim().toLowerCase() === "you" ? "you" : args.audience,
     role: args.role,
     slides,
     decision: decisionLinesIn(args.markdown),
