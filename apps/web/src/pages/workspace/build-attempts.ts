@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import { zonedTime } from "./delivery-opening.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -64,7 +65,7 @@ export function buildEvidenceState(
 export type SupervisorBriefInput = {
   readonly attempt: number;
   readonly outcome: BridgeOutcome;
-  readonly archive: { readonly fileName: string; readonly sha256: string; readonly sizeBytes: number };
+  readonly archive: { readonly fileName: string; readonly sha256: string; readonly sizeBytes: number; readonly fileCount: number };
   /** Why no target was probed, when none was: the actual reason, from `probeDecision`. */
   readonly probeSkipped?: string | null;
   /** Stage 7's forecast, as the estimator wrote it (`forecastSection`); null when none could be read. */
@@ -150,7 +151,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
-    `- Ran from ${outcome.startedAt} to ${outcome.endedAt}.`,
+    `- Ran from ${zonedTime(outcome.startedAt)} to ${zonedTime(outcome.endedAt)}.`,
     `- The interface gives a final text and an exit status and nothing else: no session, steering or checkpoint exists.`,
     ``,
     `### Final text`,
@@ -159,14 +160,15 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## Evidence recorded`,
     `- Archive ${input.archive.fileName}, ${String(input.archive.sizeBytes)} bytes, sha256 ${input.archive.sha256}, recorded as attempt-${String(input.attempt)}.`,
+    `- The archive holds ${String(input.archive.fileCount)} file${input.archive.fileCount === 1 ? "" : "s"}; any file count you give is this one.`,
     `- Deterministic checks: ${input.verification.complete ? "complete." : "incomplete. Each item below failed or was not run:"}`,
     ...input.verification.unverified.map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
     targets,
     ``,
-    `## Stage 7 forecast`,
+    `## Cost approval forecast`,
     input.forecast?.trim()
       ? input.forecast.trim()
-      : "No forecast could be read from stage 7's estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
+      : "No forecast could be read from the Cost approval estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
     `The worker's own cost is not reported by its interface; say so if you cannot read it from its final text.`,
   ].join("\n");
 }

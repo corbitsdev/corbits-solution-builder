@@ -30,7 +30,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { summarizeVerification, type VerificationItem, type VerificationReport } from "./delivery.js";
@@ -81,9 +81,59 @@ export type DeliveryVerificationContent = {
 /** Walks `dir` and returns every regular file's path (relative, POSIX) with
  *  its sha256 and size, skipping any path segment named in `exclude`. */
 export async function hashTree(dir: string, exclude: ReadonlySet<string>): Promise<ManifestFileEntry[]> {
-  const paths = await walkFiles(dir, exclude);
+  return hashFiles(dir, await walkFiles(dir, exclude));
+}
+
+/** Every regular file under `dir` that ships, sorted: what git leaves
+ *  unignored, judged only by the directory's own `.gitignore` files and
+ *  `exclude` (gitignore patterns). Listed through a throwaway repository, so
+ *  neither an enclosing one nor the host's global excludes decide. An empty
+ *  list is refused: an archive of nothing is not a build. */
+export async function shippedFiles(dir: string, exclude: readonly string[]): Promise<string[]> {
+  const scratch = await mkdtemp(join(tmpdir(), "sb-ship-"));
+  let listed: string;
+  try {
+    await runGit(["init", "-q", "--bare", "--template=", scratch]);
+    listed = await runGit([
+      "-c",
+      "core.excludesFile=",
+      `--git-dir=${scratch}`,
+      `--work-tree=${dir}`,
+      "ls-files",
+      "-z",
+      "--others",
+      "--exclude-standard",
+      ...exclude.map((pattern) => `--exclude=${pattern}`),
+    ]);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+  const paths = listed.split("\0").filter((path) => path.length > 0);
+  const stats = await Promise.all(paths.map((path) => lstat(join(dir, path))));
+  const files = paths.filter((_, at) => stats[at]!.isFile()).sort();
+  if (files.length === 0) throw new Error(`There is nothing to package in ${dir}: every file is excluded or ignored by a .gitignore.`);
+  return files;
+}
+
+function runGit(args: readonly string[]): Promise<string> {
+  return new Promise((res, reject) => {
+    const child = spawn("git", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) res(Buffer.concat(out).toString("utf8"));
+      else reject(new Error(`git ${args.join(" ")} exited ${String(code)}: ${Buffer.concat(err).toString("utf8")}`));
+    });
+  });
+}
+
+/** Hashes each listed file (relative, POSIX) under `dir`, in path order. */
+export async function hashFiles(dir: string, paths: readonly string[]): Promise<ManifestFileEntry[]> {
   return Promise.all(
-    paths.sort().map(async (path): Promise<ManifestFileEntry> => {
+    [...paths].sort().map(async (path): Promise<ManifestFileEntry> => {
       const bytes = await readFile(join(dir, path));
       return { path, sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.byteLength };
     }),

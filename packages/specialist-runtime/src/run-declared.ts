@@ -36,8 +36,9 @@ async function readRunDeclaration(dir: string): Promise<RunDeclaration | string>
   let text: string;
   try {
     text = await readFile(join(dir, RUN_DECLARATION), "utf8");
-  } catch {
-    return `the attempt left no ${RUN_DECLARATION}`;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return `the attempt left no ${RUN_DECLARATION}`;
+    return `${RUN_DECLARATION} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
   }
   try {
     const parsed = RunDeclaration(JSON.parse(text));

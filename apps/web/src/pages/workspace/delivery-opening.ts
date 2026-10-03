@@ -16,6 +16,11 @@
  * `node:fs` runtime code.
  */
 
+// The person reads local time beside these texts; a specialist must quote the same moment.
+export function zonedTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { timeZoneName: "short" });
+}
+
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
 
 /** What the packaging's checks established about the archive itself (#129):
@@ -53,7 +58,7 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   }
   const verified = verification.items.filter((item) => item.status === "verified").length;
   const lines = [
-    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
+    `Verification recorded with the archive at ${zonedTime(verification.checkedAt)} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
       verification.report.complete ? "no required item failed" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];
@@ -116,10 +121,10 @@ export function deliveryOpeningLine(
 ): string {
   if (!manifest) {
     return [
-      "No delivery manifest artifact is available for this build — stage 8's archive was recorded without one, or no manifest could be read.",
+      "No delivery manifest artifact is available for this build — the Build and test archive was recorded without one, or no manifest could be read.",
       "No check was run by a tool, so nothing about this archive is verified; say so, never score a pass.",
       "",
-      "Checks stage 8 declared:",
+      "Checks Build and test declared:",
       buildStatusBody,
     ].join("\n");
   }
@@ -136,6 +141,6 @@ export function deliveryOpeningLine(
     lines.push(`- ${file.path} — ${String(file.sizeBytes)} bytes — sha256 ${file.sha256}`);
   }
   lines.push("", ...verificationLines(content.verification));
-  lines.push("", "Checks stage 8 declared:", buildStatusBody);
+  lines.push("", "Checks Build and test declared:", buildStatusBody);
   return lines.join("\n");
 }
