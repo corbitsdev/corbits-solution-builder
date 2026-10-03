@@ -58,6 +58,8 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
+import { useMaterialDispatch } from "./use-material-dispatch.ts";
+import { splitMaterialMail } from "./attached-material.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
@@ -238,7 +240,10 @@ export function StageWorkspace({
     stage,
     detail.nodes,
     thread.messages,
-    (body) => {
+    (stopped) => {
+      // A stopped material mail (#607) is not something the person typed:
+      // nothing of it goes back into the box.
+      const body = splitMaterialMail(stopped) ? "" : stopped;
       setComposer(body);
       setStopSeed({ text: body, at: Date.now() });
     },
@@ -589,16 +594,38 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
-  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const [attachRefusal, setAttachRefusal] = useState<string | null>(null);
   const addMaterial = async (files: File[]) => {
-    setAttachNote(null);
+    setAttachRefusal(null);
     try {
       await api.attachMaterial(detail.project.id, files);
       void refreshWorkflow();
     } catch (cause) {
-      setAttachNote(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      setAttachRefusal(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   };
+  // A file attached once the stage has opened is mailed to its specialist
+  // (#607): the opening that would have carried it has already gone. The
+  // refresh above is what brings the new file into `detail.nodes`.
+  const materialDispatch = useMaterialDispatch({
+    tenantId,
+    stage,
+    nodes: detail.nodes,
+    agentAddress,
+    addresses: agent.addresses,
+    messages: thread.messages,
+    loadedFor: thread.loadedFor,
+    busy: busy || sending,
+    revising: draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body) ? draftMessage.body : null,
+    reloadThread: loadThread,
+  });
+  // Said where a refused attachment is said: the file is kept, and the
+  // specialist has not been sent it.
+  const attachNote =
+    attachRefusal ??
+    (materialDispatch.error
+      ? `The attached material is saved, and could not be sent to the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}: ${materialDispatch.error}`
+      : null);
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
