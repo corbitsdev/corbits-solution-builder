@@ -19,6 +19,7 @@ function node(over: Partial<ArtifactNode> & { kind: string; stage: number }): Ar
     variant: null,
     title: over.kind,
     version: 1,
+    position: 1,
     artifactId: `art-${over.kind}`,
     contentHash: "",
     createdAt: at,

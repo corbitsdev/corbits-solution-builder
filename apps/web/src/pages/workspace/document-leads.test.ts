@@ -17,6 +17,7 @@ const NODE: ArtifactNode = {
   stage: 7,
   title: "Cost",
   version: 1,
+  position: 1,
   artifactId: "a1",
   contentHash: "",
   sizeBytes: 1,

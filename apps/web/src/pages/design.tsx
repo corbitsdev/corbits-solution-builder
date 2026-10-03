@@ -27,7 +27,6 @@ import { Banner, Button, CopyButton, Field, StateLabel, documentName } from "../
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
-import { designOrdinal } from "./workspace/design-history.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
 import { Markdown } from "../markdown.jsx";
@@ -149,7 +148,6 @@ export function DesignFeedbackView({
     prompt: string,
   ) => Promise<unknown>;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(designs.at(-1)?.id ?? null);
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pending, setPending] = useState<PendingComment[]>([]);
   const [draftAnchor, setDraftAnchor] = useState<Anchor | null>(null);
@@ -167,7 +165,8 @@ export function DesignFeedbackView({
     else frames.current.delete(id);
   };
 
-  const design = designs.find((entry) => entry.id === selectedId) ?? designs.at(-1) ?? null;
+  // The head: picking another version in the strip opens it in the reader.
+  const design = designs.at(-1) ?? null;
   const content = design ? (contentByNode.get(design.id) ?? "") : "";
   const framed = useMemo(
     () => (content && looksLikeHtmlDocument(content) ? framedDesign(content, frameMode, design?.title ?? "Design") : null),
@@ -284,22 +283,9 @@ export function DesignFeedbackView({
       <div className="doc" data-tour="design-feedback">
         <div className="docmeta">
           <span>
-            v{design ? designOrdinal(designs, design) : ""} · {documentName(design?.kind ?? "design_artifact")}
+            {documentName(design?.kind ?? "design_artifact")}
           </span>
           <div className="document-tools">
-            {designs.length > 1 ? (
-              <select
-                aria-label="Version"
-                value={design?.id ?? ""}
-                onChange={(event) => setSelectedId(event.target.value)}
-              >
-                {designs.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    Version {designOrdinal(designs, entry)}
-                  </option>
-                ))}
-              </select>
-            ) : null}
             <select
               aria-label="Mode"
               value={feedbackMode ? "feedback" : "preview"}
@@ -336,7 +322,7 @@ export function DesignFeedbackView({
           <DesignFrames
             framed={framed}
             frameKey={design?.id ?? ""}
-            title={`Design preview: ${design?.title ?? ""} v${design ? designOrdinal(designs, design) : ""}`}
+            title={`Design preview: ${design?.title ?? ""} v${design?.position ?? ""}`}
             paneClassName="design-preview"
             registerFrame={registerFrame}
           />

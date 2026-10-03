@@ -3,7 +3,7 @@
  * component here exists only where behaviour or an accessibility obligation
  * travels with the markup.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Compass, Copy, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -383,6 +383,7 @@ export function GuideDock({
   note = null,
   at,
   stage,
+  now = null,
 }: {
   step: import("@solutions-builder/app/next-step").NextStep;
   onGo: (where: import("@solutions-builder/app/next-step").NextStep["where"]) => void;
@@ -400,110 +401,89 @@ export function GuideDock({
   at?: import("@solutions-builder/app/next-step").NextStep["where"];
   /** Which of the nine this project is on, for the ring. */
   stage?: number;
+  /** Where the stage stands now, as the workspace reads it from the thread. */
+  now?: { title: string; detail: string } | null;
 }) {
   const [open, setOpen] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
-  const fab = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const next = step.ending || at === step.where ? step.title : `Next: ${step.title}`;
+  const where = stage ? stageName(stage) : null;
 
-  // `role="dialog"` is a promise about the keyboard: Escape closes it, focus
-  // moves into it on open and back to the control it came from on close, and
-  // clicking away dismisses it. Without those it is a div wearing a role.
-  useEffect(() => {
-    if (!open) return;
-    panel.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-        fab.current?.focus();
-      }
-    };
-    const onPointer = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (panel.current?.contains(target) || fab.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onPointer);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onPointer);
-    };
-  }, [open]);
-
+  // A native popover: it opens only from the ring, Escape and a click
+  // anywhere else close it, and that click still reaches what it landed on.
   return (
     <div className="guide-dock" data-tour="next-step">
-      {open ? (
-        <div
-          ref={panel}
-          className="guide-panel"
-          role="dialog"
-          aria-modal="false"
-          aria-label="What happens next"
-          tabIndex={-1}
-        >
-          <div className="guide-panel-head">
-            <p className="guide-title">
-              {step.ending || at === step.where ? step.title : `Next: ${step.title}`}
-            </p>
-            <button
-              type="button"
-              className="guide-close"
-              aria-label="Close"
-              onClick={() => {
-                setOpen(false);
-                fab.current?.focus();
-              }}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </div>
-          <p className="guide-detail">{step.detail}</p>
-
-          {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
-
-          <div className="guide-actions">
-            {step.ending || step.where === at ? null : (
-              <Button variant="primary" onClick={() => onGo(step.where)}>
-                {step.where === "decisions"
-                  ? "Go to the decision queue"
-                  : step.where === "artifacts"
-                    ? "Open artifacts"
-                    : step.where === "settings"
-                      ? "Open settings"
-                      : "Take me there"}
-              </Button>
-            )}
-            {/* Always offered while there is someone to ask: a guide that timed
-                out, or answered before the project moved on, must be askable
-                again. No handler, no button: a control that does nothing is
-                absent. */}
-            {onExplain ? (
-              <Button loading={explaining} onClick={onExplain}>
-                {guidance ? "Ask again" : "Where does this stand?"}
-              </Button>
-            ) : null}
-          </div>
+      <div
+        id={panelId}
+        popover="auto"
+        className="guide-panel"
+        role="dialog"
+        aria-label="What happens next"
+        onToggle={(event) => setOpen(event.newState === "open")}
+      >
+        <div className="guide-panel-head">
+          <p className="guide-where">{where ?? "Where this stands"}</p>
+          <button type="button" className="guide-close" aria-label="Close" popoverTarget={panelId} popoverTargetAction="hide">
+            <X aria-hidden="true" />
+          </button>
         </div>
-      ) : null}
+        {now ? (
+          <div className="guide-now">
+            <p className="guide-title">{now.title}</p>
+            <p className="guide-detail">{now.detail}</p>
+          </div>
+        ) : null}
+        <div className="guide-next">
+          <p className="guide-label">{step.ending ? "Where it ends" : "Next step"}</p>
+          <p className="guide-title">{step.title}</p>
+          <p className="guide-detail">{step.detail}</p>
+        </div>
+
+        {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
+
+        <div className="guide-actions">
+          {step.ending || step.where === at ? null : (
+            <Button variant="primary" onClick={() => onGo(step.where)}>
+              {step.where === "decisions"
+                ? "Go to the decision queue"
+                : step.where === "artifacts"
+                  ? "Open artifacts"
+                  : step.where === "settings"
+                    ? "Open settings"
+                    : "Take me there"}
+            </Button>
+          )}
+          {/* Always offered while there is someone to ask: a guide that timed
+              out, or answered before the project moved on, must be askable
+              again. No handler, no button: a control that does nothing is
+              absent. */}
+          {onExplain ? (
+            <Button loading={explaining} onClick={onExplain}>
+              {guidance ? "Ask again" : "Where does this stand?"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
 
       <button
-        ref={fab}
         type="button"
         className={`guide-fab${open ? " is-open" : ""}`}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        aria-haspopup="dialog"
+        popoverTarget={panelId}
+        // A ring alone read as a spinner: the tooltip says this is progress
+        // through the stages, and a guide.
+        title={`${where ? `${where}. ` : ""}${next}. Open the guide.`}
       >
         <span key={step.title} className="guide-live">
           {stage ? <StageRing stage={stage} /> : <Compass aria-hidden="true" />}
         </span>
-        {/* Closed, it is the ring and nothing else — a small mark of how far
-            through the nine stages this is, sitting out of the way. The words
-            are in the card it opens, so the corner of the window is not
-            carrying a sentence at all times. */}
+        {/* Closed, it is the ring and nothing else, sitting out of the way.
+            The words are in the card it opens, so the corner of the window is
+            not carrying a sentence at all times. */}
         <span className="sr-only">
-          {step.ending || at === step.where ? step.title : `Next: ${step.title}`}
+          {where ? `${where}. ` : ""}
+          {next}
         </span>
       </button>
     </div>
@@ -569,8 +549,8 @@ const DOCUMENT_NAMES: Record<string, string> = {
 };
 
 /** What a folded document says for itself: its version, when it was written, and, when known, how long it is. */
-export function versionDigest(node: { version: number; createdAt: string; sizeBytes?: number }): string {
-  const stamp = `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()}`;
+export function versionDigest(node: { position: number; createdAt: string; sizeBytes?: number }): string {
+  const stamp = `Version ${node.position} · written ${new Date(node.createdAt).toLocaleString()}`;
   if (node.sizeBytes === undefined) return stamp;
   const length = node.sizeBytes < 1024 ? `${node.sizeBytes} B` : `${(node.sizeBytes / 1024).toFixed(1)} kB`;
   return `${stamp} · ${length}`;

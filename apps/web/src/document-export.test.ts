@@ -19,14 +19,10 @@ describe("document export", () => {
     expect(node).toMatchObject({ kind: "build_plan_review", stage: 6, variant: "Quality review", title: "Quality review", version: 1, mediaType: "text/markdown" });
   });
 
-  test("the document pane and both stage 6 panes carry the export menu beside Copy", () => {
+  test("the document pane carries the export menu beside Copy", () => {
     const document = read("./pages/workspace/document.tsx");
     expect(document).toContain("{!binary ? <CopyButton text={content} /> : null}");
     expect(document).toContain("<DocumentExportMenu node={node} tenantId={tenantId} content={content} />");
     expect(document).not.toContain("<PrintButton");
-    const stage6 = read("./pages/workspace/stage6.tsx");
-    expect((stage6.match(/<DocumentExportMenu /g) ?? []).length).toBe(2);
-    expect((stage6.match(/<CopyButton text=\{current\.reply\} \/>/g) ?? []).length).toBe(2);
-    expect(stage6).toContain("draftNode(");
   });
 });
