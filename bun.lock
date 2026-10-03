@@ -84,6 +84,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@corbits/embedded-host": "workspace:*",
+        "@solutions-builder/specialist-companions": "workspace:*",
         "@solutions-builder/specialist-runtime": "workspace:*",
         "arktype": "catalog:",
         "hono": "catalog:",
@@ -116,6 +117,7 @@
         "@intx/db": "workspace:*",
         "@intx/hub-api": "workspace:*",
         "@intx/hub-sessions": "workspace:*",
+        "@intx/inference": "0.4.0",
         "@intx/types": "workspace:*",
         "arktype": "catalog:",
         "drizzle-orm": "catalog:",

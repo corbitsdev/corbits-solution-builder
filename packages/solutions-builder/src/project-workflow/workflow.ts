@@ -29,7 +29,7 @@ export const MAX_ITERATIONS = 500;
  * (#201). The loop cannot wait for the namer either way: a dependency on
  * the step skips the loop when the namer fails, one on its failure handler
  * skips the loop when the namer succeeds (#203). Naming happens outside
- * the run (#205).
+ * the run, as one inference call from the host (#205).
  */
 export const projectWorkflow = defineWorkflow({
   id: "sb-project-loop-driven",
