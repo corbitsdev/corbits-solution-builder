@@ -25,7 +25,7 @@ import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { ComposedMail, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { ComposedMail, MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
@@ -766,10 +766,10 @@ type AttachedQuote = { quote: string; note?: string };
 /**
  * A person's turn in the transcript. Material attached after the stage
  * opened travels as a mail in the person's name (#607): the files' names
- * show, and what they say opens on demand. Anything else is what the
- * person wrote.
+ * show, and what they say opens on demand. Anything else shows as
+ * `MessageBody` does: the person's words, what the app added folded.
  */
 function PersonTurn({ text }: { text: string }) {
   const material = materialMailFold(text);
-  return material ? <ComposedMail fold={material} /> : <Markdown source={text} />;
+  return material ? <ComposedMail fold={material} /> : <MessageBody text={text} />;
 }
