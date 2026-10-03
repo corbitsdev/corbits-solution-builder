@@ -52,7 +52,7 @@ export function evaluationRequest(args: { record: string | null; draft: string }
 /** The evaluator's notes, as the one revision the app asks the specialist for before the person reviews. */
 export function evaluatorNotesAsk(notes: readonly string[]): string {
   return [
-    "A reviewer read this version against the record and noted the points below. Fix each one that holds up against the record; where one does not, leave that part as it is. Change nothing else.",
+    "A reviewer read this version against the record and noted the points below. Fix each one that holds up against the record; where one does not, leave that part as it is. Change nothing else. Reply in one or two sentences saying what changed in the document, and ask nothing: the person has not yet answered your last question.",
     "",
     ...notes.map((note) => `- ${note}`),
   ].join("\n");
