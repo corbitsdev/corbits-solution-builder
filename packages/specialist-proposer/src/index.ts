@@ -28,7 +28,8 @@ would (an addition, or a relaxation you would ask for) without applying it.
 A proposal with these headings, after \`## In short\`:
 
 - \`## Approach A: <short name>\`, with \`### How it works\`, \`### Fit against
-  the brief\` (how far it moves each success criterion), \`### Trade-offs\`,
+  the brief\` (how far it moves each success criterion, as a number or a
+  labelled range), \`### Trade-offs\`,
   \`### Risks\` and \`### Assumptions\`.
 - \`## Approach B: <short name>\`, the same subsections. Omit it when one
   approach is clearly right, and say why under Recommendation.
