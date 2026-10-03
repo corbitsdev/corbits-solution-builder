@@ -31,6 +31,7 @@ import { Input } from "@corbits/react-ui";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { ApproveControl } from "./approve-control.tsx";
+import { evaluatorStateOf, type StageEvaluator } from "./use-advisory.ts";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import { StageConversation } from "./thread.jsx";
@@ -339,6 +340,13 @@ export function BuildPanel({
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
   const archiveAttempt = archive ? attemptOfNode(archive) : null;
   const status = useMemo(() => (archiveAttempt === null ? null : supervisorStatus(messages, archiveAttempt)), [messages, archiveAttempt]);
+  // The supervisor is this stage's evaluator: its verdict on the recorded attempt, read from the status's own Verdict line.
+  const verdict = useMemo((): StageEvaluator => {
+    if (!status) return { status: "unavailable", reason: "No recorded attempt has been read by the build supervisor yet." };
+    if (!status.reply) return { status: "checking" };
+    const at = status.reply.body.search(/^Verdict:/im);
+    return at < 0 ? { status: "unavailable", reason: "The build supervisor's status gives no verdict." } : evaluatorStateOf({ ...status.reply, body: status.reply.body.slice(at) });
+  }, [status]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
@@ -385,7 +393,7 @@ export function BuildPanel({
             popover={popover}
             rows={
               canApprove || evidence.reason ? (
-                <ApproveControl waiting={evidence.reason} busy={approving} onApprove={onApprove} />
+                <ApproveControl evaluator={verdict} waiting={evidence.reason} busy={approving} onApprove={onApprove} />
               ) : null
             }
           />
