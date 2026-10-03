@@ -1277,21 +1277,34 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .ver {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
   font-family: var(--wb-font-mono);
   font-size: 0.6875rem;
   color: var(--wb-muted-foreground);
-  padding: 2px var(--space-2);
+  padding: 0 var(--space-2);
   border-radius: 999px;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
+  transition:
+    color 150ms var(--ease-out, ease),
+    background-color 150ms var(--ease-out, ease);
 }
 
 .ver:hover {
   color: var(--wb-foreground);
+  background: var(--wb-muted);
 }
 
-.ver.on {
+.ver:focus-visible,
+.ver-nav:focus-visible {
+  outline-offset: -2px;
+}
+
+.ver.on,
+.ver.on:hover {
   border-color: var(--wb-border-strong);
   background: var(--wb-background);
   color: var(--wb-foreground);
@@ -1299,8 +1312,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .ver-nav {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1318,7 +1332,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .ver-nav:disabled {
   opacity: 0.4;
+  background: transparent;
   cursor: default;
+}
+
+.ver-nav svg {
+  width: 14px;
+  height: 14px;
 }
 
 .version-note {
@@ -1326,6 +1346,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.6875rem;
   color: var(--wb-muted-foreground);
   margin-left: var(--space-2);
+  white-space: nowrap;
 }
 
 .document {
@@ -1373,8 +1394,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .docmeta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+  min-height: 32px;
   font-family: var(--wb-font-mono);
   font-size: 0.6875rem;
   color: var(--wb-muted-foreground);
@@ -1482,29 +1505,77 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* In the docmeta row the tools sit inline at the right end. */
+/* In the docmeta row the tools sit inline at the right end, and wrap under
+   one another rather than pushing the pane wider. */
 .docmeta .document-tools {
+  flex: 0 1 auto;
   flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
   font-family: var(--wb-font-ui);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+/* Every control in a document's header is one size: 32px tall, the same
+   inset, the same 14px glyph before its label. Buttons, selects and the
+   changes toggle came in at three heights and two type sizes. */
+.docmeta [data-slot="button"],
+.document-tools [data-slot="button"] {
+  height: 32px;
+  padding: 0 var(--space-3);
+  gap: 6px;
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
+  transition:
+    background-color 150ms var(--ease-out, ease),
+    color 150ms var(--ease-out, ease);
+}
+
+.docmeta [data-slot="button"] svg,
+.document-tools [data-slot="button"] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.docmeta select,
+.document-tools select {
+  height: 32px;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
+  transition: border-color 150ms var(--ease-out, ease);
+}
+
+.docmeta select:hover:not(:disabled),
+.document-tools select:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
 }
 
 .changes-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--wb-muted-foreground);
-  cursor: pointer;
-}
-
-.document-tools select {
   height: 32px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--wb-border-strong);
   border-radius: var(--radius-control);
-  background: var(--wb-background);
-  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-out, ease),
+    color 150ms var(--ease-out, ease);
+}
+
+.changes-toggle:hover {
+  background: var(--wb-muted);
+  color: var(--wb-foreground);
 }
 
 /* Tracked changes: added in green, removed in red and struck through. */
