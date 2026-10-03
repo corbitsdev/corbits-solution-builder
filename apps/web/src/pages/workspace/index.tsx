@@ -1319,6 +1319,9 @@ export function StageWorkspace({
         <BuildPanel
           detail={detail}
           tenantId={tenantId}
+          address={agentAddress}
+          messages={thread.messages}
+          reloadThread={loadThread}
           freeze={workflowView?.freeze ?? null}
           attempts={builds.attempts}
           refreshAttempts={builds.refresh}

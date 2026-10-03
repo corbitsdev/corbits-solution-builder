@@ -23,9 +23,7 @@ import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPrompt
 import type { ChatMessage } from "../../stage-mail.ts";
 import { useQuery } from "@tanstack/react-query";
 import { keys } from "../../queries/keys.ts";
-import { useMailboxNudge } from "../../queries/use-mailbox.ts";
 
-const NO_MESSAGES: ChatMessage[] = [];
 const NO_TURNS: (BuildTurn | null)[] = [];
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Input } from "@corbits/react-ui";
@@ -169,6 +167,9 @@ function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" |
 export function BuildPanel({
   detail,
   tenantId,
+  address,
+  messages,
+  reloadThread,
   freeze,
   attempts,
   refreshAttempts,
@@ -189,6 +190,12 @@ export function BuildPanel({
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
+  /** The build supervisor's live address and its thread across every address
+   *  it has run at (`useStageAgent`, `useStageThread`), read through the
+   *  workspace's query cache so a reopened project shows what was sent. */
+  address: string;
+  messages: readonly ChatMessage[];
+  reloadThread: () => Promise<void>;
   /** Stage 7's freeze: the target, the frozen references and the stack. */
   freeze: Freeze | null;
   /** The host's attempts for this project (`useBuildAttempts`). */
@@ -213,7 +220,6 @@ export function BuildPanel({
   documents?: readonly AttachedDocument[];
   documentLabels?: ReadonlyMap<string, string>;
 }) {
-  const [address, setAddress] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
@@ -221,21 +227,6 @@ export function BuildPanel({
   const [selected, setSelected] = useState<number | null>(null);
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .ensureStageAgent(detail.project.id, 8)
-      .then((deployment) => {
-        if (!cancelled) setAddress(deployment.address);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id]);
 
   // The worker's presence is the host's word, asked for on open and again
   // whenever the window regains focus: a person installs the tool in a
@@ -254,18 +245,6 @@ export function BuildPanel({
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [checkWorker]);
-
-  const backstop = useMailboxNudge(address ? tenantId : null);
-  const thread = useQuery({
-    queryKey: keys.thread.of(tenantId, address ? [address] : []),
-    queryFn: () => api.readStageThread(tenantId, [address!]),
-    enabled: address !== null,
-    refetchInterval: backstop,
-  });
-  const messages = thread.data ?? NO_MESSAGES;
-  useEffect(() => {
-    if (thread.error) setError(thread.error instanceof ApiFailure ? thread.error.detail.message : String(thread.error));
-  }, [thread.error]);
 
   // The project detail (and so `detail.nodes`) follows this stage's thread:
   // a supervisor reply is the only cue that the status document changed.
@@ -333,7 +312,7 @@ export function BuildPanel({
   // review opens on; the brief is what the status is written from.
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
-      if (!address || !attempt.outcome) return;
+      if (!attempt.outcome) return;
       // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
       const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
@@ -359,7 +338,7 @@ export function BuildPanel({
           verification: packaged.verification,
         }),
       });
-      await Promise.all([thread.refetch(), refreshAttempts()]);
+      await Promise.all([reloadThread(), refreshAttempts()]);
       onChanged();
     });
 
@@ -382,11 +361,6 @@ export function BuildPanel({
               {error}
             </Banner>
           ) : null}
-          {!address ? (
-            <div className="think" role="status">
-              <span className="who conv-who">Opening…</span>
-            </div>
-          ) : null}
           <StageConversation
             messages={messages}
             value={composer}
@@ -395,14 +369,12 @@ export function BuildPanel({
               const body = composer;
               setComposer("");
               return run("message", async () => {
-                if (!address) return;
                 const tags = await attachedSubjectTags(tenantId, attached);
                 await api.sendStageMail(tenantId, address, { body, ...taggedSubject(tags, body) });
-                await thread.refetch();
+                await reloadThread();
               });
             }}
             working={busy !== null}
-            disabled={!address}
             events={stageEvents}
             who={agentFor(8).title}
             empty={`Nothing has been sent to the ${agentFor(8).title.toLowerCase()} yet. It reads each attempt once the attempt is recorded.`}
@@ -550,7 +522,7 @@ export function BuildPanel({
                       onChange={(event) => setPort(event.target.value)}
                       style={{ maxWidth: "6rem" }}
                     />
-                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null || !address} onClick={() => void record(current)}>
+                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null} onClick={() => void record(current)}>
                       Record attempt {String(current.attempt)} and brief the supervisor
                     </Button>
                   </div>
