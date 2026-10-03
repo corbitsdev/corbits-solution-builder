@@ -42,6 +42,7 @@ export async function measureDesignWidth(html: string, at: number): Promise<numb
     const width = Math.max(doc.documentElement.scrollWidth, doc.body?.scrollWidth ?? 0);
     return width > 0 ? width : null;
   } catch {
+    // A design that will not load in time has no known width; it is shown unscaled.
     return null;
   } finally {
     frame.remove();

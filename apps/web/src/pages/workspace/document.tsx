@@ -14,6 +14,8 @@ import {
   type ChatMessage,
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -172,21 +174,12 @@ export function StageDocument({
   // document.
   const previous = versions.find((entry) => entry.version === node.version - 1) ?? null;
   const [showChanges, setShowChanges] = useState(true);
-  const [previousContent, setPreviousContent] = useState<string | null>(null);
-  useEffect(() => {
-    setPreviousContent(null);
-    if (!previous) return;
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, previous.id)
-      .then((result) => {
-        if (!cancelled) setPreviousContent(result.content);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [previous?.id, tenantId]);
+  const previousRead = useQuery({
+    queryKey: keys.artifact.of(tenantId, previous?.id ?? ""),
+    queryFn: previous ? async () => (await api.artifactContent(tenantId, previous.id)).content : skipToken,
+    staleTime: Infinity,
+  });
+  const previousContent = previousRead.data ?? null;
   // Closed by default. While the specialist is still asking, the document is
   // the thing being written rather than the thing being read, and a wall of
   // draft beside a question is what made this feel like homework.
@@ -650,6 +643,7 @@ export function StageDocument({
                     <span>Changes since v{previous.version}</span>
                   </label>
                 ) : null}
+                {previousRead.error ? <span className="inline-note">v{previous?.version} could not be read: {previousRead.error.message}</span> : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}
               </div>
             </div>

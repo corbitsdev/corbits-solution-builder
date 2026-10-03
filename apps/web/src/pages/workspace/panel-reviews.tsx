@@ -94,12 +94,14 @@ export function usePanelReviews({
       const node = reviewNodes.get(role.label);
       if (!node || recoveredFor.current.has(node.id)) continue;
       recoveredFor.current.add(node.id);
-      void api
-        .artifactContent(tenantId, node.id)
-        .then((result) =>
-          update(role.key, (prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev)),
-        )
-        .catch(() => undefined);
+      void (async () => {
+        try {
+          const result = await api.artifactContent(tenantId, node.id);
+          update(role.key, (prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
+        } catch (cause) {
+          update(role.key, (prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+        }
+      })();
     }
   }, [reviews, reviewNodes, tenantId, update]);
 
@@ -113,13 +115,16 @@ export function usePanelReviews({
       if (recordedFor.current.has(mark)) continue;
       recordedFor.current.add(mark);
       const reply = state.reply;
-      void api
-        .persistPanelReview(projectId, stage, role.key, role.label, reply)
-        .then(() => {
+      void (async () => {
+        try {
+          await api.persistPanelReview(projectId, stage, role.key, role.label, reply);
           update(role.key, (prev) => (prev.reply === reply ? { ...prev, recorded: true } : prev));
           onDocumentsChanged?.();
-        })
-        .catch(() => undefined);
+        } catch (cause) {
+          const error = `The review could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`;
+          update(role.key, (prev) => ({ ...prev, status: "error", error }));
+        }
+      })();
     }
   }, [reviews, projectId, stage, onDocumentsChanged, update]);
 

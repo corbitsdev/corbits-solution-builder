@@ -815,7 +815,7 @@ export function StageWorkspace({
           title={
             workflow.startError
               ? `The project workflow could not be started: ${workflow.startError}`
-              : "The project workflow could not be read."
+              : `The project workflow could not be read: ${workflow.viewError}`
           }
           action={{ label: "Try again", onClick: workflow.retryOpening }}
         />
@@ -943,6 +943,7 @@ export function StageWorkspace({
       ) : null}
 
       {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
+      {withdrawn.error ? <Banner tone="error" title="The stopped turns could not be read">{withdrawn.error}</Banner> : null}
       {modelHandoff.error ? (
         <Banner tone="error" title="The new specialist could not be told about the prior conversation">
           {modelHandoff.error}
@@ -1019,6 +1020,9 @@ export function StageWorkspace({
         <BuildPanel
           detail={detail}
           tenantId={tenantId}
+          address={agentAddress}
+          messages={thread.messages}
+          reloadThread={loadThread}
           freeze={workflowView?.freeze ?? null}
           attempts={builds.attempts}
           refreshAttempts={builds.refresh}
@@ -1371,6 +1375,7 @@ export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; t
     let cancelled = false;
     void Promise.all(
       live.map(async (node) => {
+        // An unreadable review says so on itself, as the design history does.
         const result = await api.artifactContent(tenantId, node.id).catch(() => null);
         return [node.id, result?.content ?? UNREADABLE] as const;
       }),

@@ -93,16 +93,12 @@ export async function composeApprovedChain(deps: {
   const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
   const items: Inputs = [];
   for (const node of chain) {
-    try {
-      const { content } = await api.artifactContent(deps.tenantId, node.id);
-      if (!content.trim()) continue;
-      items.push({
-        node: { id: node.id, title: node.title, kind: node.kind === MATERIAL_READING_KIND ? MATERIAL_KIND : node.kind, stage: node.stage },
-        content: chainContent(content),
-      });
-    } catch {
-      // Unreadable: not handed over, not described.
-    }
+    const { content } = await api.artifactContent(deps.tenantId, node.id);
+    if (!content.trim()) continue;
+    items.push({
+      node: { id: node.id, title: node.title, kind: node.kind === MATERIAL_READING_KIND ? MATERIAL_KIND : node.kind, stage: node.stage },
+      content: chainContent(content),
+    });
   }
   return renderApprovedChain(items, deps.stage);
 }

@@ -706,11 +706,10 @@ function specialistHubOrigin(): string {
  * places replacements; mail to the remembered address is then refused as
  * terminal. The remembered one stands while the live pick is still it; it
  * is dropped once another deployment is the pick, or once it has ended and
- * nothing has replaced it yet. A status read that fails keeps the memo, as
- * `ensureStageAgent` always has.
+ * nothing has replaced it yet.
  */
 async function memoStillLive(projectId: string, stage: Stage, roleKey: string | undefined, remembered: SpecialistDeployment): Promise<boolean> {
-  const fresh = await asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage, roleKey, await hostSidecar())).catch(() => null);
+  const fresh = await asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage, roleKey, await hostSidecar()));
   if (!fresh) return true;
   if (fresh.deploymentId !== remembered.deploymentId) return false;
   return !ENDED_DEPLOYMENT_STATUSES.has(fresh.status);
@@ -832,7 +831,7 @@ async function downloadArtifactBytes(tenantId: string, artifactId: string): Prom
   if (response.status === 404) {
     // A project's older upload can still sit in the workspace tenant (#29);
     // the same read against the parent answers it there.
-    const parentId = await parentTenantOf(createHubTransport(), tenantId).catch(() => null);
+    const parentId = await parentTenantOf(createHubTransport(), tenantId);
     if (parentId) return downloadArtifactBytes(parentId, artifactId);
   }
   if (!response.ok) {
@@ -1098,24 +1097,17 @@ export const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
  * re-approval, or `promote()` restoring an older version forward) -- each
  * write must supersede the lineage's current head, or the graph fold
  * (`foldArtifactGraph`) never links them and every write shows up as its
- * own unrelated version 1 (the "v1 v1 v1" defect). The lookup is
- * best-effort: a tenant-wide list that fails here must never block the
- * draft itself from being saved -- falling back to no `supersedes` is
- * exactly the earlier (already shipped) behavior, not a regression.
+ * own unrelated version 1 (the "v1 v1 v1" defect).
  */
 async function persistDraftOfKind(
   transport: ReturnType<typeof createHubTransport>,
   projectId: string,
   args: { stage: number; kind: string; content: string; sourceVersionIds: string[]; title: string; agentRole?: string; target?: string; variant?: string },
 ): Promise<{ artifactId: string; versionId: string; contentHash: string }> {
-  const previousHead = await artifactGraphFor(transport, projectId)
-    .then(
-      (graph) =>
-        graph.nodes
-          .filter((node) => node.stage === args.stage && node.kind === args.kind && node.variant === (args.variant ?? null) && node.supersededByNodeId === null)
-          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
-    )
-    .catch(() => undefined);
+  const graph = await artifactGraphFor(transport, projectId);
+  const previousHead = graph.nodes
+    .filter((node) => node.stage === args.stage && node.kind === args.kind && node.variant === (args.variant ?? null) && node.supersededByNodeId === null)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
   const artifact = await installerCreateArtifact(transport, projectId, {
     title: args.title,
     content: args.content,
@@ -1153,8 +1145,7 @@ async function persistDraftOfKind(
  * time off the workspace tenant; the default is American English.
  */
 async function localizedRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, role: AgentRole): Promise<AgentRole> {
-  const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
-  if (!settings) return role;
+  const settings = await readLanguageSettings(transport, workspaceTenantId);
   return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
 }
 
@@ -1317,9 +1308,7 @@ export const api = {
   /** Stops an in-flight provider sign-in on the host, releasing the loopback
    *  port its callback server holds so the next attempt can bind it. */
   cancelProviderSignIn: async (providerId: string): Promise<void> => {
-    await createHubTransport()
-      .fetch<unknown>("POST", `/api/oauth/${providerId}/cancel`)
-      .catch(() => undefined);
+    await createHubTransport().fetch<unknown>("POST", `/api/oauth/${providerId}/cancel`);
   },
   selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
     try {
@@ -1524,9 +1513,9 @@ export const api = {
         installerRequireProject(transport, projectId),
         loadProjectView(projectId, transport),
         listSpecialistDeployments(transport, projectId),
-        resolveProjectWorkflowRef(transport, projectId).catch(() => null),
+        resolveProjectWorkflowRef(transport, projectId),
       ]);
-      const view = ref ? await loadProjectWorkflowView(transport, ref).catch(() => null) : null;
+      const view = ref ? await loadProjectWorkflowView(transport, ref) : null;
       const decisions = view?.decisions ?? [];
       const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
       const stamps = detail.nodes.map((node) => node.createdAt);
@@ -1732,6 +1721,7 @@ export const api = {
       try {
         await installerReviseArtifact(transport, workspaceTenantId, uploaded.id, { metadata: { sb } });
       } catch (cause) {
+        // Best-effort cleanup of an orphan; the revise failure is what the person needs to see.
         await installerArchiveArtifact(transport, workspaceTenantId, uploaded.id).catch(() => {});
         throw cause;
       }
@@ -1854,6 +1844,7 @@ export const api = {
               metadata: { sb: { kind: DECK_DESIGN_DOCUMENT_KIND, variant: file.name, mediaType, sourceVersionIds: [], provenance, textRead, ...(theme ? { theme } : {}) } },
             });
           } catch (cause) {
+            // Best-effort cleanup of an orphan; the revise failure is what the person needs to see.
             await installerArchiveArtifact(transport, tenantId, uploaded.id).catch(() => {});
             throw cause;
           }
@@ -1880,7 +1871,7 @@ export const api = {
       const tenantId = projectId ?? workspaceTenantId;
       const readings = readingIdsFor(await listArtifacts(transport, tenantId), documentId);
       await installerArchiveArtifact(transport, tenantId, documentId);
-      await Promise.all(readings.map((id) => installerArchiveArtifact(transport, tenantId, id).catch(() => {})));
+      await Promise.all(readings.map((id) => installerArchiveArtifact(transport, tenantId, id)));
       return { removed: documentId };
     }),
   /** One project's deck settings — today, whether the workspace's design documents apply to it. */
@@ -2577,7 +2568,7 @@ export const api = {
    * or that is not a persisted artifact yet (a not-yet-approved reply).
    */
   designFeedback: async (tenantId: string, nodeId: string): Promise<DesignFeedbackEntry[]> => {
-    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId).catch(() => null);
+    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId);
     const sb = (artifact?.metadata as { sb?: { feedback?: unknown } } | null)?.sb;
     return Array.isArray(sb?.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
   },
@@ -2596,22 +2587,11 @@ export const api = {
     asWorkspaceOwner(async (transport) => {
       // A package written again supersedes the stakeholder's current head,
       // the way `persistStageDraft` chains a stage's draft -- without it both
-      // stayed live and the page showed the stakeholder twice (#122). Best
-      // effort, as there: a graph read that fails never blocks the write.
-      const previousHead = await artifactGraphFor(transport, projectId)
-        .then(
-          (graph) =>
-            graph.nodes
-              .filter(
-                (node) =>
-                  node.stage === 5 &&
-                  node.kind === STAGE_DRAFT_KIND[5] &&
-                  node.variant === audience &&
-                  node.supersededByNodeId === null,
-              )
-              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
-        )
-        .catch(() => undefined);
+      // stayed live and the page showed the stakeholder twice (#122).
+      const graph = await artifactGraphFor(transport, projectId);
+      const previousHead = graph.nodes
+        .filter((node) => node.stage === 5 && node.kind === STAGE_DRAFT_KIND[5] && node.variant === audience && node.supersededByNodeId === null)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
       const artifact = await installerCreateArtifact(transport, projectId, {
         title: `${audience}'s package`,
         content,
@@ -2715,7 +2695,7 @@ export const api = {
     args: { mailBody: string; comments: readonly { anchor?: DesignFeedbackEntry["anchor"]; text: string }[] },
   ) =>
     asWorkspaceOwner(async (transport) => {
-      const artifact = await installerGetArtifact(transport, tenantId, node.id).catch(() => null);
+      const artifact = await installerGetArtifact(transport, tenantId, node.id);
       const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
       const projectId = typeof sb.projectId === "string" ? sb.projectId : null;
       if (!projectId) {
@@ -2757,7 +2737,7 @@ export const api = {
     disposition: DesignFeedbackDisposition,
   ) =>
     asWorkspaceOwner(async (transport) => {
-      const artifact = await installerGetArtifact(transport, tenantId, node.id).catch(() => null);
+      const artifact = await installerGetArtifact(transport, tenantId, node.id);
       const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
       const existing = Array.isArray(sb.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
       const updated = withDisposition(existing, entryId, disposition, new Date().toISOString());

@@ -18,6 +18,7 @@ export type WorkflowViewState = {
   /** The workflow failed to start or load — drive the failure state, never a guessed stage. */
   readonly openingFailed: boolean;
   readonly startError: string | null;
+  readonly viewError: string | null;
   /** The workflow was moved onto new code, and the new rules refused an
    *  earlier decision (#51): what was refused, in the workflow's own words.
    *  Null when nothing was refused, or no replay happened. */
@@ -35,8 +36,9 @@ export type WorkflowViewState = {
   /** The quiet re-read: polls and nudges go through this, no busy flag. */
   readonly reload: () => Promise<ProjectWorkflowView | null>;
   /** Optimistically land a stage the workflow just confirmed (approve /
-   *  send-back) ahead of the re-read, so the view never flashes backwards. */
-  readonly markStage: (stage: number) => void;
+   *  send-back) ahead of the re-read, so the view never flashes backwards;
+   *  `done` when that approve finished the project. */
+  readonly markStage: (stage: number, done?: boolean) => void;
 };
 
 // Re-entering a project this session already has a workflow view for: a
@@ -51,13 +53,16 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
   const [replayNotice, setReplayNotice] = useState<{ title: string; detail: string } | null>(null);
-  const [viewFailed, setViewFailed] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
+  // A run that has not written its first state (stage 0) never replaces a
+  // view already held, nor does any read replace a finished one: delivery is
+  // terminal, and a read racing the run's end must not reopen the stage.
   const reload = useCallback(async () => {
     const next = await api.projectWorkflowView(projectId).catch(() => null);
-    if (next && next.stage >= 1) {
+    if (next && next.stage >= 1 && (next.done || !viewSnapshots.get(projectId)?.done)) {
       setView(next);
       viewSnapshots.set(projectId, next);
     }
@@ -76,13 +81,18 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
 
   const retryOpening = useCallback(() => {
     setStartError(null);
-    setViewFailed(false);
+    setViewError(null);
     setAttempt((value) => value + 1);
   }, []);
 
-  const markStage = useCallback((stage: number) => {
-    setView((current) => (current ? { ...current, stage } : current));
-  }, []);
+  const markStage = useCallback(
+    (stage: number, done?: boolean) => {
+      const held = viewSnapshots.get(projectId);
+      if (held) viewSnapshots.set(projectId, { ...held, stage, done: done ?? held.done });
+      setView((current) => (current ? { ...current, stage, done: done ?? current.done } : current));
+    },
+    [projectId],
+  );
 
   // Re-entering a project whose workflow is already live: paint it
   // immediately with the same non-deploying read `reload` uses
@@ -131,8 +141,8 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
           next = await api.projectWorkflowView(projectId);
         }
         if (next && next.stage < 1) throw new Error("the project workflow did not start");
-      } catch {
-        if (!cancelled) setViewFailed(true);
+      } catch (cause) {
+        if (!cancelled) setViewError(describeFailure(cause));
         return;
       }
       if (!cancelled) {
@@ -164,14 +174,15 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setView(viewSnapshots.get(projectId) ?? null);
     setStartError(null);
     setReplayNotice(null);
-    setViewFailed(false);
+    setViewError(null);
   }, [projectId]);
 
   return {
     view,
     resolved: view !== null,
-    openingFailed: startError !== null || viewFailed,
+    openingFailed: startError !== null || viewError !== null,
     startError,
+    viewError,
     replayNotice,
     retryOpening,
     refreshingAfterAction,
