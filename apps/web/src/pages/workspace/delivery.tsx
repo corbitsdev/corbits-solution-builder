@@ -328,7 +328,7 @@ function DeliveryDecision({
           <Markdown source={howToRun} />
         </section>
       ) : null}
-      {summary ? <p>{summary}</p> : null}
+      {summary ? <Markdown source={summary} /> : null}
       {artifacts.length > 0 ? (
         <details className="delivery-files">
           <summary>
