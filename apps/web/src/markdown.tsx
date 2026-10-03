@@ -77,7 +77,15 @@ type Block =
   | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "quote"; text: string }
   | { kind: "code"; text: string }
+  | { kind: "table"; head: string[]; rows: string[][] }
   | { kind: "rule" };
+
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
+function cells(line: string): string[] {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
 
 function parse(source: string): Block[] {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
@@ -126,6 +134,20 @@ function parse(source: string): Block[] {
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       flush();
       blocks.push({ kind: "rule" });
+      continue;
+    }
+
+    if (TABLE_ROW.test(line) && TABLE_DELIMITER.test(lines[index + 1] ?? "")) {
+      flush();
+      const head = cells(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && TABLE_ROW.test(lines[index]!)) {
+        rows.push(cells(lines[index]!));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push({ kind: "table", head, rows });
       continue;
     }
 
@@ -207,6 +229,29 @@ export function Markdown({ source }: { source: string }): JSX.Element {
               <pre key={key}>
                 <code>{block.text}</code>
               </pre>
+            );
+          case "table":
+            return (
+              <div key={key} className="prose-table">
+                <table>
+                  <thead>
+                    <tr>
+                      {block.head.map((cell, at) => (
+                        <th key={`${key}-h${at}`}>{inline(cell, `${key}-h${at}`)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, r) => (
+                      <tr key={`${key}-r${r}`}>
+                        {block.head.map((_, c) => (
+                          <td key={`${key}-r${r}-${c}`}>{inline(row[c] ?? "", `${key}-r${r}-${c}`)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case "rule":
             return <hr key={key} />;

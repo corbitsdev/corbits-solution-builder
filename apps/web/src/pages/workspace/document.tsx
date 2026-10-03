@@ -23,7 +23,8 @@ import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { ComposedMail, MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
@@ -59,6 +60,7 @@ export function StageDocument({
   onSelectVersion,
   onRevise,
   onAddMaterial,
+  attachNote = null,
   onSubmit,
   soloApproval,
   canSubmit,
@@ -75,6 +77,8 @@ export function StageDocument({
   onSendHold,
   composerPopover = null,
   events = EMPTY_EVENTS,
+  documentLead = null,
+  composerLead = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -99,6 +103,7 @@ export function StageDocument({
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
+  attachNote?: string | null;
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
@@ -134,6 +139,13 @@ export function StageDocument({
   /** The stage's event record — decisions, versions, aborted turns — folded
    *  into the transcript as quiet lines. */
   events?: readonly StageEvent[];
+  /** A read of the document that heads the document pane, above the text:
+   *  Cost approval's estimate summary (#619). Never part of the document,
+   *  so a passage cannot be quoted from it. */
+  documentLead?: ReactNode;
+  /** A question the stage itself asks the person, in the chat column above
+   *  the box: Cost approval's "How will this be used?" (#619). */
+  composerLead?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
@@ -457,7 +469,7 @@ export function StageDocument({
             ) : (
               <>
                 {who}
-                <MessageBody text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <PersonTurn text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
               </>
             );
           }}
@@ -486,6 +498,8 @@ export function StageDocument({
         </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
+          {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {composerLead}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
           {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
@@ -613,6 +627,7 @@ export function StageDocument({
       }
     >
         <div className="stage-inner">
+          {documentLead}
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
@@ -752,3 +767,14 @@ const EMPTY_EVENTS: readonly StageEvent[] = [];
  *  per-passage note the selection popover collects. The note folds into the
  *  quote's own line on send — `Quote` on the wire stays what it is. */
 type AttachedQuote = { quote: string; note?: string };
+
+/**
+ * A person's turn in the transcript. Material attached after the stage
+ * opened travels as a mail in the person's name (#607): the files' names
+ * show, and what they say opens on demand. Anything else shows as
+ * `MessageBody` does: the person's words, what the app added folded.
+ */
+function PersonTurn({ text }: { text: string }) {
+  const material = materialMailFold(text);
+  return material ? <ComposedMail fold={material} /> : <MessageBody text={text} />;
+}
