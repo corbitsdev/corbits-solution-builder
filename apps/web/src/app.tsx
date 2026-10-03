@@ -207,11 +207,12 @@ class ProjectRenderBoundary extends Component<{ children: ReactNode; onBackToPro
 }
 
 /**
- * The nine stages as blocks: done ones in ink and clickable, the current
- * one widened into a pill that carries its name, the rest quiet. The segment being looked at, when it is a done stage
+ * The nine stages as a whisper track: done segments in ink and clickable,
+ * the current one wider in the primary colour with the pointer beneath, the
+ * rest hairline. The segment being looked at, when it is a done stage
  * opened from here, is ringed -- the track still says how far the project
  * has come; the ring says where the eyes are. A stage the project's
- * surface made not applicable is a muted, hollow block that opens nothing.
+ * surface made not applicable is a hollow segment that opens nothing.
  */
 function StageStepper({
   steps,
@@ -239,7 +240,7 @@ function StageStepper({
             </button>
           ) : (
             <span title={step.label}>
-              <span className={step.status === "current" ? undefined : "sr-only"}>{step.label}</span>
+              <span className="sr-only">{step.label}</span>
             </span>
           )}
         </li>
@@ -255,15 +256,10 @@ const SURFACE_NOUN: Readonly<Record<Surface, string>> = {
   desktop: "an installed app",
 };
 
-function stageSteps(stage: number, done: boolean, surface: Surface | null, skipped: readonly number[]): WorkflowStep[] {
+function stageSteps(stage: number, surface: Surface | null, skipped: readonly number[]): WorkflowStep[] {
   return STAGES.map((number) => ({
     number,
-    label:
-      done && number === stage
-        ? "Delivered"
-        : skipped.includes(number) && surface
-          ? `${stageName(number)} — not needed for ${SURFACE_NOUN[surface]}`
-          : stageName(number),
+    label: skipped.includes(number) && surface ? `${stageName(number)} — not needed for ${SURFACE_NOUN[surface]}` : stageName(number),
     status: number < stage ? "completed" : number === stage ? "current" : "pending",
   }));
 }
@@ -391,14 +387,16 @@ export function AppBar({
         {inProject ? (
           <>
             <StageStepper
-              steps={stageSteps(detail.stage, detail.done, detail.surface, detail.skipped)}
+              steps={stageSteps(detail.stage, detail.surface, detail.skipped)}
               skipped={detail.skipped}
               viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
               {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
             />
-            {viewedStage !== null && viewedStage !== detail.stage ? (
-              <span className="step-name">Viewing {stageName(viewedStage)}</span>
-            ) : null}
+            <span className="step-name">
+              {viewedStage !== null && viewedStage !== detail.stage
+                ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
+                : stageName(detail.stage)}
+            </span>
           </>
         ) : null}
       </div>

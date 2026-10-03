@@ -41,17 +41,15 @@
 .topbar-project .stepper {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .topbar-project .stepper li > span,
 .topbar-project .stepper li > button {
-  display: block;
-  height: 8px;
-  width: 16px;
-  border: 0;
-  border-radius: 3px;
-  background: var(--wb-border-strong);
+  height: 4px;
+  width: 20px;
+  border-radius: 2px;
+  background: var(--wb-border);
 }
 
 .topbar-project .stepper li > button {
@@ -63,21 +61,10 @@
   background: var(--wb-muted-foreground);
 }
 
-/* The current stage opens into a pill that names it, so where the project
-   stands reads in the track itself. */
 .topbar-project .stepper li[aria-current="step"] > span {
-  display: inline-flex;
-  align-items: center;
-  width: auto;
-  height: 22px;
-  padding: 0 10px;
-  border-radius: 999px;
+  width: 28px;
   background: var(--wb-primary);
-  color: var(--primary-foreground);
-  font-family: var(--wb-font-mono);
-  font-size: 11px;
-  white-space: nowrap;
-  transition: padding 0.2s ease-out;
+  opacity: 1;
 }
 
 /* Not applicable to what is being built: hollow, so it reads as passed
@@ -87,11 +74,37 @@
   box-shadow: inset 0 0 0 1px var(--wb-border);
 }
 
-/* A done stage opened from the track: ringed, while the pill stays on the
-   current stage so progress still reads. */
-.topbar-project .stepper li[data-viewed] > button {
+.topbar-project .stepper li:not([aria-current="step"]) > span {
+  opacity: 0.5;
+}
+
+/* The segment being looked at, when a done stage was opened from the
+   track: ringed in the primary colour. The pointer stays on the current
+   stage and the ink on the done ones, so progress still reads. */
+.topbar-project .stepper li[data-viewed] > button,
+.topbar-project .stepper li[data-viewed] > span {
   outline: 2px solid var(--wb-primary);
   outline-offset: 2px;
+}
+
+/* Where you are: a small pointer under the current segment, aimed at it,
+   so the position reads at a glance and the stage name beneath the track
+   visibly belongs to that segment rather than to the whole row. */
+.topbar-project .stepper li[aria-current="step"] {
+  position: relative;
+}
+
+.topbar-project .stepper li[aria-current="step"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 4px solid var(--wb-primary);
 }
 
 /* ---- two panes: proportional conversation + draft ---- */
@@ -717,11 +730,11 @@
 
   .topbar-project .stepper li > span,
   .topbar-project .stepper li > button {
-    width: 8px;
+    width: 12px;
   }
 
   .topbar-project .stepper li[aria-current="step"] > span {
-    width: auto;
+    width: 18px;
   }
 
   .topbar-project .step-name {
