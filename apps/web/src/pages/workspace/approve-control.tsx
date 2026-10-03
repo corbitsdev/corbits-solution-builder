@@ -16,6 +16,7 @@ export function ApproveControl({
   waiting = null,
   busy = false,
   doing,
+  action = null,
   onApprove,
 }: {
   /** Null on a stage no evaluator reads. */
@@ -25,6 +26,8 @@ export function ApproveControl({
   waiting?: ReactNode;
   busy?: boolean;
   doing?: string;
+  /** What acting on `waiting` takes, offered here in place of Continue. */
+  action?: ReactNode;
   onApprove: () => void;
 }) {
   const ready = !evaluator || (evaluator.status === "verdict" && evaluator.verdict.ready);
@@ -34,13 +37,15 @@ export function ApproveControl({
         {evaluator ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
         {waiting ? <span className="composer-note">{waiting}</span> : null}
       </span>
-      <span data-tour="submit" data-ready={ready ? "true" : undefined} className={ready ? "is-ready approve" : "approve"}>
-        {ready ? <span>Happy with this?</span> : null}
-        <Button variant="ghost" loading={busy} disabled={Boolean(waiting)} {...(doing ? { doing } : {})} onClick={onApprove}>
-          <Check aria-hidden="true" />
-          {ready ? "Continue" : "Continue anyway"}
-        </Button>
-      </span>
+      {action ?? (
+        <span data-tour="submit" data-ready={ready ? "true" : undefined} className={ready ? "is-ready approve" : "approve"}>
+          {ready ? <span>Happy with this?</span> : null}
+          <Button variant="ghost" loading={busy} disabled={Boolean(waiting)} {...(doing ? { doing } : {})} onClick={onApprove}>
+            <Check aria-hidden="true" />
+            {ready ? "Continue" : "Continue anyway"}
+          </Button>
+        </span>
+      )}
     </div>
   );
 }

@@ -868,12 +868,28 @@ export function AudiencePackages({
     if (!selected) return;
     if (await recordDecision(selected, decision, inlineNote, setInlineBusy)) setInlineNote("");
   };
+  // While the person's own Proceed is what approval waits on, the approve row offers it.
+  const ownPackage = packages.find((node) => audiences.some((audience) => isOwner(audience) && audience.name === node.variant));
+  const ownProceedAwaited = !quorumMet && awaited.some(isOwner);
+  const [ownBusy, setOwnBusy] = useState<AudienceVote["decision"] | null>(null);
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
   return panes(
     canApprove || waiting ? (
-      <ApproveControl waiting={waiting} busy={approving} doing="Approving the packages and opening the next stage" onApprove={onApprove} />
+      <ApproveControl
+        waiting={waiting}
+        busy={approving}
+        doing="Approving the packages and opening the next stage"
+        action={
+          ownPackage && ownProceedAwaited ? (
+            <Button variant="secondary" loading={ownBusy !== null} onClick={() => void recordDecision(ownPackage, "proceed", "", setOwnBusy)}>
+              {DECISION_LABEL.proceed}
+            </Button>
+          ) : null
+        }
+        onApprove={onApprove}
+      />
     ) : null,
     <div data-tour="audience-packages">
       {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
@@ -959,7 +975,7 @@ export function AudiencePackages({
               <div className="doc">
                 <div className="docmeta">
                   <span>
-                    v{selected.version} · {selected.variant ?? selected.title}
+                    v{selected.version} · For {selectedAudience && isOwner(selectedAudience) ? "you" : (selected.variant ?? selected.title)}
                     {selected.supersededByNodeId ? " · superseded" : ""}
                   </span>
                   <div className="document-tools">
@@ -976,7 +992,6 @@ export function AudiencePackages({
               {selected.variant ? (
                 <div className="aud-decision" data-tour="audience-your-decision">
                   <p className="inline-note">
-                    {selected.variant}:{" "}
                     {selectedVote && selectedVoteStale
                       ? `${DECISION_LABEL[selectedVote.decision]} on an earlier package · needs a new decision`
                       : selectedVote
