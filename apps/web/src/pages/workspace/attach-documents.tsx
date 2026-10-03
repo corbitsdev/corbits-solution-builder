@@ -44,12 +44,10 @@ export async function attachedSubjectTags(tenantId: string, attached: readonly A
   return attached.map(attachedTag);
 }
 
-/** A sent message's attached documents, named as the strip names them. */
 export function attachedIn(subject: string | undefined, labels: ReadonlyMap<string, string>): AttachedDocument[] {
   return attachedTags(subject).map((tag) => ({ ...tag, label: labels.get(tag.artifactId) ?? tag.artifactId }));
 }
 
-/** The chips under a person's bubble for what they attached. */
 export function AttachedList({ documents }: { documents: readonly AttachedDocument[] }) {
   if (documents.length === 0) return null;
   return (
@@ -63,7 +61,6 @@ export function AttachedList({ documents }: { documents: readonly AttachedDocume
   );
 }
 
-/** The composer's (+): the project's documents to attach, and a file to upload as material. */
 export function AttachMenu({
   documents,
   attached,

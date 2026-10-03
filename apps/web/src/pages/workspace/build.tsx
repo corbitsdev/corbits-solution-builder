@@ -169,9 +169,7 @@ export function BuildPanel({
   popover?: ReactNode;
   /** "Upload a file": files join the project as material. */
   onAttach?: (files: FileList) => void;
-  /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
-  /** The strip's name for each artifact, for the chips on a sent message. */
   documentLabels?: ReadonlyMap<string, string>;
 }) {
   const [address, setAddress] = useState<string | null>(null);

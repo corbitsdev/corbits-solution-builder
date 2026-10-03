@@ -102,9 +102,7 @@ export function StageDocument({
   onRevise: (message: string, quotes: Quote[], revise?: boolean, attached?: readonly AttachedDocument[]) => void | Promise<boolean>;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
-  /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
-  /** The documents each of the person's turns attached. */
   attachedByTurn?: ReadonlyMap<string, readonly AttachedDocument[]>;
   onSubmit: () => void;
   soloApproval: boolean;

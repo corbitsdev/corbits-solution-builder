@@ -139,19 +139,18 @@ content only when most of the document changes. Never create a second
 artifact for the same document. If a write is refused, read the artifact once
 with artifact_read and try again.
 
-Each message opens with its "Subject:" line. A subject that carries
-"[artifact:<id>:<version>]" names your document's artifact and its current
-version. Revise that artifact, with expectedVersion set to that version; if
+A message whose subject carries "[artifact:<id>:<version>]" names your
+document's artifact and its current version. Revise that artifact, with expectedVersion set to that version; if
 you have not seen that version, read it once with artifact_read first.
 `.trim();
 
 /** Appended for every specialist that carries the artifact tools, drafting
  *  or not: a document the person attaches travels by reference. */
 export const ATTACHED_DOCUMENTS_RULE = `
-Each message opens with its "Subject:" line. Documents the person attached to
-a message are named there, one "[attached:<id>:<version>]" each. Read each
-with artifact_read, passing that artifactId and version, before you answer
-the message. An attached document is for reference: never write to it.
+Documents the person attached to a message are named in its subject, one
+"[attached:<id>:<version>]" each. Read each with artifact_read, passing that
+artifactId and version, before you answer the message. An attached document
+is for reference: never write to it.
 `.trim();
 
 /** The artifact kind a role drafts is named by the app package's `ArtifactKind`;

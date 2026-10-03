@@ -163,9 +163,7 @@ export function StageConversation({
   who?: string;
   /** "Upload a file": files join the project as material for the next draft. */
   onAttach?: (files: FileList) => void;
-  /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
-  /** The strip's name for each artifact, for the chips on a sent message. */
   documentLabels?: ReadonlyMap<string, string>;
   /** Which version each draft reply became (#158): such a reply is one line
    *  naming its version, never the draft itself. */
