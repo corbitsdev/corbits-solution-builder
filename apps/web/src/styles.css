@@ -2049,9 +2049,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .turn-question {
   margin: var(--space-3) 0 0;
   padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--wb-primary);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-radius: var(--radius-control);
   font-weight: 500;
   color: var(--wb-foreground);
 }
