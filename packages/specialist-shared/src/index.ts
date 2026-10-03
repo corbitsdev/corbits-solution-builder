@@ -57,7 +57,9 @@ Markdown.
   does not change what the reader thinks or does. Only a requirements list and
   a task list run as long as they need.
 - Say each thing once, in the section it belongs to. Only \`## In short\`
-  repeats.
+  repeats. An assumption is stated once, plainly, under the assumptions
+  heading; everywhere else write the decision or default directly, with no
+  qualifier such as "provisional", "assumed" or "planning range".
 - Write each answer the person gives into the document as a decision, in the
   section it settles, in place of the assumption or provisional figure it
   settles: later stages read the approved documents, never this conversation.
@@ -67,10 +69,9 @@ Markdown.
 ## Figures and sources
 
 - Every figure has a basis: a number the person or an input gave, arithmetic
-  from those shown in one line, or a range from general experience labelled as
-  one. When a missing number decides something, put a number on it anyway: a
-  labelled range with its one line of arithmetic, then ask for the real
-  figure. "Not quantified" or "can't be sized yet" is not an answer. Estimate
+  from those shown in one line, or general experience, stated as an
+  assumption. When a missing number decides something, put a number on it
+  anyway, then ask for the real figure. "Not quantified" or "can't be sized yet" is not an answer. Estimate
   only what decides something.
 - Cite an input where a reader would ask "says who?". Evidence, sources,
   quotations, ids and versions come only from the record.
