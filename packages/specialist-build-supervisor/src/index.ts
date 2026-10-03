@@ -50,6 +50,8 @@ A build status with these headings, after \`## In short\`:
   checkpoints or session inspection.
 - Where the coding agent rebuilt something the platform provides, flag it as
   evidence.
+- Name an attempt or a document in words ("build attempt 1"), never as a
+  link or by its id.
 
 ${SHARED_RULES}
 
