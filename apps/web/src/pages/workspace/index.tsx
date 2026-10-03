@@ -20,6 +20,8 @@
  */
 import { isStageOpening } from "./composed-mail.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
@@ -27,8 +29,6 @@ import {
   type ProjectDetail,
   type StageTurn,
 } from "../../client.js";
-import { useQuery } from "@tanstack/react-query";
-import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
@@ -46,11 +46,11 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { artifactTag } from "./composed-mail.ts";
 import { newestSavedPlanId, repairedStackDraft } from "./stack-repair.ts";
 import { parseStackRecord } from "@solutions-builder/app/stack";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -80,7 +80,6 @@ import { useMountEffect } from "../../use-mount-effect.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
@@ -203,7 +202,13 @@ export function StageWorkspace({
   const agentAddress = agent.address;
   // Stable across renders — an inline arrow would re-subscribe the mailbox
   // stream every render since it is a dep of the thread effect.
-  const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
+  // A nudge is also a reply landing, by which time the specialist has
+  // written the stage's artifact.
+  const queryClient = useQueryClient();
+  const nudgeWorkflow = useCallback(() => {
+    void workflow.reload();
+    void queryClient.invalidateQueries({ queryKey: keys.stageWork.all });
+  }, [workflow.reload, queryClient]);
   const thread = useStageThread(tenantId, agentAddress, agent.addresses, nudgeWorkflow, setError);
   const loadThread = thread.reload;
 
@@ -269,49 +274,33 @@ export function StageWorkspace({
   // never had one.
   // A drafting stage with artifact tools keeps its document in an artifact
   // the specialist writes; the host reads the newest one of the stage's kind
-  // rather than trusting what the reply says it wrote. It is read again as
-  // the thread moves, and polled while a reply is pending so the pane follows
-  // the specialist's writes. A stage with no artifact yet, such as a project
+  // rather than trusting what the reply says it wrote. It is read again when
+  // a reply lands, and polled while one is pending so the pane follows the
+  // specialist's writes. A stage with no artifact yet, such as a project
   // drafted before the tools, keeps reading its draft from the mail.
   const usesArtifact = stageUsesArtifactTools(stage as Stage);
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
-  const [work, setWork] = useState<WorkArtifact | null>(null);
   const savedPlanId = useMemo(() => (stage === 6 ? newestSavedPlanId(detail.nodes) : null), [stage, detail.nodes]);
-  const [workTick, setWorkTick] = useState(0);
-  useEffect(() => {
-    if (!usesArtifact || !awaitingReply) return;
-    const timer = setInterval(() => setWorkTick((tick) => tick + 1), 5000);
-    return () => clearInterval(timer);
-  }, [usesArtifact, awaitingReply]);
-  useEffect(() => {
-    if (!usesArtifact || !workKind) {
-      setWork(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const artifact = await api.stageWorkArtifact(tenantId, workKind);
-        if (!artifact) {
-          if (!cancelled) setWork({ state: "none" });
-          return;
-        }
-        // Read once the reply has landed, not on every poll while it is pending.
-        const savedPlan =
-          savedPlanId && !awaitingReply && !parseStackRecord(artifact.content)
-            ? (await api.artifactContent(tenantId, savedPlanId)).content
-            : null;
-        if (!cancelled) setWork({ state: "ready", artifact, savedPlan });
-      } catch (cause) {
-        if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [usesArtifact, workKind, tenantId, savedPlanId, awaitingReply, foldedMessages, workTick]);
+  const workQuery = useQuery({
+    queryKey: keys.stageWork.of(tenantId, workKind ?? ""),
+    queryFn: usesArtifact && workKind !== null ? () => api.stageWorkArtifact(tenantId, workKind) : skipToken,
+    refetchInterval: awaitingReply ? 5_000 : false,
+  });
+  // Read once the reply has landed, not on every poll while it is pending.
+  // An artifact id names a fixed version, so its content is never stale.
+  const savedPlanQuery = useQuery({
+    queryKey: keys.artifact.of(tenantId, savedPlanId ?? ""),
+    queryFn: async () => (await api.artifactContent(tenantId, savedPlanId!)).content,
+    enabled: savedPlanId !== null && !awaitingReply && !!workQuery.data && !parseStackRecord(workQuery.data.content),
+    staleTime: Infinity,
+  });
+  const work = useMemo((): WorkArtifact | null => {
+    const error = workQuery.error ?? savedPlanQuery.error;
+    if (error) return { state: "unreadable", message: error.message };
+    if (workQuery.data === undefined) return null;
+    return workQuery.data ? { state: "ready", artifact: workQuery.data, savedPlan: savedPlanQuery.data ?? null } : { state: "none" };
+  }, [workQuery.error, workQuery.data, savedPlanQuery.error, savedPlanQuery.data]);
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
@@ -319,10 +308,6 @@ export function StageWorkspace({
     // while the next reply is pending is newer than any saved version.
     return { ...latestSpecialistMessage, body: work.artifact.content, at: work.artifact.updatedAt };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
-  const workUnreadable = work?.state === "unreadable" ? work.message : null;
-  useEffect(() => {
-    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
-  }, [workUnreadable]);
   const draftMessage = useMemo(
     () =>
       repairedStackDraft(
@@ -631,12 +616,6 @@ export function StageWorkspace({
     }
   };
 
-  // The stage's companion documents (#345): named in a message, they go along with it.
-  const [stageDocuments, setStageDocuments] = useState<MentionedDocument[]>([]);
-  useEffect(() => {
-    setStageDocuments([]);
-  }, [stage, detail.project.id]);
-
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -652,20 +631,14 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // A stage whose document is an artifact gets the person's words as
-      // they wrote them: the specialist's instructions say every message is
-      // about that document. A draft that lives only in the mail, from before
-      // the tools, still travels with the instruction to revise it, as alpha
-      // main's rounds did (#431); stages 8 and 9 revise nothing.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
-      const turn = withAttachedDocuments(body, stageDocuments);
-      const mail =
-        usesArtifact && work !== null && work.state !== "none"
-          ? turn
-          : revising
-            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
-            : turn;
-      await api.sendStageMail(tenantId, agentAddress, { body: mail });
+      // The body is the person's words alone. The artifact holding the
+      // stage's document travels in the subject, so a specialist that never
+      // wrote it, such as one taking over after a model hand-off, revises it
+      // instead of starting a second.
+      await api.sendStageMail(tenantId, agentAddress, {
+        body,
+        ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
+      });
       await loadThread();
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
@@ -892,6 +865,11 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
+      {work?.state === "unreadable" ? (
+        <Banner tone="error" title="The stage document could not be read">
+          {work.message} Approval waits until it can be read.
+        </Banner>
+      ) : null}
       {error ? (
         <Banner
           tone="error"
@@ -1142,7 +1120,6 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
         />
       ) : null}
 
@@ -1161,7 +1138,6 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes, 6)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
           onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}

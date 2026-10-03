@@ -6,7 +6,6 @@ import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
 import { appEventLine, composedMailFold, isStageOpening } from "./composed-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
-import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -91,25 +90,8 @@ export function MessageBody({ text }: { text: string }) {
       </>
     );
   }
-  // A model hand-off quotes the earlier turns, revision markers included,
-  // so it is named for what it is before anything reads it for the person's
-  // words.
+  // A model hand-off quotes the earlier turns, so it is named for what it is.
   if (isHandoffBody(text)) return <Markdown source={HANDOFF_BUBBLE_TEXT} />;
-  // A message the app composed around the person's words (the version it
-  // revises, an attached document, a choice reminder) shows only those
-  // words; what the app added stays behind a fold.
-  const composed = personWordsIn(text);
-  if (composed) {
-    return (
-      <>
-        <Markdown source={composed.words} />
-        <details className="bubble-fold">
-          <summary>{composed.added.startsWith(REVISION_LEAD) ? "The version this revises" : "What the app sent with this"}</summary>
-          <Markdown source={composed.added} />
-        </details>
-      </>
-    );
-  }
   const handoff = splitHandoff(text);
   if (handoff) {
     return (

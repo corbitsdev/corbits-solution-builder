@@ -75,7 +75,6 @@ export function Stage6Panel({
   requirementsNode = null,
   reviewNodes = null,
   onDocumentsChanged,
-  onDocuments,
   onSendToArchitect,
   requirementsAsk = null,
   onRequirementsDrafted,
@@ -106,8 +105,6 @@ export function Stage6Panel({
   reviewNodes?: ReadonlyMap<string, ArtifactNode> | null;
   /** A document was recorded (#334): the project's artifact graph should be re-read. */
   onDocumentsChanged?: () => void;
-  /** The stage's documents as they stand (#345): what a message to the architect may attach. */
-  onDocuments?: (documents: StageDocument[]) => void;
   /** "Send to the architect": the document as a message in the architect's thread (#345). */
   onSendToArchitect?: (body: string) => void;
   /** A chat message the workspace routed to the requirements author (#407). */
@@ -286,12 +283,6 @@ export function Stage6Panel({
       return state?.status === "done" && state.reply ? [reviewDocument(role.label, state.reply)] : [];
     }),
   ];
-  const documentsKey = documents.map((doc) => `${doc.key}:${String(doc.content.length)}`).join("|");
-  useEffect(() => {
-    onDocuments?.(documents);
-    // Re-reported when a document arrives or changes, not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentsKey]);
 
   // Addressing a companion specialist directly (#345): the ask, with any
   // named documents attached, goes to that role's own thread; the reply

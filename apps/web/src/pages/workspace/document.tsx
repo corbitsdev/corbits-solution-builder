@@ -509,9 +509,7 @@ export function StageDocument({
                     key={section.heading}
                     variant="primary"
                     disabled={busy !== null}
-                    onClick={() =>
-                      onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)
-                    }
+                    onClick={() => onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)}
                   >
                     {name}
                   </Button>
