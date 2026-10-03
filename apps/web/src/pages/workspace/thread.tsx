@@ -9,7 +9,7 @@ import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, turnLead } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
@@ -39,7 +39,7 @@ function toUiMessages(messages: readonly ChatMessage[], draftRefs: ReadonlyMap<s
   // stakeholder at stage 5. Say it once, at the latest, where the document it
   // names is current.
   const isPointer = (message: ChatMessage) =>
-    message.author !== "me" && !draftRefs.has(message.id) && conversationLead(message.body) === DRAFT_POINTER;
+    message.author !== "me" && !draftRefs.has(message.id) && turnLead(message.body) === null;
   const lastPointer = messages.findLastIndex(isPointer);
   return messages.flatMap((message, index) => {
     if (index !== lastPointer && isPointer(message)) return [];
