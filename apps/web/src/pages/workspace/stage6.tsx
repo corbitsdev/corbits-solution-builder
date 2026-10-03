@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
+import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
 import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
@@ -76,6 +77,7 @@ export function Stage6Panel({
   onDocumentsChanged,
   onDocuments,
   onSendToArchitect,
+  requirementsAsk = null,
   onRequirementsDrafted,
   strip,
   conversation,
@@ -108,6 +110,8 @@ export function Stage6Panel({
   onDocuments?: (documents: StageDocument[]) => void;
   /** "Send to the architect": the document as a message in the architect's thread (#345). */
   onSendToArchitect?: (body: string) => void;
+  /** A chat message the workspace routed to the requirements author (#407). */
+  requirementsAsk?: { body: string; at: number } | null;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
    *  accepted (its reply lands) — `index.tsx` records it as the project's
    *  document unless `recorded` says it already is (#328), and mints the
@@ -335,13 +339,44 @@ export function Stage6Panel({
   // becomes the next version of its document through the same paths a
   // first request takes.
   const [ask, setAsk] = useState("");
-  const askRole = (roleKey: string) => {
-    const body = withAttachedDocuments(ask.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
-    if (!body) return;
+  const askRole = (roleKey: string, text = ask) => {
+    const asked = withAttachedDocuments(text.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
+    if (!asked) return;
+    // A companion role sees only what it is sent, and after a redeploy it
+    // remembers nothing (#409): the author always gets the approved
+    // inputs and the current document as the prior revision; a reviewer
+    // gets the ids and the plan, as a first request does.
+    const body =
+      roleKey === STAGE6_REQUIREMENTS_ROLE_KEY
+        ? [
+            asked,
+            requirements.reply ? `---\n\n## Attached: Product requirements (prior revision, keep its ids)\n\n${requirements.reply.trim()}` : null,
+            requirementsInput ? `---\n\n## Attached: Approved inputs this document is drawn from\n\n${requirementsInput.trim()}` : null,
+          ]
+            .filter((part): part is string => part !== null)
+            .join("\n\n")
+        : [asked, requirementsBlock, reviewInput ? `---\n\n## Attached: The build plan under review\n\n${reviewInput.trim()}` : null].filter((part): part is string => part !== null).join("\n\n");
     setAsk("");
     if (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY) runRole(roleKey, body, setRequirements);
     else runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
   };
+
+  // A requirements request typed to the architect lands here (#407).
+  const routedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!requirementsAsk || routedFor.current === requirementsAsk.at) return;
+    routedFor.current = requirementsAsk.at;
+    setPage("requirements");
+    askRole(STAGE6_REQUIREMENTS_ROLE_KEY, requirementsAsk.body);
+    // `askRole` reads the documents of the moment; the request is what fires this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requirementsAsk]);
+
+  // The companion roles say what they are doing while they work (#407).
+  const requirementsBusy = requirements.status === "starting" || requirements.status === "waiting";
+  useBusyWhile(requirementsBusy, requirementsNode || requirements.reply ? "Requirements author is rewriting the requirements" : "Requirements author is writing the requirements");
+  const reviewingRole = STAGE6_PANEL_ROLES.find((role) => reviews[role.key]?.status === "starting" || reviews[role.key]?.status === "waiting");
+  useBusyWhile(reviewingRole !== undefined, `${reviewingRole?.label ?? "A"} reviewer is reviewing the plan`);
 
   const current = page === "requirements" ? requirements : (reviews[page] ?? STAGE6_IDLE_ROLE);
   const currentPage = PAGES.find((entry) => entry.key === page) ?? PAGES[0]!;

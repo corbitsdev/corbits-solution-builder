@@ -5,7 +5,7 @@
  * stage's gate is. Modeled on workbench's `pending-approvals.ts`, trimmed to
  * what this app needs: it has no chat surface of its own, so there is no
  * per-agent filtering here. Specialists (stage 9's `deliver` and any other
- * stage's tool, e.g. stage 8's `run_shell`) deploy into the PROJECT tenant
+ * tool a stage's specialist carries) deploy into the PROJECT tenant
  * (#29), and one deployed before that still runs in the workspace, so a
  * caller passes the tenant the deployment runs in
  * (`SpecialistDeployment.tenantId`), never a guess.

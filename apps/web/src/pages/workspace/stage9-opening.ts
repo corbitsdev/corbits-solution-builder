@@ -13,9 +13,9 @@ export function approvedStage8Archive(nodes: readonly ArtifactNode[], review: Re
 }
 
 /**
- * The delivery manifest `publish_workspace` uploaded alongside a build
- * archive, resolved from the archive's OWN metadata -- they are written by
- * the same call, sharing the same `variant` (`attempt-<n>`), rather than by
+ * The delivery manifest recorded alongside a build archive, resolved from
+ * the archive's OWN metadata -- they are written by the same call
+ * (`persistBuildEvidence`), sharing the same `variant` (`attempt-<n>`), rather than by
  * scanning for the newest `delivery_manifest` node at stage 8 (which could
  * belong to a different, unapproved attempt).
  */
@@ -29,9 +29,9 @@ export function manifestCompanionOf(nodes: readonly ArtifactNode[], archive: Art
 
 /**
  * Stage 9's opening mail (defect 3, CL-8723 follow-up): the delivery
- * manifest `publish_workspace` uploaded alongside the approved build
+ * manifest the host's packaging wrote alongside the approved build
  * archive, read back and rendered into the exact text the
- * delivery-verifier's prompt promises, plus the build-engineer's own latest
+ * delivery-verifier's prompt promises, plus the build supervisor's own latest
  * status reply as "the checks stage 8 declared". Self-contained (reads
  * stage 8's own thread and the manifest artifact itself) so it produces the
  * identical opening whether called right after `approve()` or rebuilt on a

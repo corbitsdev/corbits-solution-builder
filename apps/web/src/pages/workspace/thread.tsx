@@ -3,6 +3,9 @@ import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui"
 import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
+import { splitChain } from "./approved-chain.ts";
+import { composedMailFold } from "./composed-mail.ts";
+import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -60,6 +63,35 @@ function MessageBody({ text }: { text: string }) {
         <summary>The approved design</summary>
         <iframe className="bubble-document" title="The approved design" srcDoc={text} sandbox="" />
       </details>
+    );
+  }
+  // An opening that carries the approved chain (#423) folds it the same
+  // way: the record on demand, then what this stage opens with.
+  const chain = splitChain(text);
+  if (chain) {
+    return (
+      <>
+        {chain.before ? <Markdown source={chain.before} /> : null}
+        <details className="bubble-fold">
+          <summary>What was approved before this stage</summary>
+          <Markdown source={chain.chain} />
+        </details>
+        {chain.after ? <MessageBody text={chain.after} /> : null}
+      </>
+    );
+  }
+  // A revision turn carries the version it revises (#431); the chat shows
+  // the person's words and keeps the version behind a fold.
+  const revision = splitRevision(text);
+  if (revision) {
+    return (
+      <>
+        <Markdown source={revision.ask} />
+        <details className="bubble-fold">
+          <summary>The version this revises</summary>
+          <Markdown source={revision.document} />
+        </details>
+      </>
     );
   }
   const handoff = splitHandoff(text);
@@ -147,6 +179,7 @@ export function StageConversation({
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
+  const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
     // A turn in flight has no row of its own yet, so the transcript would sit
@@ -213,11 +246,23 @@ export function StageConversation({
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
+            const source = byId.get(message.id);
+            const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
                 <span className="who conv-who">{you ? "You" : who}</span>
                 <div className="bubble">
-                  {you && withdrawnIds.has(message.id) ? (
+                  {composed ? (
+                    <>
+                      {composed.lead ? <Markdown source={composed.lead} /> : null}
+                      {composed.summary ? (
+                        <details className="bubble-fold">
+                          <summary>{composed.summary}</summary>
+                          <MessageBody text={composed.body} />
+                        </details>
+                      ) : null}
+                    </>
+                  ) : you && withdrawnIds.has(message.id) ? (
                     <div className="turn-withdrawn">
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>

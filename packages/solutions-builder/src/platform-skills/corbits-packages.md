@@ -1,11 +1,6 @@
 # corbits-packages
 
-Corbits packages are reusable packages and solutions built by corbitsdev.
-Interchange is the platform; these packages are not a separate platform.
-Each is published on npm and installs with `bun add @corbits/<name>`; the
-source is at github.com/corbitsdev/corbits-<name>. Every package below is on
-npm as of 2026-10-01, with its published description; a name not listed
-here is not a package a deliverable can build on, so do not name one.
+`@corbits/*` packages are published on npm and install with `bun add @corbits/<name>`; source at github.com/corbitsdev/corbits-<name>. Every package below is on npm as of 2026-10-02 at the version shown; the list is complete.
 
 Mount onto a hub (an embedded host counts):
 
@@ -53,14 +48,6 @@ Inference adapters:
   provider: OpenAI-compatible and Anthropic messages factories, one reasoning
   setting, think-tag stripping, inline tool JSON repair.
 
-Not on npm, and not for a generated stack: `@corbits/embedded-host`,
-`@corbits/embed-hub` and `@corbits/keychain` are Solution Builder's own
-workspace packages, the process this tool itself runs in. A deliverable that
-needs an embedded hub is built on `@intx/*` directly.
-
-When a brief genuinely needs an agentic capability — memory, mailbox, oauth,
-embeddings and the like — check this list before writing a new one. Where
-it genuinely lacks the thing, say so and scope it — a substitute that
-pretends to be the primitive is worse than an admitted gap. Ordinary product
-code (screens, routes, schema, business logic) is simply written; this
-catalog is not a checklist for it.
+Not on npm: `@corbits/embedded-host`, `@corbits/embed-hub` and
+`@corbits/keychain` are Solution Builder's own workspace packages, the
+process this tool itself runs in.

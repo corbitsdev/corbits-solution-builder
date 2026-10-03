@@ -7,21 +7,17 @@ describe("Experience designer prompt", () => {
     expect(designer).toBeDefined();
     const prompt = designer!.system;
     expect(prompt).toContain("The mockup fits the width it is read at.");
-    expect(prompt).toContain("any width from 1024px up");
+    expect(prompt).toContain("any width from 402px up");
     expect(prompt).toContain("minmax(0, 1fr)");
     expect(prompt).toContain("nothing clipped at the right edge");
     expect(prompt).toContain("scrolls inside its own panel");
   });
-});
 
-// #101: a phone screen is the screen only; the review window draws the phone.
-describe("Experience designer phone screens", () => {
-  test("marks each phone screen and draws no device around it", () => {
+  test("asks every desktop or phone screen to lay out at both review widths (#417)", () => {
     const prompt = agentById("experience-designer")!.system;
-    expect(prompt).toContain("A phone screen is drawn as the screen, never as the phone.");
-    expect(prompt).toContain('<section data-testid="screen-<name>" data-surface="phone">');
-    expect(prompt).toContain("402px-wide viewport");
-    expect(prompt).toContain("no bezel, notch or rounded device");
-    expect(prompt).not.toContain("a phone-width frame\n  with a notch");
+    expect(prompt).toContain("Every desktop or phone screen lays out at both widths.");
+    expect(prompt).toContain("1280px and at 402px");
+    expect(prompt).toContain("@media (max-width: 640px)");
+    expect(prompt).toContain("Nothing scrolls horizontally at\n  402px.");
   });
 });

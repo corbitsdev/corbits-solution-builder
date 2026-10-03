@@ -248,7 +248,7 @@ describe("project chrome paint", () => {
     expect(build).toContain('className="ev"');
     expect(build).toContain("Build Evidence");
     expect(build).toContain("Start the build attempt");
-    expect(build).toContain("Accept as evidence");
+    expect(build).toContain("Record attempt");
     expect(build).not.toContain("Build supervision");
     expect(build).not.toContain("<Screen");
     expect(build).not.toContain("Starting the build specialist");
@@ -299,5 +299,19 @@ describe("project chrome paint", () => {
     const css = read("../workspace-layout.css");
     expect(css).toContain(".cost-row {");
     expect(css).toContain(".checklist {");
+  });
+});
+
+// #409: an ask to a companion role carries what the role needs, since it
+// sees only what it is sent.
+describe("companion asks carry their context", () => {
+  test("the requirements author gets the prior revision and the approved inputs; a reviewer gets the ids and the plan", () => {
+    const source = read("./stage6.tsx");
+    const ask = source.slice(source.indexOf("const askRole"), source.indexOf("setAsk(\"\");", source.indexOf("const askRole")));
+    expect(ask).toContain("Product requirements (prior revision, keep its ids)");
+    expect(ask).toContain("Approved inputs this document is drawn from");
+    expect(ask).toContain("requirementsInput.trim()");
+    expect(ask).toContain("The build plan under review");
+    expect(ask).toContain("requirementsBlock");
   });
 });

@@ -461,6 +461,24 @@ export async function resolveWorkspace(): Promise<Workspace | null> {
 }
 
 /** Forgets the cached workspace, so the next read asks the hub again. */
+/**
+ * Whether `projectId` names a tenant the signed-in principal can see: a
+ * project is a tenant under the workspace, and the hub answers 404 for an
+ * id that is nobody's and 403 for one outside the principal's reach. A
+ * route that keeps per-project files on disk asks this before it creates
+ * anything under that id.
+ */
+export async function projectTenantExists(projectId: string): Promise<boolean> {
+  if (hubMode() === "embedded" && !currentSession()) return false;
+  const response = await hubApi(`/api/tenants/${encodeURIComponent(projectId)}`);
+  if (response.ok) {
+    void response.body?.cancel();
+    return true;
+  }
+  if (response.status === 404 || response.status === 403 || response.status === 401) return false;
+  throw new HubApiError(response.status, `/api/tenants/${projectId}`, await response.text().catch(() => null));
+}
+
 export function forgetWorkspace(): void {
   workspace = null;
 }

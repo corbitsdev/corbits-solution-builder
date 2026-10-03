@@ -52,9 +52,9 @@ describe("deliveryOpeningLine", () => {
     const at = (needle: string) => body.indexOf(needle);
     expect(at("Manifest node id: art_m@2")).toBe(0);
     expect(at("- src/index.ts — 5 bytes")).toBeGreaterThan(0);
-    expect(at("Verification recorded by publish_workspace")).toBeGreaterThan(at("- src/index.ts — 5 bytes"));
+    expect(at("Verification recorded with the archive")).toBeGreaterThan(at("- src/index.ts — 5 bytes"));
     expect(at("No web or api target was started or probed.")).toBeGreaterThan(0);
-    expect(at("Checks stage 8 declared:")).toBeGreaterThan(at("Verification recorded by publish_workspace"));
+    expect(at("Checks stage 8 declared:")).toBeGreaterThan(at("Verification recorded with the archive"));
     expect(body.endsWith("bun test")).toBe(true);
   });
 

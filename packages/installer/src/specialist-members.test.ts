@@ -67,7 +67,7 @@ describe("renderSpecialistSource members", () => {
     );
 
   test("a specialist that imports no tool ships the vendored workflow alone", async () => {
-    for (const stage of [1, 2, 3, 4, 6, 7] as Stage[]) {
+    for (const stage of [1, 2, 3, 4, 6, 7, 8] as Stage[]) {
       const files = await render(stage);
       expect(membersOf(files)).toEqual(["intx-workflow"]);
       const deps = dependenciesOf(files);
@@ -76,26 +76,26 @@ describe("renderSpecialistSource members", () => {
     }
   });
 
-  test("stage 5's one deployment ships the deck tool and the runtime", async () => {
+  test("stage 5's one deployment ships no tool: the app draws slides from the outline (#435)", async () => {
     const packages = await render(5);
-    expect(membersOf(packages)).toEqual(["intx-workflow", "specialist-runtime", "tools-deck"]);
-    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBe("workspace:*");
+    expect(membersOf(packages)).toEqual(["intx-workflow"]);
+    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBeUndefined();
     expect(dependenciesOf(packages)["@solutions-builder/tools-delivery"]).toBeUndefined();
   });
 
-  test("stages 8 and 9 ship the delivery tool and the runtime, and stage 8 alone depends on the shell", async () => {
+  test("stage 9 ships the delivery tool and the runtime, and no stage depends on the shell", async () => {
     const build = await render(8);
-    expect(membersOf(build)).toEqual(["intx-workflow", "specialist-runtime", "tools-delivery"]);
-    expect(dependenciesOf(build)["@intx/tools-posix"]).toBe("0.4.0");
+    expect(membersOf(build)).toEqual(["intx-workflow"]);
+    expect(dependenciesOf(build)["@intx/tools-posix"]).toBeUndefined();
     const deliver = await render(9);
     expect(membersOf(deliver)).toEqual(["intx-workflow", "specialist-runtime", "tools-delivery"]);
     expect(dependenciesOf(deliver)["@intx/tools-posix"]).toBeUndefined();
   });
 
-  test("the generic artifact bundle ships only when asked for, and never on stage 8", async () => {
+  test("the generic artifact bundle ships only when asked for", async () => {
     expect(membersOf(await render(2, "primary", true))).toEqual(["corbits-artifacts", "intx-workflow"]);
     expect(dependenciesOf(await render(2, "primary", true))["@corbits/artifacts"]).toBe("workspace:*");
-    expect(membersOf(await render(8, "primary", true))).toEqual(["intx-workflow", "specialist-runtime", "tools-delivery"]);
+    expect(membersOf(await render(8, "primary", true))).toEqual(["corbits-artifacts", "intx-workflow"]);
   });
 
   // #41 step 5: the rendered entry for a role is identical across projects;

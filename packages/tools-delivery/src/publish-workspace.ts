@@ -4,6 +4,11 @@
  * route, so the archive survives past the run's release and shows up among
  * the project's artifacts the same way any other stage's draft does.
  *
+ * No stage deploys this tool today: stage 8's build runs on the host
+ * through the bounded bridge, and the host's build route packages the
+ * attempt with the same code (`@solutions-builder/specialist-runtime/
+ * package-attempt`). The tool is kept for closures that already ship it.
+ *
  * This mirrors `@corbits/artifacts/sidecar-bundle`'s own resolve-and-call
  * shape (`requires: ["capabilities", "address"]`, resolve the `hub`
  * credential handle, call the run-scoped route through the mediated fetch)
@@ -40,17 +45,30 @@
  */
 import { defineTool, type BaseEnv } from "@intx/agent";
 import type { RuntimeCapabilities } from "@intx/types/runtime-capabilities";
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { resolve, relative, isAbsolute, join } from "node:path";
 import { BUILD_EVIDENCE_KIND, DELIVERY_MANIFEST_KIND } from "@solutions-builder/specialist-runtime/artifact-kinds";
-import { hashTree, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
+import {
+  attemptVariant,
+  buildManifest,
+  BUNDLE_MEDIA_TYPE,
+  DEFAULT_EXCLUDES,
+  MANIFEST_MEDIA_TYPE,
+  packageAttempt,
+  parseTargetProbe,
+  tarDirectory,
+  verifyAndRecord,
+  type DeliveryManifestContent,
+  type TargetProbe,
+  type VerificationSummary,
+} from "@solutions-builder/specialist-runtime/package-attempt";
 
 export const TOOL_NAME = "publish_workspace";
 
-export const BUNDLE_MEDIA_TYPE = "application/gzip";
-export const MANIFEST_MEDIA_TYPE = "application/json";
+/** The packaging itself lives in `@solutions-builder/specialist-runtime/package-attempt`; re-exported for this tool's callers. */
+export { attemptVariant, BUNDLE_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, packageAttempt, parseTargetProbe } from "@solutions-builder/specialist-runtime/package-attempt";
+export type { DeliveryManifestContent, ManifestFileEntry, PackagedAttempt, TargetProbe, VerificationSummary } from "@solutions-builder/specialist-runtime/package-attempt";
 
 /** Mirrors `@corbits/artifacts`' `MAX_UPLOAD_BYTES` — the ceiling the hub's
  *  binary create route enforces on one uploaded file. Duplicated rather than
@@ -58,36 +76,12 @@ export const MANIFEST_MEDIA_TYPE = "application/json";
  *  pre-check looser or tighter than the hub's, never bypass it. */
 const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
 
-/** The data-URI fallback's own, much lower ceiling: a base64 archive pasted
- *  into a mail reply breaks at the mail transport's ~44 MB cap and is
- *  fragile well before that (CL-8723 follow-up). */
-const FALLBACK_MAX_ARCHIVE_BYTES = 5 * 1024 * 1024;
-
-/** The manifest's own per-file list is capped so it stays small enough for a
- *  mail body a person and a model both read; the archive's real file count
- *  is reported separately so a truncated list is never mistaken for the
- *  whole picture. */
-const MANIFEST_FILE_CAP = 200;
-
 /** Where a host mounts `mountWorkflowArtifacts`, and the credential handle a
  *  specialist's `credentialBindings` binds to it. Copied from
  *  `@corbits/artifacts/sidecar-bundle` for the same reason as
  *  `MAX_ARCHIVE_BYTES` above. */
 const WORKFLOW_ARTIFACTS_BASE_PATH = "/api/workflow-artifacts";
 const HUB_CREDENTIAL_HANDLE = "hub";
-
-/** Directories never worth shipping: reproducible, huge, generated, or not part of the deliverable. */
-const DEFAULT_EXCLUDES = [
-  "node_modules",
-  ".git",
-  ".venv",
-  "__pycache__",
-  "dist",
-  ".cache",
-  ".turbo",
-  ".next",
-  "coverage",
-];
 
 /** Sidecar env this tool needs: the workspace directory the run's shell
  *  commands operate on (same key `@intx/tools-posix` declares), plus the
@@ -108,29 +102,6 @@ type PublishWorkspaceArgs = {
   dir: string | null;
   /** The targets to start and probe; none when the model named none. */
   targets: TargetProbe[];
-};
-
-export type { ManifestFileEntry } from "./verify.js";
-
-export type DeliveryManifestContent = {
-  stage: 8;
-  attempt: string;
-  archive: { fileName: string; sizeBytes: number; sha256: string };
-  files: ManifestFileEntry[];
-  fileCount: number;
-  truncated: boolean;
-  generatedAt: string;
-  /** What `verify.ts` established about this archive; absent only for a
-   *  manifest written before #129. */
-  verification?: DeliveryVerificationContent;
-};
-
-/** What the model is told about the checks, in both result shapes. */
-type VerificationSummary = {
-  complete: boolean;
-  /** Paths of required items that are not `verified`. */
-  failed: string[];
-  targets: { target: string; ranSuccessfully: boolean; transcript: string }[];
 };
 
 type UploadResult = {
@@ -191,28 +162,6 @@ async function currentAttemptDir(cwd: string): Promise<string> {
   }
 }
 
-/** A target the model names is worth probing only if it says how to start
- *  it and where it listens; anything less is dropped, not guessed at. A
- *  command given as one string runs through `sh -c`. */
-export function parseTargetProbe(raw: unknown): TargetProbe | null {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw as Record<string, unknown>;
-  const target = record["target"];
-  const port = record["port"];
-  const commandRaw = record["command"];
-  const command = Array.isArray(commandRaw)
-    ? commandRaw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
-    : typeof commandRaw === "string" && commandRaw.trim().length > 0
-      ? ["sh", "-c", commandRaw]
-      : [];
-  if (typeof target !== "string" || target.length === 0 || command.length === 0) return null;
-  if (typeof port !== "number" || !Number.isInteger(port) || port <= 0 || port > 65_535) return null;
-  const routesRaw = record["routes"];
-  const routes = Array.isArray(routesRaw) ? routesRaw.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("/")) : [];
-  const path = typeof record["path"] === "string" && (record["path"] as string).startsWith("/") ? (record["path"] as string) : undefined;
-  return { target, command, port, routes, ...(path === undefined ? {} : { path }) };
-}
-
 function parseArgs(raw: unknown): PublishWorkspaceArgs {
   const args: Record<string, unknown> = raw !== null && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -226,86 +175,6 @@ function parseArgs(raw: unknown): PublishWorkspaceArgs {
   const targetsRaw = args["targets"];
   const targets = Array.isArray(targetsRaw) ? targetsRaw.map(parseTargetProbe).filter((probe): probe is TargetProbe => probe !== null) : [];
   return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])], dir, targets };
-}
-
-/** Runs `tar` over the workspace directory and resolves with the gzip bytes.
- *  Shells out rather than reimplementing tar: every workspace this runs
- *  against is a POSIX container image with `tar` on PATH. */
-function tarDirectory(cwd: string, exclude: string[]): Promise<Buffer> {
-  return new Promise((res, reject) => {
-    const args = ["-czf", "-", ...exclude.map((entry) => `--exclude=${entry}`), "."];
-    const child = spawn("tar", args, { cwd });
-    const chunks: Buffer[] = [];
-    const errChunks: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => errChunks.push(chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`tar exited ${String(code)}: ${Buffer.concat(errChunks).toString("utf8")}`));
-        return;
-      }
-      res(Buffer.concat(chunks));
-    });
-  });
-}
-
-/** Builds the delivery manifest by hashing every file the archive packed —
- *  read straight off disk, not the tar's own listing (which has no hashes),
- *  skipping the same directories `tarDirectory` excludes so the list
- *  matches what the archive contains. The file list is capped
- *  (`MANIFEST_FILE_CAP`); `fileCount` always reports the real total. */
-async function buildManifest(
-  attempt: string,
-  targetDir: string,
-  exclude: string[],
-  archive: { fileName: string; sizeBytes: number; sha256: string },
-): Promise<DeliveryManifestContent> {
-  const hashed = await hashTree(targetDir, new Set(exclude));
-  const files = hashed.slice(0, MANIFEST_FILE_CAP);
-  return {
-    stage: 8,
-    attempt,
-    archive,
-    files,
-    fileCount: hashed.length,
-    truncated: hashed.length > files.length,
-    generatedAt: new Date().toISOString(),
-  };
-}
-
-/** Runs the deterministic checks on the archive bytes and records them on
- *  the manifest, returning what the model is told. `manifestNodeId` names
- *  the archive the checks ran against: its artifact, or its hash when no
- *  artifact exists. */
-async function verifyAndRecord(
-  manifest: DeliveryManifestContent,
-  archiveBytes: Buffer,
-  manifestNodeId: string,
-  args: PublishWorkspaceArgs,
-  targetDir: string,
-): Promise<VerificationSummary> {
-  const verification = await verifyArchive({
-    archiveBytes,
-    manifest: manifest.files,
-    manifestNodeId,
-    probes: args.targets,
-    cwd: targetDir,
-    exclude: new Set(args.exclude),
-  });
-  manifest.verification = verification;
-  return {
-    complete: verification.report.complete,
-    failed: verification.report.failed,
-    targets: verification.targets.map((target) => ({ target: target.target, ranSuccessfully: target.ranSuccessfully, transcript: target.transcript })),
-  };
-}
-
-/** Pulls the attempt number out of a `dir` like "attempts/3" for the
- *  artifact's `variant`/title; "1" when `dir` names no attempt (e.g. "."). */
-function attemptVariant(dir: string): string {
-  const match = /(\d+)(?!.*\d)/.exec(dir);
-  return `attempt-${match ? match[1] : "1"}`;
 }
 
 type MediatedFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -366,29 +235,26 @@ async function publishWorkspaceContent(
   // wrong, so an unnamed directory is worked out here instead of refused.
   const dir = args.dir ?? (await currentAttemptDir(env.toolCwd));
   const targetDir = resolveDir(env.toolCwd, dir);
-  const bytes = await tarDirectory(targetDir, args.exclude);
-  if (bytes.byteLength === 0) {
-    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
-  }
 
   const hub = await resolveHubFetch(env.capabilities);
   if (!hub) {
-    if (bytes.byteLength > FALLBACK_MAX_ARCHIVE_BYTES) {
-      throw new Error(
-        `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${FALLBACK_MAX_ARCHIVE_BYTES}-byte fallback limit ` +
-          `(no artifact-upload credential is available, so it would have to be pasted into a mail reply) — ` +
-          `exclude node_modules/build output and retry.`,
-      );
-    }
-    const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const manifest = await buildManifest(attemptVariant(dir), targetDir, args.exclude, {
-      fileName: args.fileName,
-      sizeBytes: bytes.byteLength,
-      sha256,
-    });
-    const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, args, targetDir);
-    return { fallback: "data-uri", fileName: args.fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, dataUri, manifest, verification };
+    // No artifact-upload credential, so the archive would have to be pasted
+    // into a mail reply: the lower cap applies.
+    const packaged = await packageAttempt({ dir: targetDir, attempt: attemptVariant(dir), fileName: args.fileName, exclude: args.exclude, targets: args.targets });
+    return {
+      fallback: "data-uri",
+      fileName: packaged.fileName,
+      mediaType: packaged.mediaType,
+      sizeBytes: packaged.sizeBytes,
+      dataUri: packaged.dataUri,
+      manifest: packaged.manifest,
+      verification: packaged.verification,
+    };
+  }
+
+  const bytes = await tarDirectory(targetDir, args.exclude);
+  if (bytes.byteLength === 0) {
+    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
   }
 
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
@@ -415,7 +281,9 @@ async function publishWorkspaceContent(
           mediaType: BUNDLE_MEDIA_TYPE,
           variant,
           sourceVersionIds: [],
-          provenance: { producer: "agent", agentRole: "build-engineer" },
+          // The run's own principal made this; the hub's run-scoped mount
+          // labels it. No specialist role is claimed for it here.
+          provenance: { producer: "agent" },
         },
       },
     });
@@ -425,7 +293,7 @@ async function publishWorkspaceContent(
       sizeBytes: bytes.byteLength,
       sha256,
     });
-    const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir);
+    const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir, "sidecar");
     const manifestBytes = Buffer.from(JSON.stringify(manifestContent), "utf8");
     const manifestCreated = await uploadArtifact(hub.fetch, env.address, {
       fileName: `build-${variant}-manifest.json`,
@@ -438,7 +306,7 @@ async function publishWorkspaceContent(
           mediaType: MANIFEST_MEDIA_TYPE,
           variant,
           sourceVersionIds: [created.id],
-          provenance: { producer: "agent", agentRole: "build-engineer" },
+          provenance: { producer: "agent" },
         },
       },
     });
@@ -477,7 +345,7 @@ const INPUT_SCHEMA = {
     exclude: {
       type: "array",
       items: { type: "string" },
-      description: "Additional path patterns to exclude, beyond node_modules/.git/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
+      description: "Additional path patterns to exclude, beyond node_modules/.git/.corbits/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
     },
     targets: {
       type: "array",

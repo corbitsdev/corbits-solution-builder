@@ -43,19 +43,19 @@ export const PLATFORM_SKILLS: readonly PlatformSkill[] = [
   },
   {
     key: "using-interchange",
-    description: "How to get and use the @intx/* packages — npm tags versus vendoring faremeter/interchange — and the workflow authoring surface, with an example.",
+    description: "How to install the @intx/* packages from npm, with a CLI-with-agent example, a workflow definition, and a web app that uses the hub as its API.",
     body: usingInterchange,
     tools: [],
   },
   {
     key: "using-corbits-packages",
-    description: "How to install the @corbits/* packages — git dependencies, not npm — and how the unpublished workbench packages are vendored.",
+    description: "How to install the @corbits/* packages from npm and pin the versions the stage 7 freeze names.",
     body: usingCorbitsPackages,
     tools: [],
   },
   {
     key: "designing-on-interchange",
-    description: "How to shape a deliverable on the platform: the three shapes, agents as workflows, skills tools and directors as assets, apps as clients of the hub.",
+    description: "The shapes Interchange offers, smallest first: local libraries, durable local, and the hub control plane with sidecar-isolated agents.",
     body: designingOnInterchange,
     tools: [],
   },

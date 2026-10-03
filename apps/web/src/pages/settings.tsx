@@ -18,17 +18,19 @@
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
+import { LANGUAGES, SUPPORTED_OUTPUT_LANGUAGES, type LanguageId, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import {
   api,
   ApiFailure,
   STAKEHOLDER_ROLES,
   type ActiveModel,
+  type BuildWorkerStatus,
   type DesignerSettings,
   type GoogleDriveStatus,
   type HostStatus,
   type Provider,
 } from "../client.js";
-import { Banner } from "../components.jsx";
+import { Banner, StateLabel } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { DesignDocumentsList } from "./design-documents.jsx";
@@ -52,6 +54,7 @@ export function Settings({
     <div className="settings-page">
       <h1>Settings</h1>
       <Appearance />
+      <Language />
       <Inference
         providers={providers}
         apiKeyProviders={apiKeyProviders}
@@ -59,6 +62,7 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
+      <BuildWorker />
       <StakeholderDecks />
       <DesignDocuments />
       <GoogleDrive />
@@ -137,6 +141,124 @@ function SegCtl<T extends string>({
   );
 }
 
+/* ------------------------------------------------------------ build worker */
+
+/** What the install row says, from the host's own instruction. Pure, for the test. */
+export function workerInstallCopy(status: Pick<BuildWorkerStatus, "available" | "detail" | "install">): string {
+  if (status.available) return status.detail;
+  return status.install ? status.install.text : status.detail;
+}
+
+/**
+ * Which coding agent stage 8 hands the frozen packet to. The host's bridge
+ * runs one tool's non-interactive form and reports final text and an exit
+ * status whichever it is; the choice here changes the tool, not what the
+ * bridge can see. Whether the tool is on this computer is the host's word,
+ * asked for on every change and on "Check again", and when it is absent the
+ * host says how to get it for this operating system.
+ */
+function BuildWorker() {
+  const [status, setStatus] = useState<BuildWorkerStatus | null>(null);
+  const [executable, setExecutable] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const check = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      const loaded = await api.buildWorker();
+      setStatus(loaded);
+      setExecutable(loaded.settings.executable);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    void check();
+    // Once, on open: later checks are the person's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async (patch: { worker?: string; executable?: string }) => {
+    setError(null);
+    try {
+      const saved = await api.setBuildWorker(patch);
+      setStatus(saved);
+      setExecutable(saved.settings.executable);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+
+  const chosen = status?.workers.find((entry) => entry.id === status.settings.worker);
+  return (
+    <Section title="Build worker" lead="The coding agent stage 8 hands the frozen plan to. It runs on this computer, with your own configuration of that tool, and the build shows its final output and exit status and nothing more.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        <Row label="Tool" hint="Corbits Code is the default">
+          <SegCtl<string>
+            label="Build worker"
+            value={status?.settings.worker ?? "corbits-code"}
+            disabled={!status}
+            onChange={(value) => void save({ worker: value })}
+            options={(status?.workers ?? [{ id: "corbits-code", label: "Corbits Code", executable: "corbits" }]).map((entry) => ({ id: entry.id, label: entry.label }))}
+          />
+        </Row>
+        <Row label="Executable" hint={`Empty means \`${chosen?.executable ?? "the tool's own name"}\` from this computer's PATH; a full path for an install elsewhere`}>
+          <input
+            className="field"
+            aria-label="Build worker executable"
+            value={executable}
+            disabled={!status}
+            placeholder={chosen?.executable ?? ""}
+            spellCheck={false}
+            onChange={(event) => setExecutable(event.target.value)}
+            onBlur={() => {
+              if (status && executable.trim() !== status.settings.executable) void save({ executable: executable.trim() });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+            }}
+          />
+        </Row>
+        <Row label="On this computer" {...(status ? { hint: `Checked ${new Date(status.checkedAt).toLocaleTimeString()}` } : {})}>
+          <span className="v">
+            {status ? (
+              <>
+                <StateLabel tone={status.available ? "success" : "error"}>{status.available ? "Available" : "Not found"}</StateLabel>{" "}
+                {workerInstallCopy(status)}
+                {!status.available && status.install?.command ? (
+                  <>
+                    {" "}
+                    <code>{status.install.command}</code>
+                  </>
+                ) : null}
+                {!status.available && status.install?.url ? (
+                  <>
+                    {" "}
+                    <a href={status.install.url} target="_blank" rel="noreferrer">
+                      {status.install.url}
+                    </a>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "Checking…"
+            )}{" "}
+            <button type="button" className="btn link" disabled={checking} onClick={() => void check()}>
+              {checking ? "Checking…" : "Check again"}
+            </button>
+          </span>
+        </Row>
+      </div>
+    </Section>
+  );
+}
+
 /* --------------------------------------------------------------- appearance */
 
 /** The theme, as a segmented choice — the same control onboarding's Look step
@@ -164,6 +286,76 @@ function Appearance() {
 }
 
 /* ---------------------------------------------------------------- inference */
+
+/* ----------------------------------------------------------------- language */
+
+/** What the Output language select says of a language that cannot be chosen yet. */
+export function languageOptionLabel(id: LanguageId, label: string, forOutput: boolean): string {
+  return forOutput && !SUPPORTED_OUTPUT_LANGUAGES.includes(id) ? `${label} (not supported yet)` : label;
+}
+
+/**
+ * The workspace's languages (#411): what you write in, and what every
+ * specialist writes in, documents and the software it builds alike. Only
+ * the two Englishes are offered as output for now; the rest are listed so
+ * the choice is visible, and disabled.
+ */
+function Language() {
+  const [settings, setSettings] = useState<LanguageSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .languageSettings()
+      .then((loaded) => {
+        if (!cancelled) setSettings(loaded);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const save = async <K extends keyof LanguageSettings>(key: K, value: LanguageSettings[K]) => {
+    if (!settings) return;
+    setError(null);
+    const before = settings;
+    setSettings({ ...settings, [key]: value });
+    try {
+      setSettings(await api.saveLanguageSetting(key, value));
+    } catch (cause) {
+      setSettings(before);
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const select = (key: keyof LanguageSettings, label: string) => (
+    <select
+      className="field"
+      aria-label={label}
+      value={settings?.[key] ?? "en-US"}
+      disabled={!settings}
+      onChange={(event) => void save(key, event.target.value as LanguageId)}
+    >
+      {LANGUAGES.map((language) => (
+        <option key={language.id} value={language.id} disabled={key === "output" && !SUPPORTED_OUTPUT_LANGUAGES.includes(language.id)}>
+          {languageOptionLabel(language.id, language.label, key === "output")}
+        </option>
+      ))}
+    </select>
+  );
+  return (
+    <Section title="Language" lead="What you write in, and what the specialists write in. American English unless you say otherwise.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        <Row label="Input language" hint="The language of your messages and material">{select("input", "Input language")}</Row>
+        <Row label="Output language" hint="Every document, reply, and the text of any software built. American English and British English for now.">
+          {select("output", "Output language")}
+        </Row>
+      </div>
+    </Section>
+  );
+}
 
 function Inference({
   providers,

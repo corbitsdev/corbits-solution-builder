@@ -49,6 +49,7 @@ export {
   hubTransport,
   resolveWorkspace,
   forgetWorkspace,
+  projectTenantExists,
   assets,
   type HubEndpoint,
   type HubMode,

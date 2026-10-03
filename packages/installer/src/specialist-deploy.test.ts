@@ -246,8 +246,8 @@ describe("specialistEntryIsCurrent", () => {
   });
 
   test("stale when the kit's brief has moved on since the deploy", async () => {
-    expect(rendered).toContain("A phone screen is drawn as the screen, never as the phone.");
-    const before = rendered.replace("A phone screen is drawn as the screen, never as the phone.", "");
+    expect(rendered).toContain("The mockup fits the width it is read at.");
+    const before = rendered.replace("The mockup fits the width it is read at.", "");
     expect(await check(before)).toBe(false);
   });
 

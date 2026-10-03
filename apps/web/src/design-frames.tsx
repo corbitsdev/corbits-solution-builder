@@ -9,9 +9,9 @@ import { useEffect, useRef, useState } from "react";
 import { DESKTOP_WINDOW, DesktopFrame } from "./desktop-frame.tsx";
 import { fitDesignScale, measureDesignWidth } from "./design-measure.ts";
 import { IPHONE_17_PRO, IPhoneFrame } from "./iphone-frame.tsx";
-import { splitPhoneSurfaces, splitSurfaces, type PhoneSurface } from "./phone-surfaces.ts";
+import { PHONE_VIEWPORT_WIDTH, splitPhoneSurfaces, splitSurfaces, type PhoneSurface } from "./phone-surfaces.ts";
 
-export type FrameMode = "auto" | "phone" | "desktop" | "pane";
+export type FrameMode = "auto" | "phone" | "desktop" | "narrow" | "pane";
 
 export type FramedDesign = {
   readonly phones: readonly PhoneSurface[];
@@ -30,6 +30,15 @@ export function framedDesign(content: string, mode: FrameMode, title: string): F
       : { phones: [{ id: "whole", title, html: content }], desktops: [], main: null };
   }
   if (mode === "desktop") return { phones: [], desktops: [{ id: "whole", title, html: content }], main: null };
+  if (mode === "narrow") {
+    // Every screen in a phone, the desktop ones included (#417): the stage 4
+    // prompt asks each screen to lay out at the phone width too, and this is
+    // where a person checks that it does. An unmarked design goes in whole.
+    const split = splitSurfaces(content);
+    return split.phones.length > 0 || split.desktops.length > 0
+      ? { phones: [...split.desktops, ...split.phones], desktops: [], main: split.main }
+      : { phones: [{ id: "whole", title, html: content }], desktops: [], main: null };
+  }
   const split = splitSurfaces(content);
   if (split.phones.length > 0 || split.desktops.length > 0) return split;
   return { phones: [], desktops: [], main: content };
@@ -41,6 +50,7 @@ export function FrameSelect({ value, onChange }: { value: FrameMode; onChange: (
       <option value="auto">Frame: as designed</option>
       <option value="desktop">{DESKTOP_WINDOW.name}</option>
       <option value="phone">{IPHONE_17_PRO.name}</option>
+      <option value="narrow">Every screen at {String(PHONE_VIEWPORT_WIDTH)}px</option>
       <option value="pane">Pane</option>
     </select>
   );

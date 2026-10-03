@@ -1,366 +1,91 @@
 /**
- * Stage 8: build supervision, talking to the stage's own mail agent.
+ * Stage 8: the build, driven through the host's bounded bridge, and the
+ * Build supervisor who reads what the worker reported.
  *
- * Contract v6 gives stage 8 a posix tool inside its own single-step run
- * rather than a separate host build-worker bridge with its own signal
- * chain, so there is no lifecycle run to park a build attempt's state on
- * any more -- "start"/"cancel"/"fail" are sent as plain mail, the same way
- * any other stage's specialist is talked to (see index.tsx's own account of
- * the cutover). The rich timeline the old bridge reported (a state label,
- * exit status, packaged archive, live output, an elapsed clock, an event
- * log) is rebuilt here from what the stage's own run already exposes: the
- * hub approval each `run_shell`/`publish_workspace` call parks on
- * (CL-8566), the run's own committed event log, and the mail thread's
- * replies -- CL-8621 follow-up.
+ * The build is not done by the stage's specialist. The host runs one coding
+ * agent's non-interactive form in `attempts/<n>/` under the project's build
+ * directory (`apps/hub/src/corbits-exec.ts`, `build-attempts.ts`) and
+ * reports its stdout and stderr as written, its final text and its exit
+ * status — nothing synthesised: no sessions, steering or checkpoints,
+ * because the interface has none. This panel starts, continues and cancels
+ * those attempts and shows the log as it grows.
  *
- * "Accept as evidence" is different (CL-8739): it never sends mail. Every
- * observed live failure at this stage was the model failing to call
- * `publish_workspace` at all -- malformed tool-call JSON, invented argument
- * names, a stalled turn after the tool did run once -- and there is no way
- * to invoke that tool without a prior model turn producing its `tool_use`
- * (stage 8 is wired as `step({ agent })`, the ordinary agent+model loop --
- * `specialist-source.ts`'s `specialistEntrySource` -- never the model-free
- * `action()` primitive `vendor/interchange/packages/workflow/src/
- * definition/primitives.ts`'s `ActionPrimitive` offers; and a resolved
- * approval carries no result, only status --
- * `vendor/interchange/packages/hub-api/src/routes/approvals.ts`'s
- * `formatApproval`). Once the model HAS called it, though, packaging and
- * recording it as evidence needs no further model turn: Accept calls
- * `index.tsx`'s `openReviewNow` directly, which persists (via
- * `api.persistBuildEvidence`, the fallback path) or reads (the real-upload
- * path) the archive and opens its review, client-side.
+ * When an attempt has ended, "Record" has the host package it — the same
+ * archive, hashes and target probes `publish_workspace` ran when the build
+ * was a sidecar tool — records the archive as the stage's `build_evidence`
+ * with the host as its producer (so it is the reviewable artifact,
+ * `stage-approval.ts`'s `reviewableArtifact`), and briefs the supervisor
+ * with the record. The supervisor's reply is the build status document;
+ * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Textarea } from "@corbits/react-ui";
-import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { Banner, Button } from "../../components.jsx";
-import { Dictated } from "../../dictation.jsx";
+import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
+import { Banner, Button, StateLabel } from "../../components.jsx";
+import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
-import { parseDeliveryManifest, type DeliveryManifestContent } from "./delivery-opening.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
-import { createHubTransport } from "../../hub.ts";
-import { approveTool, pendingApprovals, rejectTool, type PendingApproval } from "../../pending-approvals.ts";
+import { renderStackBlock } from "./frozen-stack-text.ts";
+import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
-/** The run_shell tool's declared name — every stage-8 approval this panel
- *  turns into a timeline row is parked on a tool call by this name. */
-const RUN_SHELL_TOOL_NAME = "run_shell";
-
-/** `publish_workspace`'s own declared name (`packages/tools-delivery/src/
- *  publish-workspace.ts`'s `TOOL_NAME`) — duplicated as a literal rather
- *  than imported: that package's `node:child_process`/`node:fs` runtime
- *  code must never reach the web bundle. Its calls are `approval: "ask"`
- *  too, so they need the same in-panel decision `run_shell` calls get. */
-const PUBLISH_WORKSPACE_TOOL_NAME = "publish_workspace";
-const BUILD_APPROVAL_TOOL_NAMES = new Set([RUN_SHELL_TOOL_NAME, PUBLISH_WORKSPACE_TOOL_NAME]);
-
-/** The mail bodies that start a fresh or continued build attempt — see the
- *  build-engineer's prompt (`kit.ts`) for the `attempts/<n>/` convention
- *  these correspond to. */
-const START_ATTEMPT_BODY = "Start the build attempt.";
-const CONTINUE_ATTEMPT_BODY = "Continue the build.";
-
-/** When the current build attempt began: the latest "Start"/"Continue" mail
- *  sent to the specialist, or undefined before either has been sent. Shared
- *  by evidence-staleness and the attempt timeout below so both agree on what
- *  "the current attempt" means. */
-function lastAttemptStartedAt(messages: readonly ChatMessage[]): number | undefined {
-  return [...messages]
-    .filter((message) => message.author === "me" && [START_ATTEMPT_BODY, CONTINUE_ATTEMPT_BODY].includes(message.body.trim()))
-    .map((message) => Date.parse(message.at))
-    .sort((a, b) => b - a)[0];
-}
-
-/** A `publish_workspace` fallback result as a reply carries it. `manifest`
- *  is the delivery manifest, with the tool's verification, that the real
- *  upload path would have written as its own artifact (#129). */
-export type PublishedBundle = {
-  fileName: string;
-  mediaType: string;
-  dataUri: string;
-  sizeBytes: number;
-  manifest?: DeliveryManifestContent;
-};
-
-/**
- * The stage 8 build specialist's `publish_workspace` fallback result, when
- * a reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
- * the whole message body or inside a fenced code block. Anything else (a
- * plain status update, or the real-upload result shape which has no
- * `dataUri`) is not a fallback bundle.
- */
-export function parsePublishedBundle(body: string | undefined): PublishedBundle | null {
-  if (!body) return null;
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(body)?.[1] ?? body;
-  try {
-    const parsed = JSON.parse(fenced.trim()) as Record<string, unknown>;
-    if (
-      typeof parsed["fileName"] === "string" &&
-      typeof parsed["mediaType"] === "string" &&
-      typeof parsed["dataUri"] === "string" &&
-      typeof parsed["sizeBytes"] === "number"
-    ) {
-      const manifest = parseDeliveryManifest(JSON.stringify(parsed["manifest"] ?? null));
-      return {
-        fileName: parsed["fileName"],
-        mediaType: parsed["mediaType"],
-        dataUri: parsed["dataUri"],
-        sizeBytes: parsed["sizeBytes"],
-        ...(manifest ? { manifest } : {}),
-      };
-    }
-  } catch {
-    // Not a bundle — an ordinary chat reply.
-  }
-  return null;
-}
-
-/**
- * The current attempt's `publish_workspace` fallback bundle, searched from
- * the newest agent reply backwards through every reply sent no earlier than
- * the last "Start"/"Continue" mail — not only the very latest reply. A
- * specialist that calls the tool and then keeps talking (CL-8739: "a stalled
- * turn after the tool did run once") would otherwise lose a bundle a prior
- * reply already carried, since nothing else ever surfaces it: there is no
- * tool-result channel outside the agent's own mail replies (approvals record
- * only arguments and status, never a call's result — see the module doc).
- */
-export function currentPublishedBundle(
-  messages: readonly ChatMessage[],
-): ReturnType<typeof parsePublishedBundle> {
-  const since = lastAttemptStartedAt(messages);
-  const replies = [...messages]
-    .filter((message) => message.author === "agent" && (since === undefined || Date.parse(message.at) >= since))
-    .reverse();
-  for (const message of replies) {
-    const bundle = parsePublishedBundle(message.body);
-    if (bundle) return bundle;
-  }
-  return null;
-}
-
-/**
- * Whether the current build attempt has produced evidence to approve
- * against: EITHER a `build_evidence` artifact (`publish_workspace`'s real
- * upload) written no earlier than the last "Start"/"Continue" mail sent to
- * the specialist, OR — on the fallback path, where no artifact exists until
- * `approve()` persists it — some reply since then already carries a fallback
- * bundle. Approving with neither would freeze a stage-8 reply that never
- * actually built anything — the bug this stage shipped with, and the reason
- * Approve could never enable at all once the real-upload path shipped (the
- * artifact only ever appeared AFTER approval, behind the disabled button —
- * CL-8723).
- */
-export function buildEvidenceState(
-  messages: readonly ChatMessage[],
-  nodes: readonly ArtifactNode[],
-  hasPublishedBundle = false,
-): { ready: boolean; reason: string | null } {
-  const archive = nodes
-    .filter((node) => node.kind === "build_evidence" && node.mediaType === "application/gzip" && node.supersededByNodeId === null)
+/** The frozen version of a kind, when the freeze names one; else the live node. */
+function frozenNode(nodes: readonly ArtifactNode[], freeze: Freeze | null, kind: string): ArtifactNode | undefined {
+  const frozen = freeze?.frozen.find((ref) => nodes.some((node) => node.artifactId === ref.artifactId && node.version === ref.version && node.kind === kind));
+  if (frozen) return nodes.find((node) => node.artifactId === frozen.artifactId && node.version === frozen.version);
+  return nodes
+    .filter((node) => node.kind === kind && node.supersededByNodeId === null)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  const startedAt = lastAttemptStartedAt(messages);
-  const archiveIsCurrent = archive !== undefined && (startedAt === undefined || Date.parse(archive.createdAt) >= startedAt);
-  if (archiveIsCurrent || hasPublishedBundle) return { ready: true, reason: null };
-  if (!archive) {
-    return { ready: false, reason: "No published build archive yet — the build has not published one." };
-  }
-  return { ready: false, reason: "The current attempt has not published a build archive yet." };
-}
-
-/** Matches `BUILD_STEP_TIMEOUT_MS` on `main`'s (now-removed) stage-loop: the
- *  bound a build attempt gets before the panel calls it stalled rather than
- *  leaving it silently "working" forever on the dispatch backstop. Enforced
- *  here, client-side, rather than as a workflow `step.timeout` — that field
- *  bounds the specialist's whole unbounded step (every attempt across its
- *  entire deployed lifetime, `vendor/interchange/packages/workflow/src/
- *  runtime/run.ts`'s `runStep`), not one build attempt, so it would tear
- *  down the specialist between attempts rather than fail just the stalled
- *  one. */
-export const BUILD_ATTEMPT_TIMEOUT_MS = 30 * 60 * 1000;
-
-/** Whether the current attempt has run past its bound with nothing to show
- *  for it: no published evidence, no pending approval left to act on either
- *  (a person still has a decision in front of them, not a stall). */
-export function attemptTimedOut(
-  messages: readonly ChatMessage[],
-  evidenceReady: boolean,
-  hasPendingApproval: boolean,
-  now: number = Date.now(),
-  timeoutMs: number = BUILD_ATTEMPT_TIMEOUT_MS,
-): boolean {
-  if (evidenceReady || hasPendingApproval) return false;
-  const startedAt = lastAttemptStartedAt(messages);
-  if (startedAt === undefined) return false;
-  return now - startedAt >= timeoutMs;
-}
-
-type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
-
-/** `GET /api/tenants/<t>/workflows/runs/<runId>/events`: the run's own
- *  committed, seq-ordered event log (RunStarted, StepStarted, SignalAwaited,
- *  SignalReceived, ...), read straight off the tenant-wide runs route --
- *  the same one workbench's `insightsRunEventsPath` reads. */
-async function runEvents(tenantId: string, runId: string): Promise<RunEvent[]> {
-  const transport = createHubTransport();
-  const page = await transport
-    .fetch<{ runId: string; events: RunEvent[] }>("GET", `/api/tenants/${tenantId}/workflows/runs/${runId}/events`)
-    .catch(() => ({ runId, events: [] as RunEvent[] }));
-  return page.events;
-}
-
-/** One row in the build timeline: a tool call, a run milestone, or a reply. */
-type TimelineRow = {
-  readonly id: string;
-  readonly at: string;
-  readonly label: string;
-  readonly detail?: string;
-  readonly tone: "info" | "selected" | "success" | "error" | "warning";
-};
-
-/** Mockup `.ev` tone classes: pass / fail / working / queued. */
-const EV_TONE: Record<TimelineRow["tone"], "p" | "f" | "w" | "r"> = {
-  success: "p",
-  error: "f",
-  warning: "w",
-  selected: "w",
-  info: "r",
-};
-
-function evMark(tone: TimelineRow["tone"]): string {
-  if (tone === "success") return "✓ ";
-  if (tone === "error") return "✗ ";
-  if (tone === "warning" || tone === "selected") return "… ";
-  return "";
-}
-
-function approvalRows(approvals: readonly PendingApproval[]): TimelineRow[] {
-  return approvals
-    .filter((approval) => BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""))
-    .map((approval) => {
-      const isPublish = approval.toolDefinition?.name === PUBLISH_WORKSPACE_TOOL_NAME;
-      const command = approval.toolArguments["command"];
-      const resolvedAt = approval.resolvedAt ?? null;
-      const tone =
-        approval.status === "pending" ? "selected" : approval.status === "approved" ? "success" : "error";
-      return {
-        id: `approval:${approval.id}`,
-        at: resolvedAt ?? approval.createdAt,
-        label: isPublish
-          ? approval.status === "pending"
-            ? "asks to publish the build archive"
-            : approval.status === "approved"
-              ? "published the build archive"
-              : `publish ${approval.status}`
-          : approval.status === "pending"
-            ? "asks to run a command"
-            : approval.status === "approved"
-              ? "ran a command"
-              : `command ${approval.status}`,
-        detail: typeof command === "string" ? command : JSON.stringify(approval.toolArguments),
-        tone,
-      };
-    });
-}
-
-const RUN_MILESTONE_LABEL: Record<string, string> = {
-  RunStarted: "the build specialist started",
-  StepStarted: "working",
-  SignalReceived: "resumed",
-};
-
-function eventRows(events: readonly RunEvent[]): TimelineRow[] {
-  return events.flatMap((event): TimelineRow[] => {
-    if (event.type === "SignalAwaited") {
-      const parkKind = event.body["parkKind"];
-      return [
-        {
-          id: `event:${event.seq}`,
-          at: String(event.body["at"] ?? ""),
-          label: parkKind === "input" ? "waiting on you" : "waiting for your approval",
-          tone: "warning",
-        },
-      ];
-    }
-    const label = RUN_MILESTONE_LABEL[event.type];
-    if (!label) return [];
-    return [{ id: `event:${event.seq}`, at: String(event.body["at"] ?? ""), label, tone: "info" }];
-  });
-}
-
-// CL-8566's `run_shell`/`publish_workspace` calls resolve as a hub approval
-// that carries only status, never a result (`formatApproval` in
-// `vendor/interchange/packages/hub-api/src/routes/approvals.ts`), and the
-// run's own committed event log is step-level only — no event kind carries a
-// tool call's stdout/stderr (`vendor/interchange/packages/workflow/src/
-// state-machine/events.ts`). A failing command's raw output is never
-// recorded anywhere this client can reach: the specialist's own reply is the
-// only account of it, in its own words, and that reply is what this row
-// shows in full — no 140-character cut that would hide the one place a
-// failure's detail can appear at all.
-function replyRows(messages: readonly ChatMessage[]): TimelineRow[] {
-  return messages
-    .filter((message) => message.author === "agent")
-    .map((message) => ({
-      id: `reply:${message.id}`,
-      at: message.at,
-      label: "reported",
-      detail: message.body,
-      tone: "success" as const,
-    }));
 }
 
 /**
- * The current state, in the same vocabulary the old bridge's `StateLabel`
- * used: waiting on a decision beats everything else, then a timed-out
- * attempt, then whether the run's last milestone is still open, then idle.
+ * The frozen material the host assembles the worker's packet from: the
+ * approved plan, the requirements it cites, the stage 4 design and the
+ * stack and target stage 7 froze. Read once per attempt; the host writes
+ * the assembled packet beside the attempt, immutable.
  */
-function currentState(
-  approvals: readonly PendingApproval[],
-  events: readonly RunEvent[],
-  messages: readonly ChatMessage[],
-  timedOut: boolean,
-): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
-  const pending = approvals.find(
-    (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
-  );
-  if (pending) return { label: "waiting for your approval", tone: "warning" };
-  if (timedOut) return { label: "the build attempt timed out", tone: "error" };
-
-  const lastReplyAt = messages.filter((message) => message.author === "agent").at(-1)?.at;
-  const lastEvent = [...events].reverse().find((event) => ["StepStarted", "SignalReceived"].includes(event.type));
-  if (lastEvent) {
-    const lastEventAt = String(lastEvent.body["at"] ?? "");
-    if (!lastReplyAt || Date.parse(lastReplyAt) < Date.parse(lastEventAt)) return { label: "working", tone: "selected" };
-  }
-  if (lastReplyAt) return { label: "reported · your decision", tone: "success" };
-  return { label: "idle", tone: "info" };
-}
-
-/** When the build attempt began, for the elapsed clock: the earliest
- *  `RunStarted` this run has committed, or null before one has. */
-function startedAt(events: readonly RunEvent[]): string | null {
-  const started = events.find((event) => event.type === "RunStarted");
-  return started ? String(started.body["at"] ?? "") || null : null;
+export async function buildPromptMaterial(
+  tenantId: string,
+  nodes: readonly ArtifactNode[],
+  freeze: Freeze | null,
+  read: (nodeId: string) => Promise<string> = (nodeId) => api.artifactContent(tenantId, nodeId).then((result) => result.content),
+): Promise<BuildPromptMaterial> {
+  const plan = frozenNode(nodes, freeze, "build_plan");
+  const requirements = frozenNode(nodes, freeze, "product_requirements");
+  const design = frozenNode(nodes, freeze, "design_artifact");
+  const [planText, requirementsText, designText] = await Promise.all([
+    plan ? read(plan.id) : Promise.resolve(""),
+    requirements ? read(requirements.id) : Promise.resolve(""),
+    design ? read(design.id) : Promise.resolve(""),
+  ]);
+  return {
+    planText,
+    requirementsText,
+    designText,
+    stackBlock: renderStackBlock(freeze) ?? "",
+    target: freeze?.target ?? "",
+    planRef: plan ? `${plan.artifactId}@${String(plan.version)}` : "",
+  };
 }
 
 /** Counts up from `since`, or shows nothing until there is one. */
-function BuildClock({ since }: { since: string | null }) {
+function BuildClock({ since, until }: { since: string | null; until: string | null }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (!since) return;
     const started = Date.parse(since);
-    const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    const tick = () => setSeconds(Math.max(0, Math.floor(((until ? Date.parse(until) : Date.now()) - started) / 1000)));
     tick();
+    if (until) return;
     const timer = setInterval(tick, 1_000);
     return () => clearInterval(timer);
-  }, [since]);
+  }, [since, until]);
   if (!since) return null;
   return (
     <span className="elapsed-clock" role="timer" aria-live="off">
@@ -369,16 +94,46 @@ function BuildClock({ since }: { since: string | null }) {
   );
 }
 
+/** Mockup `.ev` tone classes: pass / fail / working / queued. */
+const EV_TONE: Record<"info" | "selected" | "success" | "error" | "warning", "p" | "f" | "w" | "r"> = {
+  success: "p",
+  error: "f",
+  warning: "w",
+  selected: "w",
+  info: "r",
+};
+
+function evMark(tone: keyof typeof EV_TONE): string {
+  if (tone === "success") return "✓ ";
+  if (tone === "error") return "✗ ";
+  if (tone === "warning" || tone === "selected") return "… ";
+  return "";
+}
+
+function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
+  if (attempt.state === "running") return { label: "working", tone: "selected" };
+  if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
+  if (attempt.state === "lost") return { label: "lost: the host was stopped without ending it, and the worker is gone", tone: "error" };
+  if (attempt.state === "unavailable") return { label: "could not run", tone: "error" };
+  const outcome = attempt.outcome;
+  if (!outcome) return { label: "ended", tone: "info" };
+  if (outcome.signal) return { label: `ended by ${outcome.signal}`, tone: "warning" };
+  // An exit status is reported, never coloured: zero is not evidence the
+  // build is right, and a person reads the record, not a tick.
+  return { label: `exited ${String(outcome.exitStatus ?? "?")}`, tone: outcome.exitStatus === 0 ? "info" : "warning" };
+}
+
 export function BuildPanel({
   detail,
   tenantId,
+  freeze,
+  attempts,
+  refreshAttempts,
   onChanged,
   onOpenSettings,
   onApprove,
   approving,
   canApprove,
-  onOpenDecisions,
-  onAcceptEvidence,
   strip = null,
   reader = null,
   stageEvents = EMPTY_STAGE_EVENTS,
@@ -389,21 +144,16 @@ export function BuildPanel({
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
+  /** Stage 7's freeze: the target, the frozen references and the stack. */
+  freeze: Freeze | null;
+  /** The host's attempts for this project (`useBuildAttempts`). */
+  attempts: readonly BuildAttempt[];
+  refreshAttempts: () => Promise<void>;
   onChanged: () => void;
   onOpenSettings: () => void;
   onApprove: () => void;
   approving: boolean;
   canApprove: boolean;
-  /** Where "waiting for your approval" sends the person. */
-  onOpenDecisions?: () => void;
-  /**
-   * "Accept as evidence": packages and records this attempt's archive as
-   * the stage's `build_evidence` artifact and opens its review, entirely
-   * client-side — no mail to the specialist, so accepting never depends on
-   * the model taking another turn. Fails honestly (`ok: false`, a reason)
-   * when the attempt has not published anything to accept yet.
-   */
-  onAcceptEvidence: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
   /** The artifact tabs + version strip the pane shares with every stage. */
   strip?: ReactNode;
   /** What the pane shows while another stage's artifact tab is selected. */
@@ -417,27 +167,22 @@ export function BuildPanel({
   onAttach?: (files: FileList) => void;
 }) {
   const [address, setAddress] = useState<string | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
-  // The tenant the specialist's run, approvals and events are in: the
-  // project's own, or the workspace for one deployed before #29.
-  const [runTenantId, setRunTenantId] = useState<string>(tenantId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
-  const [events, setEvents] = useState<RunEvent[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
-  const [now, setNow] = useState(() => Date.now());
+  const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [log, setLog] = useState("");
+  const [startCommand, setStartCommand] = useState("");
+  const [port, setPort] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     api
       .ensureStageAgent(detail.project.id, 8)
       .then((deployment) => {
-        if (cancelled) return;
-        setAddress(deployment.address);
-        setRunId(deployment.deploymentId);
-        setRunTenantId(deployment.tenantId);
+        if (!cancelled) setAddress(deployment.address);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -446,6 +191,24 @@ export function BuildPanel({
       cancelled = true;
     };
   }, [detail.project.id]);
+
+  // The worker's presence is the host's word, asked for on open and again
+  // whenever the window regains focus: a person installs the tool in a
+  // terminal, or changes it in Settings, and comes back expecting the
+  // panel to know.
+  const checkWorker = useCallback(async () => {
+    try {
+      setWorker(await api.buildWorker());
+    } catch {
+      // The banner keeps the last answer; the next check says.
+    }
+  }, []);
+  useEffect(() => {
+    void checkWorker();
+    const onFocus = () => void checkWorker();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [checkWorker]);
 
   const load = useCallback(async () => {
     if (!address) return;
@@ -463,60 +226,58 @@ export function BuildPanel({
     return () => clearInterval(timer);
   }, [address, load]);
 
-  // Refreshes the project detail (and so `detail.nodes`) whenever this
-  // stage's thread grows — the only signal this panel has that
-  // `publish_workspace` may have just uploaded a real `build_evidence`
-  // artifact, which nothing else here polls for (CL-8723).
+  // The project detail (and so `detail.nodes`) follows this stage's thread:
+  // a supervisor reply is the only cue that the status document changed.
   const lastMessageCount = useRef(0);
   useEffect(() => {
     if (messages.length > lastMessageCount.current) onChanged();
     lastMessageCount.current = messages.length;
   }, [messages, onChanged]);
 
-  // The timeline: hub approvals and the run's own event log, folded
-  // together every 5s -- the same cadence the old bridge's event log
-  // polled at.
-  const loadTimeline = useCallback(async () => {
-    if (!runId) return;
-    const transport = createHubTransport();
-    const [nextApprovals, nextEvents] = await Promise.all([
-      pendingApprovals(runTenantId, transport).catch(() => [] as readonly PendingApproval[]),
-      runEvents(runTenantId, runId),
-    ]);
-    // Matched on `anchorRunId`, not `runId`: `runId` is the exact run a
-    // nested tool call executed on, which can differ from the deployment's
-    // own anchor run — `pending-approvals.ts`'s own doc comment on
-    // `actionableApprovals` says so. `runId` here is this deployment's id
-    // (the anchor), so matching on it directly would silently drop an
-    // approval raised by a nested run under it.
-    setApprovals(nextApprovals.filter((approval) => approval.anchorRunId === runId).slice());
-    setEvents(nextEvents);
-  }, [runId, runTenantId]);
+  const latest = attempts.at(-1) ?? null;
+  const running = attempts.find((entry) => entry.state === "running") ?? null;
+  // A detached worker can still be cancelled: the host signals its group.
+  const cancellable = running ?? attempts.find((entry) => entry.state === "detached") ?? null;
+  const current = useMemo(() => attempts.find((entry) => entry.attempt === selected) ?? latest, [attempts, selected, latest]);
 
+  // The log of the attempt in view: polled while it runs, read once when it
+  // has ended. Both pipes and the worker's turn reports, in arrival order.
   useEffect(() => {
-    if (!runId) return;
-    void loadTimeline();
-    const timer = setInterval(() => void loadTimeline(), 5_000);
-    return () => clearInterval(timer);
-  }, [runId, loadTimeline]);
+    if (!current) {
+      setLog("");
+      return;
+    }
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const result = await api.buildAttempt(detail.project.id, current.attempt);
+        if (!cancelled) setLog(result.log);
+      } catch {
+        // The next poll says.
+      }
+    };
+    void read();
+    if (current.state !== "running") return () => {
+      cancelled = true;
+    };
+    const timer = setInterval(() => void read(), 2_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [detail.project.id, current?.attempt, current?.state]);
 
-  // Drives `attemptTimedOut` below across time even when nothing else about
-  // the attempt has changed — a stalled turn produces no new message, no new
-  // event, and no new approval, so without its own tick the timeout would
-  // never actually fire.
+  const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+    const element = logRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [log]);
 
-  const send = async (label: string, body: string) => {
-    if (!address) return;
+  const run = async (label: string, work: () => Promise<void>) => {
     setBusy(label);
     setError(null);
     try {
-      await api.sendStageMail(tenantId, address, { body });
-      await Promise.all([load(), loadTimeline()]);
-      onChanged();
+      await work();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -524,83 +285,60 @@ export function BuildPanel({
     }
   };
 
-  const timeline = useMemo(
-    () =>
-      [...approvalRows(approvals), ...eventRows(events), ...replyRows(messages)]
-        .filter((row) => row.at)
-        .sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
-    [approvals, events, messages],
-  );
-  const buildStartedAt = useMemo(() => startedAt(events), [events]);
+  const start = (continueFrom?: number) =>
+    run(continueFrom === undefined ? "start" : "continue", async () => {
+      const material = await buildPromptMaterial(tenantId, detail.nodes, freeze);
+      const started = await api.startBuildAttempt(detail.project.id, material, continueFrom);
+      setSelected(started.attempt.attempt);
+      await refreshAttempts();
+    });
 
-  const build = useMemo(
-    () =>
-      detail.nodes
-        .filter((node) => node.kind === "build_evidence" && node.mediaType === "application/gzip" && node.supersededByNodeId === null)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
-    [detail.nodes],
-  ) as ArtifactNode | undefined;
+  const cancel = (attempt: number) =>
+    run("cancel", async () => {
+      await api.cancelBuildAttempt(detail.project.id, attempt);
+      await refreshAttempts();
+    });
 
-  const publishedBundle = useMemo(() => currentPublishedBundle(messages), [messages]);
-  const evidence = useMemo(
-    () => buildEvidenceState(messages, detail.nodes, publishedBundle !== null),
-    [messages, detail.nodes, publishedBundle],
-  );
-
-  const pendingRunShell = approvals.filter(
-    (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
-  );
-  const timedOut = useMemo(
-    () => attemptTimedOut(messages, evidence.ready, pendingRunShell.length > 0, now),
-    [messages, evidence.ready, pendingRunShell.length, now],
-  );
-  const state = useMemo(() => currentState(approvals, events, messages, timedOut), [approvals, events, messages, timedOut]);
-  const [decidingId, setDecidingId] = useState<string | null>(null);
-  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
-
-  const decideRunShell = async (approvalId: string, decision: "once" | "always" | "reject") => {
-    setDecidingId(approvalId);
-    setError(null);
-    try {
-      if (decision === "reject") {
-        const reason = (rejectReasons[approvalId] ?? "").trim();
-        if (!reason) {
-          setError("A reason is required to reject.");
-          return;
-        }
-        await rejectTool(runTenantId, approvalId, reason);
-      } else {
-        await approveTool(runTenantId, approvalId, decision);
-      }
-      await loadTimeline();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setDecidingId(null);
-    }
-  };
-
-  // Packages and records the attempt's archive directly — no mail to the
-  // specialist, so accepting never waits on another model turn. Refuses
-  // honestly when there is nothing published yet, the same reason already
-  // shown inline (`evidence.reason`).
-  const accept = async () => {
-    setBusy("accept");
-    setError(null);
-    try {
-      const result = await onAcceptEvidence();
-      if (!result.ok) {
-        setError(result.reason);
-        return;
-      }
-      await Promise.all([load(), loadTimeline()]);
+  // Package on the host, record the archive under the supervisor's role,
+  // and brief the supervisor with the record. The archive is what the
+  // review opens on; the brief is what the status is written from.
+  const record = (attempt: BuildAttempt) =>
+    run("record", async () => {
+      if (!address || !attempt.outcome) return;
+      // The target probed is the one stage 7 froze; the fields say how to start it.
+      const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
+      // Stage 7's forecast, for the supervisor's "Cost against forecast": the
+      // frozen estimate's own section, or nothing, said as nothing.
+      const estimate = frozenNode(detail.nodes, freeze, "cost_approval");
+      const forecast = estimate ? forecastSection((await api.artifactContent(tenantId, estimate.id).catch(() => ({ content: "" }))).content) : null;
+      await api.persistBuildEvidence(detail.project.id, {
+        fileName: packaged.fileName,
+        mediaType: packaged.mediaType,
+        dataUri: packaged.dataUri,
+        sizeBytes: packaged.sizeBytes,
+        manifest: packaged.manifest,
+      });
+      await api.sendStageMail(tenantId, address, {
+        body: composeSupervisorBrief({
+          attempt: attempt.attempt,
+          outcome: attempt.outcome,
+          archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes },
+          probeSkipped: probe.skipped,
+          forecast,
+          verification: packaged.verification,
+        }),
+      });
+      await Promise.all([load(), refreshAttempts()]);
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
+    });
+
+  const archive = useMemo(() => buildArchives(detail.nodes)[0], [detail.nodes]) as ArtifactNode | undefined;
+  const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
+  const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
+  const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
+  const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
+  const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
 
   return (
     <StagePanes
@@ -608,186 +346,166 @@ export function BuildPanel({
       strip={strip}
       conversation={
         <>
-        {error ? (
-          <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
-            {error}
-          </Banner>
-        ) : null}
-        {!address ? (
-          <div className="think" role="status">
-            <span className="who conv-who">Opening…</span>
-          </div>
-        ) : null}
-        <StageConversation
-          stage={8}
-          messages={messages}
-          value={composer}
-          onValueChange={setComposer}
-          onSend={() => {
-            const body = composer;
-            setComposer("");
-            void send("message", body);
-          }}
-          working={busy !== null}
-          disabled={!address}
-          events={stageEvents}
-          who={agentFor(8).title}
-          {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
-          {...(onAttach ? { onAttach } : {})}
-          popover={popover}
-          rows={
-            pendingRunShell.length > 0 ? (
-              <>
-                {pendingRunShell.map((approval) => (
-                  <GrantRow
-                    key={approval.id}
-                    approval={approval}
-                    deciding={decidingId === approval.id}
-                    reason={rejectReasons[approval.id] ?? ""}
-                    onReason={(value) =>
-                      setRejectReasons((prev) => ({ ...prev, [approval.id]: value }))
-                    }
-                    onDecide={(decision) => void decideRunShell(approval.id, decision)}
-                  />
-                ))}
-                <p className="composer-cue">
-                  "Allow for this build" trusts every future command on this build
-                  attempt without asking again — not another attempt, or another
-                  project.
-                </p>
-              </>
-            ) : null
-          }
-        />
+          {error ? (
+            <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
+              {error}
+            </Banner>
+          ) : null}
+          {!address ? (
+            <div className="think" role="status">
+              <span className="who conv-who">Opening…</span>
+            </div>
+          ) : null}
+          <StageConversation
+            stage={8}
+            messages={messages}
+            value={composer}
+            onValueChange={setComposer}
+            onSend={() => {
+              const body = composer;
+              setComposer("");
+              void run("message", async () => {
+                if (!address) return;
+                await api.sendStageMail(tenantId, address, { body });
+                await load();
+              });
+            }}
+            working={busy !== null}
+            disabled={!address}
+            events={stageEvents}
+            who={agentFor(8).title}
+            {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
+            {...(onAttach ? { onAttach } : {})}
+            popover={popover}
+          />
         </>
       }
     >
-        {reader ?? (
-          <div className="stage-inner">
-            <div className="doc">
-              <h1>Build Evidence</h1>
-              <div className="docmeta">
-                <span>
-                  {address && state.label === "waiting for your approval" && onOpenDecisions ? (
-                    <Button variant="link" onClick={onOpenDecisions}>
-                      {state.label}
-                    </Button>
-                  ) : address ? (
-                    state.label
-                  ) : (
-                    "idle"
-                  )}
-                  {" · "}
-                  {agentFor(8).title}
-                  {buildStartedAt ? (
-                    <>
-                      {" · "}
-                      <BuildClock since={buildStartedAt} />
-                    </>
-                  ) : null}
-                </span>
-              </div>
-              <div className="document-tools">
-                <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", START_ATTEMPT_BODY)}>
-                  Start the build attempt
-                </Button>
-                <Button variant="primary" loading={busy === "continue"} disabled={!address} onClick={() => void send("continue", CONTINUE_ATTEMPT_BODY)}>
-                  Continue from the last attempt
-                </Button>
-                <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
-                  Cancel the build attempt
-                </Button>
-                <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void accept()}>
-                  Accept as evidence
-                </Button>
-                <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
-                  Mark this attempt failed
-                </Button>
-                <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-                  Approve and continue
-                </Button>
-              </div>
-              {timeline.length > 0 ? (
-                <div className="ev">
-                  {timeline.map((row) => (
-                    <span key={row.id} className={EV_TONE[row.tone]}>
-                      {evMark(row.tone)}
-                      {row.label}
-                      {row.detail ? ` — ${row.detail}` : ""}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              {build ? <BuildFile node={build} tenantId={tenantId} /> : null}
-              {!canApprove && evidence.reason ? <p>{evidence.reason}</p> : null}
+      {reader ?? (
+        <div className="stage-inner">
+          <div className="doc">
+            <h1>Build Evidence</h1>
+            <div className="docmeta">
+              <span>
+                <StateLabel tone={state.tone}>{state.label}</StateLabel>
+                {" · "}
+                {worker ? `${worker.worker.label}${worker.available ? "" : " (not on this computer)"}` : agentFor(8).title}
+                {current?.startedAt ? (
+                  <>
+                    {" · attempt "}
+                    {String(current.attempt)}
+                    {" · "}
+                    <BuildClock since={current.startedAt} until={current.endedAt} />
+                  </>
+                ) : null}
+              </span>
             </div>
+            {worker && !worker.available ? (
+              <Banner tone="error" title={worker.detail} action={{ label: "Open Settings", onClick: onOpenSettings }}>
+                {worker.install ? worker.install.text : "Choose a coding agent that is installed, or give its path, in Settings."}{" "}
+                <button type="button" className="btn link" onClick={() => void checkWorker()}>
+                  Check again
+                </button>
+              </Banner>
+            ) : null}
+            <div className="document-tools">
+              <Button variant="primary" loading={busy === "start"} disabled={!!running || busy !== null} onClick={() => void start()}>
+                Start the build attempt
+              </Button>
+              <Button
+                variant="primary"
+                loading={busy === "continue"}
+                disabled={!!running || busy !== null || lastEnded === null}
+                onClick={() => lastEnded && void start(lastEnded.attempt)}
+              >
+                {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
+              </Button>
+              <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
+                Cancel the build attempt
+              </Button>
+              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
+                Approve and continue
+              </Button>
+            </div>
+            {attempts.length > 0 ? (
+              <div className="ev">
+                {attempts.map((entry) => {
+                  const mark = attemptLabel(entry);
+                  return (
+                    <span key={entry.attempt} className={EV_TONE[mark.tone]} role="button" tabIndex={0} onClick={() => setSelected(entry.attempt)} onKeyDown={(event) => event.key === "Enter" && setSelected(entry.attempt)}>
+                      {evMark(mark.tone)}
+                      {entry.attempt === current?.attempt ? <b>attempt {String(entry.attempt)}</b> : `attempt ${String(entry.attempt)}`}
+                      {entry.continuedFrom !== null ? ` (continued from ${String(entry.continuedFrom)})` : ""}
+                      {" — "}
+                      {mark.label}
+                      {entry.startedAt ? ` · ${new Date(entry.startedAt).toLocaleString()}` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+            {current ? (
+              <>
+                <h2>Attempt {String(current.attempt)} — what the worker wrote</h2>
+                <pre ref={logRef} className="build-log" aria-live="polite" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
+                  {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
+                </pre>
+                {current.outcome ? (
+                  <p className="inline-note">
+                    {current.outcome.available
+                      ? `${current.outcome.worker} ${current.outcome.signal ? `ended by ${current.outcome.signal}` : `exited ${String(current.outcome.exitStatus)}`}` +
+                        (current.outcome.turns !== null ? ` after ${String(current.outcome.turns)} turns and ${String(current.outcome.toolCalls ?? 0)} tool calls.` : ".")
+                      : current.outcome.stderrTail}
+                  </p>
+                ) : null}
+                {current.state === "ended" && current.outcome?.available && current.outcome.finalText.trim().length === 0 ? (
+                  // Ended with nothing to report: what is in the directory is
+                  // still there, and the way on is to continue from it.
+                  <div className="document-tools">
+                    <p className="inline-note">The worker ended without a report. Its directory is kept; a new attempt can continue from it.</p>
+                    <Button variant="primary" loading={busy === "continue"} disabled={!!running || busy !== null} onClick={() => void start(current.attempt)}>
+                      Continue from attempt {String(current.attempt)}'s directory
+                    </Button>
+                  </div>
+                ) : null}
+                {canRecord ? (
+                  <div className="document-tools">
+                    <input
+                      className="field"
+                      aria-label="Start command"
+                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
+                      value={startCommand}
+                      onChange={(event) => setStartCommand(event.target.value)}
+                    />
+                    <input
+                      className="field"
+                      aria-label="Port"
+                      placeholder="Port"
+                      inputMode="numeric"
+                      value={port}
+                      onChange={(event) => setPort(event.target.value)}
+                      style={{ maxWidth: "6rem" }}
+                    />
+                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null || !address} onClick={() => void record(current)}>
+                      Record attempt {String(current.attempt)} and brief the supervisor
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="inline-note">No attempt has been started. The worker builds in its own directory on this computer, from the frozen plan, requirements, design and stack.</p>
+            )}
+            {archive ? <BuildFile node={archive} tenantId={tenantId} /> : null}
+            {status ? (
+              <>
+                <h2>Build status — {agentFor(8).title}</h2>
+                <Markdown source={status.body} />
+              </>
+            ) : null}
+            {!canApprove && evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}
           </div>
-        )}
+        </div>
+      )}
     </StagePanes>
-  );
-}
-
-/** One pending capability grant as a quiet row above the composer — Deny
- *  expands the row into the reason field the rejection is sent with. */
-function GrantRow({
-  approval,
-  deciding,
-  reason,
-  onReason,
-  onDecide,
-}: {
-  approval: PendingApproval;
-  deciding: boolean;
-  reason: string;
-  onReason: (value: string) => void;
-  onDecide: (decision: "once" | "always" | "reject") => void;
-}) {
-  const [rejecting, setRejecting] = useState(false);
-  const command =
-    typeof approval.toolArguments["command"] === "string"
-      ? approval.toolArguments["command"]
-      : JSON.stringify(approval.toolArguments);
-  if (rejecting) {
-    return (
-      <div className="stage-action request composer-request">
-        <label className="sa-txt" htmlFor={`reject-reason-${approval.id}`}>
-          why refused
-        </label>
-        <Dictated value={reason} onValueChange={onReason} align="start">
-          <Textarea
-            id={`reject-reason-${approval.id}`}
-            value={reason}
-            onChange={(event) => onReason(event.target.value)}
-            placeholder="Why this call is being refused."
-          />
-        </Dictated>
-        <span className="sa-actions">
-          <Button variant="ghost" onClick={() => setRejecting(false)}>
-            Cancel
-          </Button>
-          <Button loading={deciding} onClick={() => onDecide("reject")}>
-            Send rejection
-          </Button>
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="stage-action request composer-request">
-      <span className="sa-txt">
-        requests <code className="hash">{command}</code>
-      </span>
-      <span className="sa-actions">
-        <Button variant="ghost" onClick={() => setRejecting(true)}>
-          Deny
-        </Button>
-        <Button variant="ghost" loading={deciding} onClick={() => onDecide("once")}>
-          Allow once
-        </Button>
-        <Button variant="ghost" loading={deciding} onClick={() => onDecide("always")}>
-          Allow for this build
-        </Button>
-      </span>
-    </div>
   );
 }

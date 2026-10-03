@@ -41,9 +41,13 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { BuildPanel } from "./build.jsx";
+import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { repairedChoiceDraft } from "./choice-repair.ts";
+import { repairedStackDraft } from "./stack-repair.ts";
+import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -51,6 +55,8 @@ import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
+import { useSpecialistRunState } from "./use-specialist-run-state.ts";
+import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
@@ -62,7 +68,7 @@ import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { stageEvents, switchEvents } from "./stage-events.ts";
+import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -70,6 +76,8 @@ import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
+import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
+import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
@@ -241,9 +249,14 @@ export function StageWorkspace({
   const withdrawnIds = withdrawn.ids;
   const pending = withdrawn.pending;
   const stopTurn = withdrawn.stop;
+  // Whether the specialist is working comes from its run (#445); the mailbox
+  // (a person turn with no reply) speaks only when the run cannot be read.
+  const threadKey = `${String(foldedMessages.length)}:${foldedMessages.at(-1)?.id ?? ""}`;
+  const runState = useSpecialistRunState(detail.project.id, stage, agentAddress, pending !== null, threadKey);
+  const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(pending !== null, specialistActivity(stage));
+  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
 
   const openingDispatch = useOpeningDispatch({
     detail,
@@ -265,7 +278,17 @@ export function StageWorkspace({
   // draft separate from the latest conversational turn so an acknowledgement
   // or a follow-up question never replaces the document being reviewed.
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
-  const draftMessage = guidance.draft;
+  // A stage 3 draft that absorbed the person's choice anywhere but under
+  // "## Chosen approach" would leave them choosing again (#430): the
+  // section is written in deterministically, as alpha main did, before the
+  // pane or the gate reads the draft.
+  // A stage 6 revision that dropped the plan's Stack block gets the last
+  // valid one carried in (#437), so the gate's banner is for a plan that
+  // never had one.
+  const draftMessage = useMemo(
+    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
+    [stage, foldedMessages, guidance.draft],
+  );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
   // when asked, on any stage. Both are advisory and never touch the gate.
@@ -340,12 +363,22 @@ export function StageWorkspace({
   // The transcript's quiet record: boundaries, versions, decisions, aborted
   // turns and a model switch's own announcement, folded in beside the mail
   // as system lines.
+  // Messages this session routed to the requirements author instead of the
+  // architect (#407): a line in the chat says so, where the message would
+  // have been.
+  const [routedEvents, setRoutedEvents] = useState<StageEvent[]>([]);
+  const [requirementsAsk, setRequirementsAsk] = useState<{ body: string; at: number } | null>(null);
+  useEffect(() => {
+    setRoutedEvents([]);
+    setRequirementsAsk(null);
+  }, [stage, detail.project.id]);
   const events = useMemo(
     () => [
       ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
       ...switchEvents(foldedMessages),
+      ...routedEvents,
     ],
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],
   );
 
   // CL-8899: the current stage's provider/model, reporting-only (read off
@@ -444,6 +477,10 @@ export function StageWorkspace({
     modelName: activeModel?.canonicalName ?? null,
     reloadThread: loadThread,
   });
+  // Stage 8's attempts live on the host (`apps/hub/src/build-attempts.ts`);
+  // the panel drives them and the gate reads whether the recorded archive
+  // is the current attempt's.
+  const builds = useBuildAttempts(detail.project.id, stage === 8);
   const decisions = useStageDecisions({
     detail,
     tenantId,
@@ -452,6 +489,8 @@ export function StageWorkspace({
     reviewMessage,
     draftKind,
     foldedMessages,
+    buildAttempts: builds.attempts,
+    buildAttemptsLoaded: builds.loaded,
     refreshWorkflow: workflow.refresh,
     markStage: workflow.markStage,
     queueOpening: openingDispatch.queueOpening,
@@ -553,13 +592,41 @@ export function StageWorkspace({
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
+    // A requirements request is the requirements author's (#407): it
+    // goes to the companion's author with any named review attached, and
+    // the chat says so where the message would have been.
+    if (stage === 6 && requirementsRequest(body)) {
+      const at = new Date().toISOString();
+      setRequirementsAsk({ body, at: Date.now() });
+      setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
+      return;
+    }
     setSending(true);
     setError(null);
     setRemediation(undefined);
     try {
-      await api.sendStageMail(tenantId, agentAddress, { body: withAttachedDocuments(body, stageDocuments) });
+      // With a Markdown draft on the table, the turn carries it and the
+      // instruction to revise it, as alpha main's rounds did (#431); a design
+      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
+      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
+      const turn = withAttachedDocuments(body, stageDocuments);
+      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
+      await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
+      if (isTerminalRunRefusal(cause)) {
+        // The specialist's run has ended (#413): ask for it again, which
+        // drops the dead deployment and places a fresh one, refresh the live
+        // address, and hand the message back. The redeploy hand-off carries
+        // the conversation to the new specialist before it is sent again.
+        setComposer(body);
+        setError(TERMINAL_RUN_NOTICE);
+        void api
+          .ensureStageAgent(detail.project.id, stage)
+          .then(() => agent.retry())
+          .catch((again: unknown) => setError(again instanceof ApiFailure ? again.detail.message : String(again)));
+        return;
+      }
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
     } finally {
@@ -728,7 +795,7 @@ export function StageWorkspace({
       working={sending}
       disabled={!agentAddress}
       withdrawnIds={withdrawnIds}
-      pending={pending !== null}
+      pending={busy}
       onStop={() => void stopTurn()}
       onSendHold={() => openSendBack(composer)}
       popover={sendBackPopover}
@@ -824,10 +891,10 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress ? (
-        <div className="stage-model-row" data-inference-pending={pending !== null ? "" : undefined}>
+        <div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>
           {/* The flame burns while a specialist turn is in flight and sits
               still otherwise (#87); the text keeps the state readable. */}
-          <span className="inference-flame" role="img" aria-label={pending !== null ? "Inference running" : "Inference idle"}>
+          <span className="inference-flame" role="img" aria-label={busy ? "Inference running" : "Inference idle"}>
             <Flame aria-hidden="true" />
           </span>
           <span className="inline-note">
@@ -916,7 +983,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 4 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <DesignPanel
               detail={detail}
@@ -932,7 +999,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 5 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
               <AudiencePackages
@@ -959,13 +1026,14 @@ export function StageWorkspace({
         <BuildPanel
           detail={detail}
           tenantId={tenantId}
+          freeze={workflowView?.freeze ?? null}
+          attempts={builds.attempts}
+          refreshAttempts={builds.refresh}
           onChanged={() => void refreshWorkflow()}
           onOpenSettings={onOpenSettings}
           onApprove={approve}
           approving={approving || workflow.refreshingAfterAction}
           canApprove={approveAllowed}
-          onAcceptEvidence={openReviewNow}
-          {...(onOpenDecisions ? { onOpenDecisions } : {})}
           strip={stripEl}
           reader={reader}
           stageEvents={events}
@@ -979,7 +1047,7 @@ export function StageWorkspace({
 
       {agentAddress && stage === 8 ? (
         // The senior-engineer panel on the build's evidence (#341): asked
-        // against the frozen stack and the build engineer's latest report,
+        // against the frozen stack and the build supervisor's latest status,
         // each reply recorded as the reviewer's build_review document.
         <PanelReviewsCompanion
           projectId={detail.project.id}
@@ -987,7 +1055,7 @@ export function StageWorkspace({
           stage={8}
           reviewInput={
             latestSpecialistMessage && decisions.stage8Evidence?.ready
-              ? [workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null, "## Build evidence, as the build engineer reported it", latestSpecialistMessage.body]
+              ? [workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null, "## Build evidence, as the build supervisor reported it", latestSpecialistMessage.body]
                   .filter((part): part is string => part !== null)
                   .join("\n\n")
               : null
@@ -1015,6 +1083,7 @@ export function StageWorkspace({
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
           onSendToArchitect={(body) => void send(body)}
+          requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
@@ -1032,7 +1101,7 @@ export function StageWorkspace({
           conversation={conversation}
           solo
           className="chat-first"
-          busy={pending !== null}
+          busy={busy}
         >
           {reader}
         </StagePanes>
@@ -1041,7 +1110,7 @@ export function StageWorkspace({
       {/* A past stage opened from the stepper while this stage has a draft:
           the reader, not this stage's document and its approve gate. */}
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage !== null ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader}
         </StagePanes>
       ) : null}
@@ -1089,7 +1158,7 @@ export function StageWorkspace({
             live={null}
             seed={stopSeed}
             withdrawnIds={withdrawnIds}
-            pending={pending !== null}
+            pending={busy}
             onStop={() => void stopTurn()}
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
@@ -1109,7 +1178,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
               <DeliveryPanel

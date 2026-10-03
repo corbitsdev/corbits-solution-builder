@@ -109,6 +109,15 @@ describe("desktop surfaces", () => {
     expect(split.desktops[0]!.html).not.toContain("overflow-x:hidden");
   });
 
+  test("every screen at phone width puts the desktop screens in phones too, notes still in the pane (#417)", () => {
+    const framed = framedDesign(desktop, "narrow", "Inteva");
+    expect(framed.desktops).toEqual([]);
+    expect(framed.phones.map((screen) => screen.id)).toEqual(["screen-projects", "screen-review"]);
+    expect(framed.main).toContain("design-notes");
+    const plain = "<!doctype html><html><body><p>hi</p></body></html>";
+    expect(framedDesign(plain, "narrow", "Plain")).toEqual({ phones: [{ id: "whole", title: "Plain", html: plain }], desktops: [], main: null });
+  });
+
   test("as designed puts desktop screens in windows; the phone-only split leaves them in the pane", () => {
     const framed = framedDesign(desktop, "auto", "Inteva");
     expect(framed.desktops.length).toBe(2);

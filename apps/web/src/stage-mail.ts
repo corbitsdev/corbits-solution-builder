@@ -13,6 +13,10 @@ export type ChatMessage = {
   readonly author: "me" | "agent";
   readonly body: string;
   readonly at: string;
+  /** The mail's subject. An opening the app composes carries its
+   *  `[opening:<project>:<stage>]` marker here (`use-opening-dispatch.ts`),
+   *  which is how the transcript knows to fold the body. */
+  readonly subject?: string;
   /** An agent reply: the RFC Message-ID it answers. */
   readonly inReplyTo?: string;
   /** A person turn the hub accepted as a trigger: the Message-ID the hub
@@ -180,6 +184,7 @@ async function readFolder(
         author: folder === "Sent" ? ("me" as const) : ("agent" as const),
         body: frameBody(message.raw),
         at: message.envelope.date,
+        ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
         ...(message.envelope.inReplyTo !== undefined
           ? { inReplyTo: message.envelope.inReplyTo }
           : {}),

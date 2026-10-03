@@ -8,7 +8,9 @@
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
+import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
   archiveArtifact as installerArchiveArtifact,
@@ -54,6 +56,8 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readLanguageSettings,
+  saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
@@ -201,6 +205,69 @@ export type GoogleDriveStatus = {
 };
 /** A deck uploaded as a Google Slides document. */
 export type UploadedSlides = { readonly id: string; readonly url: string; readonly name: string };
+
+/** `GET /api/build/worker`: which coding agent stage 8 runs, and whether it is on this host. */
+export type BuildWorkerStatus = {
+  bridge: string;
+  capabilities: Record<string, boolean>;
+  platform: "macos" | "linux" | "windows";
+  settings: { worker: string; executable: string };
+  worker: { id: string; label: string; command: string };
+  workers: { id: string; label: string; executable: string }[];
+  available: boolean;
+  detail: string;
+  /** How to get the worker on this host, when it is absent; null when it is present or failing for another reason. */
+  install: {
+    platform: "macos" | "linux" | "windows";
+    binary: string;
+    text: string;
+    command: string | null;
+    url: string | null;
+    verified: boolean;
+  } | null;
+  checkedAt: string;
+};
+
+/** What the bounded bridge reported when a worker ended: final text and an exit status, nothing synthesised. */
+export type BridgeOutcome = {
+  bridgeId: string;
+  worker: string;
+  command: string;
+  available: boolean;
+  exitStatus: number | null;
+  signal: string | null;
+  finalText: string;
+  stderrTail: string;
+  workspace: string;
+  turnLog: string | null;
+  turns: number | null;
+  toolCalls: number | null;
+  startedAt: string;
+  endedAt: string;
+  checkpointRef: null;
+};
+
+/** One build attempt as the host records it (`apps/hub/src/build-attempts.ts`). */
+export type BuildAttempt = {
+  attempt: number;
+  /** `detached`: a worker an earlier run of the host started is still alive, known only by its process group. `lost`: started, never recorded as ended, and gone. */
+  state: "running" | "ended" | "unavailable" | "detached" | "lost";
+  startedAt: string | null;
+  endedAt: string | null;
+  continuedFrom: number | null;
+  outcome: BridgeOutcome | null;
+  workspace: string;
+};
+
+/** The frozen material the host assembles the worker's prompt from. */
+export type BuildPromptMaterial = {
+  planText: string;
+  requirementsText: string;
+  designText: string;
+  stackBlock: string;
+  target: string;
+  planRef: string;
+};
 
 export class ApiFailure extends Error {
   readonly detail: ApiError;
@@ -406,7 +473,7 @@ export type ArtifactNode = {
   createdAt: string;
   supersededByNodeId: string | null;
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
-  provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
+  provenance: { producer: string; agentRole?: string; attempt?: number; providerId?: string; model?: string; stepRef?: string };
   /** The current version's real content digest, when the mounted package
    *  recorded one (CL-8723) — a sha256 over the actual bytes, unlike
    *  `contentHash` (an `<id>@<version>` pair). Used as a stage approval's
@@ -1096,8 +1163,40 @@ async function persistDraftOfKind(
   };
 }
 
+/**
+ * A role with the workspace's output language in its instructions (#411):
+ * what every specialist is deployed with, so documents, replies and the
+ * text of any software it builds come out in that language. Read at deploy
+ * time off the workspace tenant; the default is American English.
+ */
+async function localizedRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, role: AgentRole): Promise<AgentRole> {
+  const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
+  if (!settings) return role;
+  return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
+  /** The build lane: the chosen worker, whether it is on this host, and how to get it when not. */
+  buildWorker: () => request<BuildWorkerStatus>("/build/worker"),
+  setBuildWorker: (patch: { worker?: string; executable?: string }) =>
+    request<BuildWorkerStatus>("/build/worker", { method: "PUT", body: JSON.stringify(patch) }),
+  buildAttempts: (projectId: string) => request<{ attempts: BuildAttempt[] }>(`/projects/${projectId}/build/attempts`),
+  startBuildAttempt: (projectId: string, prompt: BuildPromptMaterial, continueFrom?: number) =>
+    request<{ attempt: BuildAttempt }>(`/projects/${projectId}/build/attempts`, {
+      method: "POST",
+      body: JSON.stringify({ prompt, ...(continueFrom === undefined ? {} : { continueFrom }) }),
+    }),
+  buildAttempt: (projectId: string, attempt: number) =>
+    request<{ attempt: BuildAttempt; log: string; prompt: string | null }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
+  cancelBuildAttempt: (projectId: string, attempt: number) =>
+    request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
+  /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
+  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[] }) =>
+    request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
+      `/projects/${projectId}/build/attempts/${String(attempt)}/package`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   /**
    * Mints the embedded owner and signs this browser in as them, via a
    * `Set-Cookie` the host attaches to this response (`apps/hub/src/api-host.ts`'s
@@ -1874,8 +1973,9 @@ export const api = {
         // recognises the write as the draft's persisted form: found on
         // the next load instead of persisted again, and superseded only
         // by a draft the specialist sends later. Stage 8 is left
-        // unstamped on purpose -- there `agentRole` is the mark of
-        // `publish_workspace`'s own archive, never a browser write.
+        // unstamped on purpose -- its reviewable artifact is the archive
+        // the host packaged, recorded by the build panel with producer
+        // "host", never a persisted reply.
         ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
         ...(target ? { target } : {}),
       });
@@ -1992,6 +2092,11 @@ export const api = {
     if (typeof uploadId !== "string") return { content: found.artifact.content };
     return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
   },
+  /** The workspace's languages (#411); American English both ways until set. */
+  languageSettings: (): Promise<LanguageSettings> =>
+    asWorkspaceOwner((transport, workspaceTenantId) => readLanguageSettings(transport, workspaceTenantId)),
+  saveLanguageSetting: <K extends keyof LanguageSettings>(key: K, value: LanguageSettings[K]): Promise<LanguageSettings> =>
+    asWorkspaceOwner((transport, workspaceTenantId) => installerSaveLanguageSettings(transport, workspaceTenantId, { [key]: value } as Partial<LanguageSettings>)),
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),
   saveDeckDesignPreference: (key: string, value: unknown) =>
@@ -2158,12 +2263,13 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // The hub credential binding for `publish_workspace`'s real upload is
-        // off until a run has been seen to start with it: a stage 8 deployed
-        // with it never produced a run, while every unbound stage does.
-        // `publish_workspace` falls back to returning the archive inline and
-        // the client persists it on approval.
-false,
+        // No hub credential binding: a stage 8 deployed with one never
+        // produced a run, while every unbound stage does. Nothing needs it
+        // now — the build runs on the host and the archive is recorded by
+        // the build panel, not uploaded from a sidecar.
+        false,
+        undefined,
+        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
@@ -2238,7 +2344,7 @@ false,
         specialistHubOrigin(),
         false,
         BRIEF_EVALUATOR_ROLE_KEY,
-        BRIEF_EVALUATOR_ROLE,
+        await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the stage 1 brief evaluator", placement);
@@ -2279,7 +2385,7 @@ false,
         specialistHubOrigin(),
         false,
         PRODUCT_GUIDE_ROLE_KEY,
-        PRODUCT_GUIDE_ROLE,
+        await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the product guide", placement);
@@ -2323,7 +2429,7 @@ false,
         specialistHubOrigin(),
         false,
         roleKey,
-        stage6RoleFor(roleKey),
+        await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);
@@ -2342,6 +2448,23 @@ false,
    */
   stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
     asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage as Stage, undefined, await hostSidecar())),
+  /**
+   * What `projectId`'s stage-`stage` specialist is doing, read from its run
+   * (#445): working, parked for its next mail, ended, or unknown when the
+   * run or its log cannot be read. The deployment's top-level run is the
+   * specialist's one manual run; with several (a redeploy's history), the
+   * one whose last word is newest speaks for it, a live run before an ended
+   * one (`newestRun`), whatever order the hub lists them in.
+   */
+  stageSpecialistRunState: (projectId: string, stage: number): Promise<SpecialistRun> =>
+    asWorkspaceOwner(async (transport) => {
+      const status = await stageSpecialistStatus(transport, projectId, stage as Stage, undefined, await hostSidecar());
+      if (!status || ENDED_DEPLOYMENT_STATUSES.has(status.status)) return UNKNOWN_RUN;
+      const workflows = workflowsFor(transport, status.tenantId);
+      const runIds = topLevelRunIds(await workflows.runs(status.deploymentId));
+      const runs = await Promise.all(runIds.map(async (runId) => runStateOf((await workflows.runEvents(status.deploymentId, runId)).events)));
+      return newestRun(runs);
+    }).catch(() => UNKNOWN_RUN),
   /**
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
    * the input `useStageThread`'s merge needs so a redeploy (restart, model
@@ -2527,13 +2650,13 @@ false,
       };
     }),
   /**
-   * Persists the stage 8 build specialist's `publish_workspace` tool result
-   * as the stage's real `build_evidence` artifact — bytes and media type,
-   * not the chat text `persistStageDraft` would otherwise write. Without
-   * this the workspace `publish_workspace` tars only ever lived in the tool
-   * result the specialist's own turn saw; the run's warm workspace is gone
-   * once the allocation is released, so this is the only copy that
-   * survives.
+   * Records the archive the host packaged from a build attempt's directory
+   * (`POST /projects/:id/build/attempts/:n/package`) as the stage's real
+   * `build_evidence` artifact — bytes and media type, not the chat text
+   * `persistStageDraft` would otherwise write — and its delivery manifest
+   * beside it. The provenance says what happened: produced by the host,
+   * for the attempt the manifest names; no specialist made it. That is
+   * what `reviewableArtifact` accepts as stage 8's reviewable node.
    */
   persistBuildEvidence: (
     projectId: string,
@@ -2542,9 +2665,10 @@ false,
   ) =>
     asWorkspaceOwner(async (transport) => {
       // The attempt the archive and its manifest share, so stage 9 finds the
-      // manifest as the archive's companion the way it does for the real
-      // upload path (`manifestCompanionOf`).
+      // manifest as the archive's companion (`manifestCompanionOf`).
       const variant = bundle.manifest?.attempt ?? null;
+      const attemptNumber = /^attempt-(\d+)$/.exec(variant ?? "")?.[1];
+      const provenance = { producer: "host" as const, ...(attemptNumber ? { attempt: Number(attemptNumber) } : {}) };
       const artifact = await installerCreateArtifact(transport, projectId, {
         title: bundle.fileName,
         content: bundle.dataUri,
@@ -2556,13 +2680,12 @@ false,
             mediaType: bundle.mediaType,
             ...(variant === null ? {} : { variant }),
             sourceVersionIds,
-            provenance: { producer: "agent" as const },
+            provenance,
           },
         },
       });
-      // The fallback result carries the manifest inline, verification and
-      // all (#129): the tool had no credential to upload it, so it is
-      // written here beside the archive, as the real path would have.
+      // The manifest comes back inline with the archive, verification and
+      // all (#129), and is written beside it.
       if (bundle.manifest) {
         await installerCreateArtifact(transport, projectId, {
           title: `${bundle.fileName.replace(/\.tar\.gz$/, "")}-manifest.json`,
@@ -2575,7 +2698,7 @@ false,
               mediaType: "application/json",
               ...(variant === null ? {} : { variant }),
               sourceVersionIds: [artifact.id],
-              provenance: { producer: "agent" as const },
+              provenance,
             },
           },
         });
