@@ -363,7 +363,17 @@ export function StageWorkspace({
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
   useBusyWhile(!threadLoaded, "Loading the conversation");
   const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
-  const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
+  // While the specialist is still answering, the pane follows its artifact
+  // writes live, but nothing is opened for review: an intermediate write is
+  // not a version, and recording one numbered the lineage twice per reply.
+  const reviewMessage =
+    !threadLoaded || (usesArtifact && awaitingReply)
+      ? null
+      : DOCUMENT_STAGES.has(stage)
+        ? draftMessage
+        : stage === 4
+          ? latestDesign
+          : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
