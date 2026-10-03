@@ -11,7 +11,8 @@
  * so nothing loads or plays behind a closed strip. It shows after a second
  * of continuous work and outlives short gaps between chained requests; both
  * timings live in `busy.ts`. Under reduced motion the film holds on its
- * first frame and only the clock moves.
+ * first frame and only the clock moves. With the garden turned off in
+ * Settings the strip never shows; `BusyLine` says the same in the composer.
  */
 import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import {
@@ -24,6 +25,7 @@ import {
 } from "./busy-strip-height.ts";
 import { clock } from "./pages/workspace/elapsed.tsx";
 import { useBusyIndicator } from "./use-busy.ts";
+import { useZenGarden } from "./zen-garden-setting.ts";
 
 /** Served from `apps/web/public`, beside the bundle, so the film ships with it. */
 export const ZEN_GARDEN_VIDEO = "/zen-garden.mp4";
@@ -44,7 +46,7 @@ function useSecondsSince(since: number | null): number {
   return seconds;
 }
 
-function useReducedMotion(): boolean {
+export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(
     () => typeof window !== "undefined" && "matchMedia" in window && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -152,6 +154,8 @@ export function ZenGarden() {
   const seconds = useSecondsSince(visible ? since : null);
   const still = useReducedMotion();
   const size = useStripHeight();
+  const shown = useZenGarden();
+  if (!shown) return null;
   return (
     <div
       className="zen-garden"
@@ -199,5 +203,22 @@ export function ZenGarden() {
         </p>
       </div>
     </div>
+  );
+}
+
+/** The strip's caption as one quiet line, for the composer to hold while
+ *  the zen garden is turned off; nothing while it is on, or nothing is busy. */
+export function BusyLine() {
+  const { visible, since, label } = useBusyIndicator();
+  const seconds = useSecondsSince(visible ? since : null);
+  const garden = useZenGarden();
+  if (garden || !visible) return null;
+  return (
+    <p className="busy-line" role="status" aria-live="polite">
+      <span className="thinking">{label ?? "Working…"}</span>{" "}
+      <span className="busy-line-clock" role="timer" aria-live="off">
+        {clock(seconds)}
+      </span>
+    </p>
   );
 }

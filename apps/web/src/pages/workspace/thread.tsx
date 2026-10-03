@@ -14,6 +14,8 @@ import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
+import { WaitingTips } from "./waiting-tips.tsx";
+import { BusyLine } from "../../zen-garden.tsx";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
  *  as a system boundary line (`stage-events.ts`'s `switchEvents`) — dropped
@@ -120,9 +122,11 @@ function messageText(message: UiChatMessage): string {
 
 /**
  * The stage's conversation with its specialist: a mail thread rendered as
- * chat. The composer is always visible — sending is always possible, whether
- * or not a draft exists yet, since the specialist is a mail agent that just
- * answers whatever it is sent.
+ * chat. The composer shows whenever sending is possible, whether or not a
+ * draft exists yet, since the specialist is a mail agent that just answers
+ * whatever it is sent. Until the stage's first reply, while that first turn
+ * is in flight, there is nothing to answer yet: the column shows the turn,
+ * a status line and a rotating tip, and the composer arrives with the reply.
  *
  * A turn the person stopped before it was answered stays in the transcript,
  * dimmed, with no reply of its own. A turn still awaiting its reply shows
@@ -188,6 +192,7 @@ export function StageConversation({
   onAnswer?: ((answer: string) => void) | undefined;
 }) {
   const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
+  const opening = pending && lastAgentId === undefined;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -326,9 +331,18 @@ export function StageConversation({
               </div>
             );
           })}
+          {opening ? (
+            <>
+              {rows}
+              <BusyLine />
+              <WaitingTips />
+            </>
+          ) : null}
         </div>
       )}
+      {opening ? null : (
       <div className="composer" data-working={working || pending ? "" : undefined}>
+        <BusyLine />
         {rows}
         <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
         {(mic) => (
@@ -351,6 +365,7 @@ export function StageConversation({
         </Dictated>
         {popover}
       </div>
+      )}
     </div>
   );
 }
