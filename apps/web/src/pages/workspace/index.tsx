@@ -1041,7 +1041,7 @@ export function StageWorkspace({
     <div className="stage-view">
       {/* Stage 9 says this in its own pane, where it does not push the panes down. */}
       {workflowView?.done && (stage !== 9 || !agentAddress) ? (
-        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
+        <Banner tone="okay" title="This project is delivered. Its delivery was approved and the workflow has finished." />
       ) : null}
 
       {openingFailed ? (

@@ -56,11 +56,11 @@ describe("stage7StackProblem", () => {
     expect(await stage7StackProblem(deps({}))).toBeNull();
   });
 
-  test("a plan approved without a Stack section names the build plan and stage 6, and offers the send-back to stage 6", async () => {
+  test("a plan approved without a Stack section names the build plan, never a stage number, and offers the send-back to it", async () => {
     const problem = await stage7StackProblem(deps({ planText: PLAN_WITHOUT_STACK }));
     expect(problem).not.toBeNull();
     expect(problem!.message).toContain("build plan");
-    expect(problem!.message).toContain("stage 6");
+    expect(problem!.message).not.toContain("stage 6");
     expect(problem!.message).not.toContain("stack decision");
     expect(problem!.remediation).toMatchObject({ kind: "send_back", targetStage: 6 });
     expect(problem!.remediation!.reason).toContain("Stack section");
@@ -69,7 +69,7 @@ describe("stage7StackProblem", () => {
   test("a Stack section citing an unknown requirement is reported with the detail and the same way out", async () => {
     const problem = await stage7StackProblem(deps({ requirementIds: ["FR-9"] }));
     expect(problem!.message).toContain("FR-1");
-    expect(problem!.message).toContain("stage 6");
+    expect(problem!.message).not.toContain("stage 6");
     expect(problem!.remediation).toMatchObject({ kind: "send_back", targetStage: 6 });
   });
 
@@ -117,7 +117,7 @@ describe("stack refusal copy", () => {
       expect(text).toContain("build plan");
       expect(text).not.toContain("stack decision");
     }
-    expect(stageRefusalMessage("stack_missing")).toContain("stage 6");
+    expect(stageRefusalMessage("stack_missing")).not.toContain("stage 6");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).toContain("build plan");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).not.toContain("stack decision");
   });
