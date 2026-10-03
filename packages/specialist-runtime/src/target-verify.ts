@@ -159,7 +159,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
         void error;
       }
     }
-    const ranSuccessfully = results.every((r) => r.status !== "unreachable");
+    const ranSuccessfully = results.every((r) => typeof r.status === "number" && r.status < 400);
     const producedOutput = results.some((r) => typeof r.status === "number" && r.status < 500 && r.bodyLength > 0);
     const transcript = [
       `$ ${input.command.join(" ")}`,
