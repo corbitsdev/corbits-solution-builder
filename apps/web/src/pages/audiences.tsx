@@ -18,6 +18,7 @@ import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from 
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
 import { openInGoogleSlides } from "../google-slides.ts";
@@ -561,7 +562,6 @@ export function AudiencePackages({
     const tab = how === "google" ? window.open("about:blank", "_blank") : null;
     if (tab) tab.opener = null;
     setSaving((before) => new Set(before).add(packageNodeId));
-    setError(null);
     try {
       if (!pkg) throw new Error("That stakeholder's package could not be found.");
       const recorded = detail.nodes
@@ -616,7 +616,7 @@ export function AudiencePackages({
         }
         if (how === "google") {
           const opened = await openInGoogleSlides(pptx, fileBase, tab);
-          if (opened.notice) setError(`Slides for ${name}: ${opened.notice}`);
+          if (opened.notice) toast(`Slides for ${name}: ${opened.notice}`);
         } else {
           downloadArtifact(pptx.dataUrl, pptx.filename);
         }
@@ -624,12 +624,12 @@ export function AudiencePackages({
       if (how === "google") {
         // Said above, when there was something to say.
       } else if (themeNotice) {
-        setError(`Slides for ${name}: ${themeNotice}.`);
+        toast(`Slides for ${name}: ${themeNotice}.`);
       }
       setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
       tab?.close();
-      setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+      toast.error(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
     } finally {
       setSaving((before) => {
         const next = new Set(before);
