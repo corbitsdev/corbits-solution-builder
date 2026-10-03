@@ -13,7 +13,9 @@ export async function importedHistory(tenantId: string, nodes: readonly Artifact
   if (!conversation) return "";
   const draftKind = STAGE_DRAFT_KIND[stage];
   const draft = ofStage.filter((node) => node.kind === draftKind).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
-  const read = async (node: ArtifactNode | undefined) => (node ? (await api.artifactContent(tenantId, node.id).catch(() => null))?.content.trim() ?? "" : "");
+  // A failed read fails the opening, which shows it and retries: a stage
+  // opened without its imported history would start over.
+  const read = async (node: ArtifactNode | undefined) => (node ? (await api.artifactContent(tenantId, node.id)).content.trim() : "");
   const [transcript, document] = await Promise.all([read(conversation), read(draft)]);
   const parts = [
     "This project was imported. Continue this stage from where it left off; do not start it over or ask again what is already answered.",
