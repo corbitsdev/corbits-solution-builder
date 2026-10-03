@@ -35,11 +35,14 @@ A cost approval with these headings, after \`## In short\`:
   per line in the form "- **<line>:** <amount> — <basis>": inference for the
   build and each remaining stage by name, providers, running cost. Name each line
   in plain words an owner reads without a glossary, never an abbreviation
-  ("Build: tokens in", not "BI"), and give tokens in and tokens out as
-  separate lines, running cost per month. Where a price per token is given,
-  add the approximate money figure and its currency beside the tokens; where
-  none is, the amount is the token count alone. Give the time too. End
-  with exactly one fenced block, opened with \`\`\`json estimate, holding a
+  or jargon ("Build: AI usage (input)", not "BI" or "tokens in"), and give
+  AI usage (input) and AI usage (output) as separate lines, running cost per
+  month. Where a price per token is given, add the approximate money figure
+  and its currency beside the tokens; where none is, the amount is the token
+  count alone. Give the time too. A basis no input gives reads "based on
+  typical projects", never "general experience". Each quantity (rounds,
+  hours, tokens) has one figure, used wherever it appears, never a range in
+  one place and a number in another. End with exactly one fenced block, opened with \`\`\`json estimate, holding a
   single JSON object of this shape (from \`estimate.ts\`; add or rename no
   field):
 
