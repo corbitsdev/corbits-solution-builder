@@ -352,11 +352,15 @@ export function StageWorkspace({
     [stage, foldedMessages, workDraft],
   );
 
-  // A stage's evaluator reads each new draft against the record the stage
-  // opened on; the Product guide answers when asked, on any stage. Both are
-  // advisory and never touch the gate.
+  // A stage's evaluator reads each settled draft against the record the
+  // stage opened on; the Product guide answers when asked, on any stage. Both
+  // are advisory and never touch the gate. A draft settles once the
+  // specialist's reply has landed and the artifact was read after it: the
+  // writes polled in between are not drafts, and judging each one started a
+  // run per write.
+  const settledDraft = !awaitingReply && (!usesArtifact || workReadFor === foldedMessages) ? (draftMessage?.body ?? null) : null;
   const stageRecord = foldedMessages.find(isStageOpening)?.body ?? null;
-  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage as Stage, draftMessage?.body ?? null, stageRecord);
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage as Stage, settledDraft, stageRecord);
   const evaluated = evaluatorFor(stage as Stage) !== null;
   const guideContext = {
     projectTitle: detail.project.title,
@@ -690,7 +694,7 @@ export function StageWorkspace({
   const notesError = useEvaluatorRevision({
     stage,
     evaluator,
-    draft: !usesArtifact || workReadFor === foldedMessages ? (draftMessage?.body ?? null) : null,
+    draft: settledDraft,
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
