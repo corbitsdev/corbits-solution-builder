@@ -367,7 +367,7 @@ export function StageWorkspace({
   // opened off them would persist the previous stage's document as this
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
-  useBusyWhile(!threadLoaded, "Loading the conversation");
+  useBusyWhile(!threadLoaded, "Opening the conversation");
   // Stage 4's design is the designer's artifact; a design sent as a reply is
   // read only for a project drafted before the tools.
   const latestDesign = useMemo(
