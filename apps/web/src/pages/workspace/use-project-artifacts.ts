@@ -196,7 +196,7 @@ export function useProjectArtifacts(
       setActiveContent("");
       return;
     }
-    if (activeNode.id === draftNode?.id) {
+    if (!document && activeNode.id === draftNode?.id) {
       setActiveContent(draftMessage?.body ?? "");
       return;
     }
