@@ -41,6 +41,7 @@ import { approvedChainQuery, composeApprovedChain } from "./approved-chain.ts";
 import { importedHistory } from "./imported-history.ts";
 import { queryClient } from "../../queries/client.ts";
 import { keys } from "../../queries/keys.ts";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -141,9 +142,10 @@ export function useOpeningDispatch({
 
   const stage5Approved = stage === 6 ? previousApproved : null;
   const stage6Chain = useQuery({ ...approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage }), enabled: stage5Approved !== null });
+  const stage5VersionId = stage5Approved ? versionIdFor(stage5Approved.artifactId, stage5Approved.version) : null;
   const stage5Package = useQuery({
-    queryKey: keys.artifact.of(tenantId, stage5Approved?.artifactId ?? ""),
-    queryFn: stage5Approved ? () => api.artifactContent(tenantId, stage5Approved.artifactId) : skipToken,
+    queryKey: keys.artifact.of(tenantId, stage5VersionId ?? ""),
+    queryFn: stage5VersionId ? () => api.artifactContent(tenantId, stage5VersionId) : skipToken,
   });
   // Nothing until the whole record is read: a partial input would ask the
   // requirements author once without the record and again with it.
@@ -241,7 +243,7 @@ export function useOpeningDispatch({
       void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
     } else if (previousApproved) {
       void api
-        .artifactContent(tenantId, previousApproved.artifactId)
+        .artifactContent(tenantId, versionIdFor(previousApproved.artifactId, previousApproved.version))
         .then((result) => {
           if (!result.content) return;
           // Stage 8's opening also names the frozen target — lost on reload

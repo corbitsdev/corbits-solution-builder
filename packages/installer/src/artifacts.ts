@@ -4,9 +4,8 @@
  * `packages/embedded-host/src/hub-client.ts`'s `artifacts` helpers are built on, rebuilt
  * here because `packages/installer/src` may not import `apps/hub/src`.
  *
- * `content` on `Artifact` is always the CURRENT version: the module's HTTP
- * surface has no route for an older version's body, only its metadata
- * (`versions`).
+ * `content` on `Artifact` is the current version; `getArtifactVersion`
+ * reads an older one.
  */
 import type { Transport } from "@intx/hub-client";
 import { tenantPathFor } from "./hub.js";
@@ -94,12 +93,58 @@ export async function getArtifact(
   }
 }
 
-/** Revises an artifact, bumping its version. Requires `write` on `artifact:<id>`. */
+/** One version of an artifact, content included, or null if it does not exist (or is not visible). */
+export async function getArtifactVersion(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+  version: number,
+): Promise<Artifact | null> {
+  try {
+    const { artifact } = await transport.fetch<{ artifact: Artifact }>(
+      "GET",
+      tenantPathFor(tenantId, `/artifacts/${artifactId}/versions/${String(version)}`),
+    );
+    return artifact;
+  } catch {
+    return null;
+  }
+}
+
+export type ArtifactVersionItem = {
+  version: number;
+  createdAt: string;
+  contentSha256: string | null;
+};
+
+/** Every version of an artifact, oldest first, without content. */
+export async function listArtifactVersions(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+): Promise<ArtifactVersionItem[]> {
+  const items: ArtifactVersionItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const page = await transport.fetch<{ versions: ArtifactVersionItem[]; nextCursor: string | null }>(
+      "GET",
+      tenantPathFor(tenantId, `/artifacts/${artifactId}/versions?${params.toString()}`),
+    );
+    items.push(...page.versions);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items.reverse();
+}
+
+/** Revises an artifact, bumping its version. Requires `write` on `artifact:<id>`.
+ *  With `expectedVersion`, a revision of an artifact that has moved past it is refused. */
 export async function reviseArtifact(
   transport: Transport,
   tenantId: string,
   artifactId: string,
-  input: { title?: string; content?: string; metadata?: Record<string, unknown> | null },
+  input: { title?: string; content?: string; metadata?: Record<string, unknown> | null; expectedVersion?: number },
 ): Promise<Artifact> {
   return transport.fetch<Artifact>(
     "POST",

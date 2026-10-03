@@ -7,12 +7,8 @@
  * before the pane and the gate read it, the way the stage 3 choice is
  * repaired (`choice-repair.ts`). A plan no version ever gave a valid block
  * passes through, and the gate's banner stays the way out.
- *
- * A plan kept in an artifact has no earlier version in the thread, since its
- * replies are conversation only; its block comes from the newest saved plan.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
-import type { ArtifactNode } from "../../client.ts";
 import { parseStackRecord, stackSectionOf } from "@solutions-builder/app/stack";
 import { isSubstantialDraft } from "./guidance.ts";
 
@@ -35,26 +31,12 @@ export function withStackSection(draft: string, section: string): string {
   return `${draft.trimEnd()}\n\n${section}\n`;
 }
 
-/** The newest saved stage 6 plan's node id, or null before one is saved. */
-export function newestSavedPlanId(nodes: readonly ArtifactNode[]): string | null {
-  const newest = nodes
-    .filter((node) => node.stage === 6 && node.kind === "build_plan" && node.supersededByNodeId === null)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  return newest?.id ?? null;
-}
-
 /**
  * The stage 6 plan draft with a valid Stack block: the draft itself when it
  * has one, else the draft with the most recent earlier plan version's block
- * carried in (from the thread, else from `savedPlan`, the newest saved
- * plan's text), else the draft as it is.
+ * carried in, else the draft as it is.
  */
-export function repairedStackDraft(
-  stage: number,
-  messages: readonly ChatMessage[],
-  draft: ChatMessage | null,
-  savedPlan: string | null = null,
-): ChatMessage | null {
+export function repairedStackDraft(stage: number, messages: readonly ChatMessage[], draft: ChatMessage | null): ChatMessage | null {
   if (stage !== 6 || !draft) return draft;
   if (parseStackRecord(draft.body)) return draft;
   const at = messages.findIndex((message) => message.id === draft.id);
@@ -62,8 +44,30 @@ export function repairedStackDraft(
   const earlier = [...before]
     .reverse()
     .find((message) => message.author === "agent" && isSubstantialDraft(message.body) && parseStackRecord(message.body) !== null);
-  const section = stackSectionOf(earlier?.body ?? savedPlan ?? "");
+  if (!earlier) return draft;
+  const section = stackSectionOf(earlier.body);
   if (!section) return draft;
   const body = withStackSection(draft.body, section);
   return parseStackRecord(body) ? { ...draft, body } : draft;
+}
+
+/**
+ * A stage 6 plan kept in one artifact, with the Stack section of the newest
+ * earlier version of that artifact that had a valid one carried in; null
+ * when `content` has a valid block, or no earlier version gives one.
+ */
+export async function stackCarriedFromEarlierVersion(
+  content: string,
+  version: number,
+  read: (version: number) => Promise<string>,
+): Promise<string | null> {
+  if (parseStackRecord(content)) return null;
+  for (let earlier = version - 1; earlier >= 1; earlier -= 1) {
+    const body = await read(earlier);
+    const section = parseStackRecord(body) ? stackSectionOf(body) : null;
+    if (!section) continue;
+    const carried = withStackSection(content, section);
+    return parseStackRecord(carried) ? carried : null;
+  }
+  return null;
 }

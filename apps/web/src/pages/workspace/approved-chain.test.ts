@@ -14,7 +14,7 @@ const node = (over: Partial<ChainNode> & Pick<ChainNode, "id" | "kind" | "stage"
 const approved = (artifactId: string, version: number) => ({ reviewId: "r", artifactId, version, sha256: "0".repeat(64), status: "approved" as const });
 
 describe("approvedChainNodes", () => {
-  test("hands over the one approved version per earlier stage, not every draft, and not the previous stage's", () => {
+  test("hands over the one approved version per earlier stage, read as that version, and not the previous stage's", () => {
     const nodes = [
       node({ id: "brief-v1", kind: "problem_brief", stage: 1, artifactId: "art_brief", version: 1, supersededByNodeId: "brief-v2" }),
       node({ id: "brief-v2", kind: "problem_brief", stage: 1, artifactId: "art_brief", version: 2, supersededByNodeId: "brief-v3" }),
@@ -24,9 +24,9 @@ describe("approvedChainNodes", () => {
     ];
     // The person approved brief v2, then revised to v3 without re-approving.
     const reviews = { 1: approved("art_brief", 2), 2: approved("art_constraints", 1) };
-    expect(approvedChainNodes(nodes, reviews, 4).map((entry) => entry.id)).toEqual(["brief-v2", "constraints-v1"]);
+    expect(approvedChainNodes(nodes, reviews, 4).map((entry) => entry.id)).toEqual(["art_brief@2", "art_constraints@1"]);
     // Stage 3 opens on the constraints themselves; the chain carries only the brief.
-    expect(approvedChainNodes(nodes, reviews, 3).map((entry) => entry.id)).toEqual(["brief-v2"]);
+    expect(approvedChainNodes(nodes, reviews, 3).map((entry) => entry.id)).toEqual(["art_brief@2"]);
   });
 
   test("a stage whose review is open or absent contributes nothing", () => {
@@ -42,7 +42,7 @@ describe("approvedChainNodes", () => {
       node({ id: "opening", kind: "source_material", stage: 1, variant: "__opening__", createdAt: "2026-01-01T00:00:01.000Z" }),
       node({ id: "upload", kind: "source_material", stage: 1, variant: "deck.pdf" }),
     ];
-    expect(approvedChainNodes(nodes, { 1: approved("art_brief", 1) }, 3).map((entry) => entry.id)).toEqual(["opening", "reading", "brief"]);
+    expect(approvedChainNodes(nodes, { 1: approved("art_brief", 1) }, 3).map((entry) => entry.id)).toEqual(["opening", "reading", "art_brief@1"]);
   });
 
   test("stage 1 opens on the problem statement itself, so its record carries only the readings", () => {
