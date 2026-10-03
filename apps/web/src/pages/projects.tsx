@@ -5,6 +5,7 @@
 import { ChatInput } from "@corbits/react-ui";
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
 import { Banner } from "../components.jsx";
@@ -462,10 +463,9 @@ function ProjectCard({
 function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   return (
     <div className="card-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
-      {Array.from({ length: 9 }, (_, index) => {
-        const at = index + 1;
-        return <span key={at} className={stageTrackSegClass(at, stage, done)} />;
-      })}
+      {STAGES.map((at) => (
+        <span key={at} className={stageTrackSegClass(at, stage, done)} />
+      ))}
     </div>
   );
 }

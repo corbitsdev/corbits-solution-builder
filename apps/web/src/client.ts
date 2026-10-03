@@ -6,7 +6,7 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
-import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
+import { AUTHORITIES, STAGES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
@@ -1053,10 +1053,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
     // (#165).
     const ownerInProject = await myPrincipalIn(transport, projectId);
     const authorizedPrincipalIds = [...new Set([...(ownerInProject ? [ownerInProject] : []), workspace.principalId])];
-    const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
-      stage: index + 1,
-      authorizedPrincipalIds,
-    }));
+    const stages: ProjectWorkflowStageInput[] = STAGES.map((stage) => ({ stage, authorizedPrincipalIds }));
     const status = await readyToDeploy(transport, workspaceTenantId, projectId);
     const opening = await openingOf(transport, projectId);
     // What the ensure step is doing, under the busy strip's clock: a click

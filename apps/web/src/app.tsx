@@ -21,6 +21,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
@@ -185,14 +186,11 @@ function StageStepper({
 }
 
 function stageSteps(stage: number): WorkflowStep[] {
-  return Array.from({ length: 9 }, (_, index) => {
-    const number = index + 1;
-    return {
-      number,
-      label: stageName(number),
-      status: number < stage ? "completed" : number === stage ? "current" : "pending",
-    };
-  });
+  return STAGES.map((number) => ({
+    number,
+    label: stageName(number),
+    status: number < stage ? "completed" : number === stage ? "current" : "pending",
+  }));
 }
 
 /**

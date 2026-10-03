@@ -2,14 +2,14 @@
  * A project exported as one JSON bundle, assembled entirely in the browser
  * from reads the client already has: the artifact graph and its content,
  * each deployed stage's mail thread, and the project's own title and policy
- * (CL-8702). No import path exists yet -- see the PR body.
+ * (CL-8702). `project-import.ts` reads it back.
  */
 import type { ArtifactNode } from "./client.ts";
+import { STAGES } from "@solutions-builder/app/ledger";
 import type { ChatMessage } from "./stage-mail.ts";
 
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
 export const BUNDLE_VERSION = 2 as const;
-const STAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 export type ExportedArtifact = { node: ArtifactNode; content: string };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
