@@ -28,10 +28,13 @@ export function TargetPicker({
   chosen,
   onChange,
   note = "Choose how the finished build will be used. Only a website or a service is actually checked today — the others are honest about not being verified yet.",
+  verification = true,
 }: {
   chosen: string | null;
   onChange: (target: string) => void;
   note?: string;
+  /** What the build lane can verify only matters once a build is being priced. */
+  verification?: boolean;
 }) {
   const [changing, setChanging] = useState(false);
   const chosenOption = chosen ? SELECTABLE_TARGETS.find((option) => option.target === chosen) : undefined;
@@ -40,7 +43,7 @@ export function TargetPicker({
       <div className="stage-lead target-picker target-chosen">
         <p className="text-sm">
           <span className="font-medium">Target:</span> {chosenOption.label}{" "}
-          {chosenOption.verified ? (
+          {!verification ? null : chosenOption.verified ? (
             <StateLabel tone="okay">verified today</StateLabel>
           ) : (
             <StateLabel tone="disabled">not verified yet</StateLabel>
@@ -72,7 +75,7 @@ export function TargetPicker({
             />
             <span>
               <span className="text-sm">{option.label}</span>{" "}
-              {option.verified ? (
+              {!verification ? null : option.verified ? (
                 <StateLabel tone="okay">verified today</StateLabel>
               ) : (
                 <StateLabel tone="disabled">not verified yet</StateLabel>
