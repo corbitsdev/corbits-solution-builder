@@ -53,7 +53,7 @@ import {
 const SPECIALIST_DIR = "packages/specialist";
 const DIGEST_PATH = "closure.sha256";
 /** The offering this asset was last deployed against -- written alongside the
- *  rendered source so `stageSpecialistSource` can report what a specialist is
+ *  rendered source so `stageSpecialistSourcePin` can report what a specialist is
  *  actually running on, rather than the tenant's current catalog order.
  *  CL-8783 verdict: this pin is a reporting artifact only, NOT the deploy
  *  path -- the hub resolves the inference chain at deploy time from
@@ -70,8 +70,8 @@ export function normalizedProjectId(projectId: string): string {
  *  deployed specialist's name byte-identical across this change. */
 const DEFAULT_ROLE_KEY = "primary";
 
-/** `sb-project-<projectId>-stage-<N>`, normalized the same way `lifecycleAssetName`
- *  is, with `-<roleKey>` appended for any role other than the primary
+/** `sb-project-<projectId>-stage-<N>`, the id normalized by `normalizedProjectId`,
+ *  with `-<roleKey>` appended for any role other than the primary
  *  per-stage agent (`DEFAULT_ROLE_KEY`) -- so a stage's other roles (a brief
  *  evaluator, a requirements author, a panel principal) each get their own
  *  asset without disturbing the primary agent's existing name. */
@@ -362,13 +362,11 @@ export async function stageSpecialistSourcePin(
 }
 
 /**
- * The asset a stage specialist deploys into: the same package-tree shape
- * `workflow-deploy.ts`'s `renderLifecycleSource` builds for the lifecycle --
- * a root workspace `package.json`, a member whose `interchange.workflow`
- * points at the rendered entry, and the vendored `@intx`/`@solutions-builder`
- * closures beside it -- but with `specialistEntrySource` as the entry and no
- * `actions.js`: a specialist has no `routeMessage` action to wire and no loop
- * body to carry it into.
+ * The asset a stage specialist deploys into: a root workspace
+ * `package.json`, a member whose `interchange.workflow` points at
+ * `specialistEntrySource`'s rendered entry, and the vendored
+ * `@intx`/`@solutions-builder` closures beside it. No `actions.js`: a
+ * specialist has no action handlers.
  */
 export async function renderSpecialistSource(
   closure: ClosureSource,
