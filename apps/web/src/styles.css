@@ -1450,6 +1450,31 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-left: 0;
 }
 
+/* Recording an attempt: the start command takes the row, the port stays
+   narrow, and the button wraps under them on a narrow pane. */
+.build-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.build-record > input[aria-label="Start command"] {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.build-log-fold {
+  margin-top: var(--space-2);
+}
+
+.build-log-fold > summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
 .document-tools {
   margin-left: auto;
   display: flex;
