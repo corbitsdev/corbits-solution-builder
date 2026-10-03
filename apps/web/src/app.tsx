@@ -687,7 +687,7 @@ export function App() {
       const bundle = await assembleBundle(detail.project.id, {
         projectView: api.projectView,
         artifactContent: api.artifactContent,
-        stageAgentStatus: api.stageAgentStatus,
+        stageAgentAddresses: api.stageAgentAddresses,
         readStageThread: api.readStageThread,
       });
       downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));

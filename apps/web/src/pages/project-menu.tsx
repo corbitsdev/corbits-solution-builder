@@ -49,7 +49,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
   const bundle = await assembleBundle(project.id, {
     projectView: api.projectView,
     artifactContent: api.artifactContent,
-    stageAgentStatus: api.stageAgentStatus,
+    stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
   });
   downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
