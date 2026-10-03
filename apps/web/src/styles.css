@@ -1456,6 +1456,75 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-left: 0;
 }
 
+/* Recording an attempt: the start command takes the row, the port stays
+   narrow, and the button wraps under them on a narrow pane. */
+.build-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.build-record > input[aria-label="Start command"] {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* The worker's live output: a bounded, framed scroll region pinned to its
+   newest line, so the line cut off at the top reads as scrolled, not lost. */
+.build-log {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-md);
+  background: var(--wb-muted);
+  font-family: var(--wb-font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* Stage 9: how to run it leads; the file lists fold. */
+.delivery-how-to-run {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-md);
+}
+
+.delivery-files {
+  margin: var(--space-2) 0;
+}
+
+.delivery-files > summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--wb-muted-foreground);
+}
+
+.delivery-hash {
+  font-family: var(--wb-font-mono);
+  user-select: all;
+  cursor: copy;
+}
+
+.delivery-done {
+  color: color-mix(in srgb, var(--wb-okay) 60%, var(--wb-foreground));
+}
+
+.build-log-fold {
+  margin-top: var(--space-2);
+}
+
+.build-log-fold > summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
 .document-tools {
   margin-left: auto;
   display: flex;

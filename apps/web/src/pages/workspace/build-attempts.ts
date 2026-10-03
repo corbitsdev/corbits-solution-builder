@@ -15,6 +15,9 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import type { ChatMessage } from "../../stage-mail.ts";
+import { pairReplies } from "../../withdrawn-turns.ts";
+import { appSubject } from "./composed-mail.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -123,6 +126,23 @@ export function probeDecision(input: { readonly startCommand: string; readonly p
 }
 
 const FINAL_TEXT_KEEP = 20_000;
+
+/**
+ * The build status as it stands: the supervisor's reply to the brief for
+ * `attempt`, the newest recorded, or that it has not replied yet. The brief
+ * is found by its subject and the reply by its threading, never by either
+ * body. Null when no brief for that attempt was sent.
+ */
+export function supervisorStatus(
+  messages: readonly ChatMessage[],
+  attempt: number,
+): { attempt: number; reply: ChatMessage | null } | null {
+  const subject = appSubject("brief", String(attempt));
+  const brief = messages.findLast((message) => message.author === "me" && message.subject === subject);
+  if (!brief) return null;
+  const { answeredBy } = pairReplies(messages);
+  return { attempt, reply: messages.find((message) => message.author === "agent" && answeredBy.get(message.id) === brief.id) ?? null };
+}
 
 /**
  * The brief the supervisor is mailed when an attempt is recorded: what the

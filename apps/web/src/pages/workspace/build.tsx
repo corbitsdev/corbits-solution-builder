@@ -19,19 +19,21 @@
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildTurn, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
+import { Input } from "@corbits/react-ui";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { appSubject } from "./composed-mail.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -110,6 +112,37 @@ function evMark(tone: keyof typeof EV_TONE): string {
   return "";
 }
 
+/** Each turn as the worker reported it: what it said, and one plain line per tool call. */
+function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
+  return (
+    <div aria-live="polite">
+      {turns.map((turn, index) =>
+        turn === null ? (
+          <p key={index} className="inline-note">
+            A turn report the host could not read.
+          </p>
+        ) : (
+          <div key={index}>
+            {turn.said ? <Markdown source={turn.said} /> : null}
+            {turn.tools.map((tool, call) => (
+              <p key={call} className="inline-note">
+                {tool.action}
+                {tool.path ? (
+                  <>
+                    {" "}
+                    <code>{tool.path}</code>
+                  </>
+                ) : null}
+                {tool.failed ? " — failed" : ""}
+              </p>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
   if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
@@ -174,6 +207,7 @@ export function BuildPanel({
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [log, setLog] = useState("");
+  const [turns, setTurns] = useState<readonly (BuildTurn | null)[]>([]);
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
@@ -245,13 +279,16 @@ export function BuildPanel({
   useEffect(() => {
     if (!current) {
       setLog("");
+      setTurns([]);
       return;
     }
     let cancelled = false;
     const read = async () => {
       try {
         const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (!cancelled) setLog(result.log);
+        if (cancelled) return;
+        setLog(result.log);
+        setTurns(result.turns);
       } catch {
         // The next poll says.
       }
@@ -305,9 +342,9 @@ export function BuildPanel({
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
       if (!address || !attempt.outcome) return;
-      // The target probed is the one stage 7 froze; the fields say how to start it.
+      // The target probed is the one stage 7 froze, started as the attempt's run.json declares unless the fields say otherwise; its tests run either way.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
-      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets], target: freeze?.target?.trim() || "web" });
       // Stage 7's forecast, for the supervisor's "Cost against forecast": the
       // frozen estimate's own section, or nothing, said as nothing.
       const estimate = frozenNode(detail.nodes, freeze, "cost_approval");
@@ -320,6 +357,7 @@ export function BuildPanel({
         manifest: packaged.manifest,
       });
       await api.sendStageMail(tenantId, address, {
+        subject: appSubject("brief", String(attempt.attempt)),
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
@@ -335,7 +373,8 @@ export function BuildPanel({
 
   const archive = useMemo(() => buildArchives(detail.nodes)[0], [detail.nodes]) as ArtifactNode | undefined;
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
-  const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
+  const archiveAttempt = archive ? attemptOfNode(archive) : null;
+  const status = useMemo(() => (archiveAttempt === null ? null : supervisorStatus(messages, archiveAttempt)), [messages, archiveAttempt]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
@@ -374,6 +413,7 @@ export function BuildPanel({
             disabled={!address}
             events={stageEvents}
             who={agentFor(8).title}
+            empty={`Nothing has been sent to the ${agentFor(8).title.toLowerCase()} yet. It reads each attempt once the attempt is recorded.`}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
             popover={popover}
@@ -408,24 +448,30 @@ export function BuildPanel({
                 </button>
               </Banner>
             ) : null}
+            {/* Only what can act now: a start while nothing runs, a continue
+                once an attempt's directory exists, a cancel while one runs. */}
             <div className="document-tools">
-              <Button variant="primary" loading={busy === "start"} disabled={!!running || busy !== null} onClick={() => void start()}>
-                Start the build attempt
-              </Button>
-              <Button
-                variant="primary"
-                loading={busy === "continue"}
-                disabled={!!running || busy !== null || lastEnded === null}
-                onClick={() => lastEnded && void start(lastEnded.attempt)}
-              >
-                {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
-              </Button>
-              <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
-                Cancel the build attempt
-              </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-                Approve and continue
-              </Button>
+              {cancellable ? (
+                <Button variant="destructive" loading={busy === "cancel"} disabled={busy !== null} onClick={() => void cancel(cancellable.attempt)}>
+                  Cancel the build attempt
+                </Button>
+              ) : (
+                <>
+                  <Button variant={canApprove ? "secondary" : "primary"} loading={busy === "start"} disabled={busy !== null} onClick={() => void start()}>
+                    {attempts.length > 0 ? "Start a new attempt" : "Start the build attempt"}
+                  </Button>
+                  {lastEnded ? (
+                    <Button variant="secondary" loading={busy === "continue"} disabled={busy !== null} onClick={() => void start(lastEnded.attempt)}>
+                      Continue from attempt {String(lastEnded.attempt)}
+                    </Button>
+                  ) : null}
+                </>
+              )}
+              {canApprove ? (
+                <Button variant="primary" loading={approving} disabled={!address} onClick={onApprove}>
+                  Approve and continue
+                </Button>
+              ) : null}
             </div>
             {attempts.length > 0 ? (
               <div className="ev">
@@ -447,9 +493,35 @@ export function BuildPanel({
             {current ? (
               <>
                 <h2>Attempt {String(current.attempt)} — what the worker wrote</h2>
-                <pre ref={logRef} className="build-log" aria-live="polite" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
-                  {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
-                </pre>
+                {current.state === "ended" && current.outcome?.finalText.trim() ? (
+                  // Once the worker is done its final text is a report, written
+                  // in Markdown; the stream it came from stays one click away.
+                  <>
+                    <Markdown source={current.outcome.finalText} />
+                    <details className="build-log-fold">
+                      <summary>Full log</summary>
+                      <pre ref={logRef} className="build-log">
+                        {log || "The worker wrote nothing."}
+                      </pre>
+                    </details>
+                  </>
+                ) : turns.length > 0 ? (
+                  // The worker's own turn reports, said readably; the raw
+                  // stream they came from stays one click away.
+                  <>
+                    <WorkerTurns turns={turns} />
+                    <details className="build-log-fold">
+                      <summary>Full log</summary>
+                      <pre ref={logRef} className="build-log">
+                        {log}
+                      </pre>
+                    </details>
+                  </>
+                ) : (
+                  <pre ref={logRef} className="build-log" aria-live="polite">
+                    {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
+                  </pre>
+                )}
                 {current.outcome ? (
                   <p className="inline-note">
                     {current.outcome.available
@@ -469,16 +541,14 @@ export function BuildPanel({
                   </div>
                 ) : null}
                 {canRecord ? (
-                  <div className="document-tools">
-                    <input
-                      className="field"
+                  <div className="build-record">
+                    <Input
                       aria-label="Start command"
-                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
+                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional; replaces run.json's)`}
                       value={startCommand}
                       onChange={(event) => setStartCommand(event.target.value)}
                     />
-                    <input
-                      className="field"
+                    <Input
                       aria-label="Port"
                       placeholder="Port"
                       inputMode="numeric"
@@ -495,11 +565,15 @@ export function BuildPanel({
             ) : (
               <p className="inline-note">No attempt has been started. The worker builds in its own directory on this computer, from the frozen plan, requirements, design and stack.</p>
             )}
-            {archive ? <BuildFile node={archive} tenantId={tenantId} /> : null}
+            {archive ? <BuildFile node={archive} nodes={detail.nodes} tenantId={tenantId} /> : null}
             {status ? (
               <>
                 <h2>Build status — {agentFor(8).title}</h2>
-                <Markdown source={status.body} />
+                {status.reply ? (
+                  <Markdown source={status.reply.body} />
+                ) : (
+                  <p className="inline-note">Waiting on the {agentFor(8).title.toLowerCase()} to read attempt {String(status.attempt)}'s record.</p>
+                )}
               </>
             ) : null}
             {!canApprove && evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}

@@ -7,12 +7,16 @@
  */
 import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
 import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
+import { keys } from "../queries/keys.ts";
+import { manifestCompanionOf } from "./workspace/stage9-opening.ts";
+import { parseDeliveryManifest } from "./workspace/delivery-opening.ts";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -20,7 +24,7 @@ type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 const MATERIAL_READING_KIND = "material_reading";
 
 /** `sizeBytes` is unknown for a plain text/data-URL artifact (CL-8709) — say so rather than showing a false 0. */
-function formatSize(sizeBytes: number | undefined): string {
+export function formatSize(sizeBytes: number | undefined): string {
   if (sizeBytes === undefined) return "unknown size";
   if (sizeBytes >= 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
@@ -312,7 +316,7 @@ function ArtifactReader({
           ) : node.kind === "audience_deck" ? (
             <DeckFile node={node} tenantId={tenantId} />
           ) : node.kind === "build_evidence" ? (
-            <BuildFile node={node} tenantId={tenantId} />
+            <BuildFile node={node} nodes={nodes} tenantId={tenantId} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -418,13 +422,28 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * attempt's workspace, named after the project. Saved, not shown — a
  * source tree is not a document.
  */
-export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+/**
+ * A recorded build archive. It is written as a data URI, so its node carries
+ * no upload size; the manifest packaged beside it names the archive's real
+ * size, and that is the one shown.
+ */
+export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
-  const size = formatSize(node.sizeBytes);
+  const manifestId = node.sizeBytes === undefined ? (manifestCompanionOf(nodes, node)?.id ?? null) : null;
+  // An artifact id names a fixed version, so its content is never stale.
+  const manifest = useQuery({
+    queryKey: keys.artifact.of(tenantId, manifestId ?? ""),
+    queryFn: async () => (await api.artifactContent(tenantId, manifestId!)).content,
+    enabled: manifestId !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const recordedSize = manifest.data === undefined ? undefined : parseDeliveryManifest(manifest.data)?.archive.sizeBytes;
+  const sizeBytes = node.sizeBytes ?? recordedSize;
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as the worker left it,
+        {node.title} · tar.gz archive · {sizeBytes !== undefined ? `${formatSize(sizeBytes)} stored` : manifest.isError ? "size could not be read" : manifestId !== null && manifest.isPending ? "reading its size" : "size not recorded"}. The build attempt's workspace as the worker left it,
         without installed dependencies; it unpacks into a directory named for the project. Its bytes are what delivery
         review verifies once accepted.
       </p>

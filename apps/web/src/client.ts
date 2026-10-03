@@ -259,6 +259,12 @@ export type BuildAttempt = {
   workspace: string;
 };
 
+/** One turn the worker reported through its hook (`summarizeTurn`): its text, and each tool call as a plain action and the path it named, relative to the attempt's directory. */
+export type BuildTurn = {
+  said: string;
+  tools: { action: string; path: string | null; failed: boolean }[];
+};
+
 /** The frozen material the host assembles the worker's prompt from. */
 export type BuildPromptMaterial = {
   planText: string;
@@ -1171,11 +1177,11 @@ export const api = {
       body: JSON.stringify({ prompt, ...(continueFrom === undefined ? {} : { continueFrom }) }),
     }),
   buildAttempt: (projectId: string, attempt: number) =>
-    request<{ attempt: BuildAttempt; log: string; prompt: string | null }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
+    request<{ attempt: BuildAttempt; log: string; turns: (BuildTurn | null)[]; prompt: string | null }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
   cancelBuildAttempt: (projectId: string, attempt: number) =>
     request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
   /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
-  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[] }) =>
+  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[]; target?: string }) =>
     request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
       `/projects/${projectId}/build/attempts/${String(attempt)}/package`,
       { method: "POST", body: JSON.stringify(body) },

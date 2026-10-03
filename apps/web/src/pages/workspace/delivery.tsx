@@ -25,7 +25,8 @@ import {
 } from "../../pending-approvals.ts";
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
-import { Banner, Button, documentName, shortHash } from "../../components.jsx";
+import { Banner, Button, CopyButton, documentName, shortHash } from "../../components.jsx";
+import { formatSize } from "../graph.jsx";
 import { Markdown } from "../../markdown.jsx";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
@@ -85,26 +86,47 @@ function VerificationList({ verification }: { verification: DeliveryVerification
       ) : summary.passed === 0 ? (
         <p className="inline-note">Nothing was verified</p>
       ) : null}
-      <ul className="checklist">
-        {rows.map((row) => (
-          <li key={row.path} className={checklistClass(row.status)}>
-            {row.path}
-            {row.note ? ` — ${row.note}` : ""}
-          </li>
-        ))}
-      </ul>
+      {/* Folded unless something failed: a clean list of every check is
+          there to check, not to read. */}
+      <details className="delivery-files" open={summary.failed > 0}>
+        <summary>
+          {summary.passed} of {rows.length} check{rows.length === 1 ? "" : "s"} verified
+        </summary>
+        <ul className="checklist">
+          {rows.map((row) => (
+            <li key={row.path} className={checklistClass(row.status)}>
+              {row.path}
+              {row.note ? ` — ${row.note}` : ""}
+            </li>
+          ))}
+        </ul>
+      </details>
     </>
   );
 }
 
-function artifactMeta(artifact: Record<string, unknown>): string {
-  const parts: string[] = [];
-  if (typeof artifact["sizeBytes"] === "number") {
-    const bytes = artifact["sizeBytes"] as number;
-    parts.push(bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} kB`);
-  }
-  if (typeof artifact["contentHash"] === "string") parts.push(shortHash(artifact["contentHash"]));
-  return parts.length > 0 ? parts.join(" · ") : "—";
+/** One delivered file: its size, and its hash shortened, whole on hover and when copied. */
+function ArtifactRow({ artifact }: { artifact: Record<string, unknown> }) {
+  const hash = typeof artifact["contentHash"] === "string" ? (artifact["contentHash"] as string) : null;
+  const size = typeof artifact["sizeBytes"] === "number" ? formatSize(artifact["sizeBytes"]) : null;
+  return (
+    <div className="cost-row">
+      <span>{typeof artifact["path"] === "string" ? artifact["path"] : "—"}</span>
+      <span>
+        {size}
+        {size && hash ? " · " : null}
+        {hash ? (
+          <>
+            <code className="delivery-hash" title={hash}>
+              {shortHash(hash)}
+            </code>
+            <CopyButton text={hash} label="Copy hash" />
+          </>
+        ) : null}
+        {!size && !hash ? "—" : null}
+      </span>
+    </div>
+  );
 }
 
 /** Stage 9's manifest, awaiting a decision. */
@@ -114,6 +136,7 @@ function DeliveryDecision({
   nodes,
   archiveRef,
   howToRun,
+  finished,
   onAccept,
   onRejectSendBack,
 }: {
@@ -123,6 +146,8 @@ function DeliveryDecision({
   /** Stage 8's approved archive, off the workflow's own review record. */
   archiveRef: { artifactId: string; version: number } | null;
   howToRun: string | null;
+  /** The workflow has recorded stage 9's approval: the project is delivered. */
+  finished: boolean;
   /**
    * Called after the hub's `deliver` tool approval succeeds, to also send
    * the project workflow its stage 9 `approve` decision — the tool approval
@@ -203,14 +228,17 @@ function DeliveryDecision({
   // never told anyone it had arrived (defect: an empty pane until reload).
   // Stops once delivered — `load` itself also short-circuits, but skipping
   // the call here means a pending timer never has to make the round trip.
+  // The workflow's own finish stops it too: after a reload the approval id
+  // is gone from memory, so `delivered` alone would never stop it.
   useEffect(() => {
     void load();
+    if (finished) return;
     const timer = setInterval(() => {
       if (!deliveredRef.current) void load();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, projectId]);
+  }, [tenantId, projectId, finished]);
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
@@ -276,9 +304,10 @@ function DeliveryDecision({
     }
   };
 
-  const deliveredAt = delivered?.resolvedAt ? new Date(delivered.resolvedAt).toLocaleString() : "just now";
-  const meta = delivered
-    ? `Final · ${VERIFIER} · delivered ${deliveredAt}`
+  const isDelivered = delivered !== null || finished;
+  const deliveredAt = delivered?.resolvedAt ? ` ${new Date(delivered.resolvedAt).toLocaleString()}` : "";
+  const meta = isDelivered
+    ? `Final · ${VERIFIER} · delivered${deliveredAt}`
     : pending
       ? `Draft · ${VERIFIER} · awaiting review`
       : VERIFIER;
@@ -288,27 +317,32 @@ function DeliveryDecision({
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
       {error ? <Banner tone="error" title={error} /> : null}
-      {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
-      {summary ? <p>{summary}</p> : null}
+      {isDelivered ? (
+        <p className="delivery-done" role="status">
+          Delivered. The project is finished. Each file handed over is recorded with a fingerprint, so what you received can be checked against it.
+        </p>
+      ) : null}
+      {!pending && !isDelivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
+      {howToRun ? (
+        <section className="delivery-how-to-run">
+          <Markdown source={howToRun} />
+        </section>
+      ) : null}
+      {summary ? <Markdown source={summary} /> : null}
       {artifacts.length > 0 ? (
-        artifacts.map((artifact, index) => (
-          <div className="cost-row" key={index}>
-            <span>{typeof artifact["path"] === "string" ? artifact["path"] : "—"}</span>
-            <span>{artifactMeta(artifact)}</span>
-          </div>
-        ))
+        <details className="delivery-files">
+          <summary>
+            {artifacts.length} file{artifacts.length === 1 ? "" : "s"} in this delivery
+          </summary>
+          {artifacts.map((artifact, index) => (
+            <ArtifactRow key={index} artifact={artifact} />
+          ))}
+        </details>
       ) : null}
       {verification ? (
         <>
           <h2>{documentName("delivery_verification")}</h2>
           <VerificationList verification={verification} />
-        </>
-      ) : null}
-      {howToRun ? <Markdown source={howToRun} /> : null}
-      {delivered ? (
-        <>
-          <h2>Sign-off</h2>
-          <p>Delivered. The manifest names exact versions and hashes.</p>
         </>
       ) : null}
       {pending ? (
@@ -342,6 +376,7 @@ export function DeliveryPanel({
   tenantId,
   archiveRef,
   latestReply,
+  finished,
   onAccept,
   onRejectSendBack,
 }: {
@@ -350,6 +385,8 @@ export function DeliveryPanel({
   /** Stage 8's approved archive, off the workflow's own review record. */
   archiveRef: { artifactId: string; version: number } | null;
   latestReply: ChatMessage | null;
+  /** The workflow has recorded stage 9's approval. */
+  finished: boolean;
   /** Called once the hub's `deliver` tool approval succeeds, to also send
    *  the project workflow its stage 9 `approve` decision. */
   onAccept: () => Promise<void>;
@@ -364,6 +401,7 @@ export function DeliveryPanel({
       nodes={detail.nodes}
       archiveRef={archiveRef}
       howToRun={extractHowToRun(latestReply?.body ?? null)}
+      finished={finished}
       onAccept={onAccept}
       onRejectSendBack={onRejectSendBack}
     />
