@@ -21,10 +21,10 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
+import { Banner, Button, Mark, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
-import { ProjectMenu } from "./pages/project-menu.jsx";
+import { ProjectMenu, exportProjectBundle } from "./pages/project-menu.jsx";
 import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
@@ -36,7 +36,6 @@ import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
-import { assembleBundle, bundleFileName } from "./project-export.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 import { useBusyWhile } from "./use-busy.ts";
@@ -410,7 +409,13 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const [view, setShownView] = useState<View>(initialView);
+  // What one page said, a download's notice or a refusal, is not carried onto the next.
+  const setView = (next: View) => {
+    setNotice(null);
+    setError(null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
@@ -676,21 +681,12 @@ export function App() {
     setView("project");
   };
 
-  /**
-   * The bundle is assembled in the browser (`project-export.ts`) and saved as
-   * a download — the same path the projects list's export menu item takes.
-   */
+  /** The same export, and the same notice, as the project menu's. */
   const exportProject = async () => {
     if (exporting || !detail) return;
     setExporting(true);
     try {
-      const bundle = await assembleBundle(detail.project.id, {
-        projectView: api.projectView,
-        artifactContent: api.artifactContent,
-        stageAgentAddresses: api.stageAgentAddresses,
-        readStageThread: api.readStageThread,
-      });
-      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
+      setNotice(await exportProjectBundle(detail.project));
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
