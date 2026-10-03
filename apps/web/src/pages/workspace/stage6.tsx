@@ -149,22 +149,31 @@ export function Stage6Panel({
     if (requirementsNode) {
       if (recoveredFor.current === requirementsNode.id) return;
       recoveredFor.current = requirementsNode.id;
-      void api
-        .artifactContent(tenantId, requirementsNode.id)
-        .then((result) => setRequirements((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev)))
-        .catch(() => undefined);
+      const nodeId = requirementsNode.id;
+      void (async () => {
+        try {
+          const result = await api.artifactContent(tenantId, nodeId);
+          setRequirements((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
+        } catch (cause) {
+          setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+        }
+      })();
       return;
     }
     if (!requirementsMinted) return;
     if (recoveredFor.current === `thread:${projectId}`) return;
     recoveredFor.current = `thread:${projectId}`;
     void (async () => {
-      const status = await api.stage6RoleAgentStatus(projectId, STAGE6_REQUIREMENTS_ROLE_KEY).catch(() => null);
-      if (!status) return;
-      const thread = await api.readStageThread(tenantId, [status.address]).catch(() => []);
-      const reply = [...thread].reverse().find((message) => message.author === "agent");
-      if (!reply) return;
-      setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
+      try {
+        const status = await api.stage6RoleAgentStatus(projectId, STAGE6_REQUIREMENTS_ROLE_KEY);
+        if (!status) return;
+        const thread = await api.readStageThread(tenantId, [status.address]);
+        const reply = [...thread].reverse().find((message) => message.author === "agent");
+        if (!reply) return;
+        setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
+      } catch (cause) {
+        setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+      }
     })();
   }, [requirements.status, requirementsNode, requirementsMinted, projectId, tenantId]);
 
@@ -185,19 +194,20 @@ export function Stage6Panel({
           const held = prev[role.key] ?? STAGE6_IDLE_ROLE;
           return held.status === "idle" ? { ...prev, [role.key]: { ...held, address, status: "done", reply, recorded } } : prev;
         });
-      if (node) {
-        void api
-          .artifactContent(tenantId, node.id)
-          .then((result) => settle(result.content, true, null))
-          .catch(() => undefined);
-        continue;
-      }
       void (async () => {
-        const status = await api.stage6RoleAgentStatus(projectId, role.key).catch(() => null);
-        if (!status) return;
-        const thread = await api.readStageThread(tenantId, [status.address]).catch(() => []);
-        const reply = [...thread].reverse().find((message) => message.author === "agent");
-        if (reply) settle(reply.body, false, status.address);
+        try {
+          if (node) {
+            settle((await api.artifactContent(tenantId, node.id)).content, true, null);
+            return;
+          }
+          const status = await api.stage6RoleAgentStatus(projectId, role.key);
+          if (!status) return;
+          const thread = await api.readStageThread(tenantId, [status.address]);
+          const reply = [...thread].reverse().find((message) => message.author === "agent");
+          if (reply) settle(reply.body, false, status.address);
+        } catch (cause) {
+          setReviews((prev) => ({ ...prev, [role.key]: { ...(prev[role.key] ?? STAGE6_IDLE_ROLE), status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) } }));
+        }
       })();
     }
   }, [reviews, reviewNodes, requirementsMinted, projectId, tenantId]);
@@ -211,13 +221,16 @@ export function Stage6Panel({
       if (reviewRecordedFor.current.has(mark)) continue;
       reviewRecordedFor.current.add(mark);
       const reply = state.reply;
-      void api
-        .persistEngineeringReview(projectId, role.key, role.label, reply)
-        .then(() => {
+      void (async () => {
+        try {
+          await api.persistEngineeringReview(projectId, role.key, role.label, reply);
           setReviews((prev) => (prev[role.key]?.reply === reply ? { ...prev, [role.key]: { ...prev[role.key]!, recorded: true } } : prev));
           onDocumentsChanged?.();
-        })
-        .catch(() => undefined);
+        } catch (cause) {
+          const error = `The review could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`;
+          setReviews((prev) => ({ ...prev, [role.key]: { ...prev[role.key]!, status: "error", error } }));
+        }
+      })();
     }
   }, [reviews, projectId, onDocumentsChanged]);
 
