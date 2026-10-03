@@ -69,7 +69,7 @@ export function readingHasText(reading: string): boolean {
 }
 
 /** Never a silent cut: what is left out past the cap is always announced. */
-function cap(text: string): string {
+export function capMaterialText(text: string): string {
   return text.length > MAX_FILE_CHARS
     ? `${text.slice(0, MAX_FILE_CHARS)}\n(${text.length - MAX_FILE_CHARS} more characters not shown)`
     : text;
@@ -271,19 +271,19 @@ async function presentationText(bytes: Uint8Array): Promise<string> {
 export async function readMaterial(input: MaterialInput): Promise<{ text: string }> {
   const { name, mediaType, bytes } = input;
   if (isText(mediaType)) {
-    return { text: cap(new TextDecoder("utf-8").decode(bytes)) };
+    return { text: capMaterialText(new TextDecoder("utf-8").decode(bytes)) };
   }
   if (isXlsx(name, mediaType)) {
-    return { text: cap(await spreadsheetText(bytes)) };
+    return { text: capMaterialText(await spreadsheetText(bytes)) };
   }
   if (isLegacyXls(name, mediaType)) {
-    return { text: cap(await spreadsheetText(await legacyWorkbookToXlsx(bytes))) };
+    return { text: capMaterialText(await spreadsheetText(await legacyWorkbookToXlsx(bytes))) };
   }
   if (isPdf(name, mediaType)) {
-    return { text: cap(await pdfText(bytes)) };
+    return { text: capMaterialText(await pdfText(bytes)) };
   }
   if (isPptx(name, mediaType)) {
-    return { text: cap(await presentationText(bytes)) };
+    return { text: capMaterialText(await presentationText(bytes)) };
   }
   const what = mediaType.startsWith("image/") ? "An image" : "A file";
   return { text: describe(name, mediaType, bytes.byteLength, what) };
