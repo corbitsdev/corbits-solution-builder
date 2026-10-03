@@ -55,10 +55,6 @@ export type ProjectRecord = {
 };
 
 const CONFIG_KEY = "solutionsBuilder";
-/** A switch recorded on a tenant that is no project: the workspace, which
- *  hosts the one namer every project shares. Kept apart from `CONFIG_KEY`,
- *  whose presence is what makes a tenant read back as a project. */
-const UNOWNED_SWITCH_CONFIG_KEY = "solutionsBuilderSpecialistSwitch";
 
 type StoredProject = {
   policy: ProjectPolicy;
@@ -230,8 +226,7 @@ export async function readStageSwitch(
 ): Promise<StageModelSwitchRecord | null> {
   const tenant = await getTenant(transport, projectId);
   const stored = tenant?.config?.[CONFIG_KEY] as StoredProject | undefined;
-  const unowned = tenant?.config?.[UNOWNED_SWITCH_CONFIG_KEY] as Record<string, StageModelSwitchRecord> | undefined;
-  return stored?.modelSwitch?.[String(stage)] ?? unowned?.[String(stage)] ?? null;
+  return stored?.modelSwitch?.[String(stage)] ?? null;
 }
 
 /** Records an explicit switch's target; read-modify-write like every config
@@ -249,13 +244,7 @@ export async function writeStageSwitch(
   const tenant = await getTenant(transport, projectId);
   if (!tenant) throw notFound("That project");
   const stored = (tenant.config?.[CONFIG_KEY] as StoredProject | undefined) ?? null;
-  if (!stored) {
-    const unowned = (tenant.config?.[UNOWNED_SWITCH_CONFIG_KEY] as Record<string, StageModelSwitchRecord> | undefined) ?? {};
-    await patchTenant(transport, projectId, {
-      config: { ...(tenant.config ?? {}), [UNOWNED_SWITCH_CONFIG_KEY]: { ...unowned, [String(stage)]: record } },
-    });
-    return;
-  }
+  if (!stored) throw notFound("That project");
   const modelSwitch = { ...(stored.modelSwitch ?? {}), [String(stage)]: record };
   await patchTenant(transport, projectId, {
     config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, modelSwitch } },

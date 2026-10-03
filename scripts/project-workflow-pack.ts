@@ -8,6 +8,8 @@
  * `@intx/workflow` is left external: the sidecar resolves it from the
  * vendored closure member `workflow-closure.ts` ships beside these files, not
  * from a bundled copy. `@intx/agent` resolves from the registry the same way.
+ * `./namer-source.js` stays external too: the installer writes the tenant's
+ * model pin there at deploy time.
  *
  * `buildProjectWorkflowEntryFiles()` is pure output-in-memory, used directly
  * by a Node/Bun caller (the deployed proof script). The browser-driven
@@ -35,6 +37,14 @@ export async function buildProjectWorkflowEntryFiles(): Promise<Record<`${EntryN
     target: "browser",
     format: "esm",
     external: ["@intx/workflow", "@intx/agent"],
+    plugins: [
+      {
+        name: "namer-source-external",
+        setup(build) {
+          build.onResolve({ filter: /\/namer-source\.js$/ }, () => ({ path: "./namer-source.js", external: true }));
+        },
+      },
+    ],
     minify: false,
     sourcemap: "none",
   });

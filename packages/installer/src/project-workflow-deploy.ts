@@ -21,13 +21,14 @@
  * never read or signalled again.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { SPECIALIST_BASE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
+import { SPECIALIST_BASE_DEPENDENCIES, type InferenceSourcePin } from "@solutions-builder/app/specialist-source";
 import { isProjectStateSnapshot, type ProjectState } from "@solutions-builder/app/project-workflow/contracts";
 import { assetsFor, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { normalizedProjectId } from "./specialist-deploy.js";
+import { isChatCapable } from "./resolved-catalog.js";
 import { treeDigest } from "./workflow-closure.js";
-import { visibleCatalog } from "./visible-catalog.js";
+import { visibleCatalog, type VisibleCatalog } from "./visible-catalog.js";
 import {
     deploymentHasEnded,
   deploymentIsLive,
@@ -36,6 +37,7 @@ import {
   pollWhilePlacing,
   pushWorkflowSourceTree,
   waitForPushVisible,
+  pinFor,
   RUN_ENDED_EVENTS,
   type PlacementWait,
   type SidecarCapability,
@@ -478,6 +480,30 @@ function parkedOn(events: readonly { seq: number; type: string }[]): boolean {
   return newest?.type === "SignalAwaited";
 }
 
+/** How long a decision waits for its run to park: a fresh run names its
+ *  project before its loop first parks, bounded by the name step's timeout. */
+const PARK_WAIT_MS = 90_000;
+
+/** A signal appended while the run's writer is busy collides with its next
+ *  sequence number and kills the run (#188), including one sent before a
+ *  fresh run's first park. */
+export async function waitForPark(
+  transport: Transport,
+  run: ProjectWorkflowDeployment,
+  options: { readonly timeoutMs?: number; readonly pollMs?: number; readonly onStill?: (events: readonly { seq: number; type: string }[]) => void } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? PARK_WAIT_MS;
+  const workflows = workflowsOf(transport, run);
+  const parked = await pollUntil(timeoutMs, options.pollMs ?? REPLAY_POLL_MS, async () => {
+    const { events } = await workflows.runEvents(run.deploymentId, run.runId);
+    if (events.some((event) => TERMINAL_RUN_EVENTS.has(event.type))) throw new Error(`the project's workflow run ${run.runId} has ended`);
+    if (parkedOn(events)) return true;
+    options.onStill?.(events);
+    return null;
+  });
+  if (!parked) throw new Error(`the project's workflow run ${run.runId} did not become ready for a decision within ${String(Math.round(timeoutMs / 1000))}s`);
+}
+
 /** How the replay paces itself, how long it lets the run sit still, and
  *  how long it waits on the hub to place the target; all shortened by tests.
  *  `onProgress` hears each decision land (#295). */
@@ -569,8 +595,9 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   // Progress is the top-level log growing. Called on every read that finds
   // the run neither where the replay needs it nor ended. Counted only once
   // the run has parked at least once: before its first park it is still
-  // starting up, which can take longer than the stall bound with nothing
-  // to show for it; the pre-send budget bounds that wait instead.
+  // starting up, and the name step it waits for can take longer than the
+  // stall bound with nothing to show for it; the pre-send budget bounds
+  // that wait instead.
   let newestSeq = -1;
   let movedAt = Date.now();
   let parkedOnce = false;
@@ -593,15 +620,7 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
     if (held.has(decision.signalId)) continue;
     // A decision held only by a snapshot has no signal to send again (#299).
     if (!decision.replayable) throw new Error(`the project's workflow cannot take decision ${decision.signalId} again: it exists only in a snapshot`);
-    // Not before the run is parked: its writer is idle only then.
-    const ready = await pollUntil(90_000, pollMs, async () => {
-      const events = await topLevel();
-      if (ended(events)) throw new Error("the project's workflow ended while its history was being replayed");
-      if (parkedOn(events)) return true;
-      stillFor(events, decision.signalId);
-      return null;
-    });
-    if (!ready) throw new Error(`the project's workflow did not park before decision ${decision.signalId} could be replayed`);
+    await waitForPark(transport, target, { pollMs, onStill: (events) => stillFor(events, decision.signalId) });
     try {
       await workflows.signal(target.deploymentId, {
         runId: target.runId,
@@ -703,7 +722,7 @@ export type EnsuredProjectWorkflow = ProjectWorkflowDeployment & { readonly repl
 /** The asset a project workflow deploys into: a root workspace `package.json`,
  *  a member whose `interchange.workflow`/`actions`/`loops` point at the
  *  compiled entries, and the vendored `@intx/workflow` closure beside it. */
-function renderProjectWorkflowSource(assetName: string, source: ProjectWorkflowSource): Record<string, string> {
+function renderProjectWorkflowSource(assetName: string, source: ProjectWorkflowSource, namer: InferenceSourcePin): Record<string, string> {
   const root = { name: `${assetName}-workspace`, version: "0.0.0", private: true, type: "module", workspaces: ["packages/*"] };
   const member = {
     name: assetName,
@@ -719,7 +738,59 @@ function renderProjectWorkflowSource(assetName: string, source: ProjectWorkflowS
     "packages/project/workflow.js": source.files["workflow.js"]!,
     "packages/project/actions.js": source.files["actions.js"]!,
     "packages/project/loops.js": source.files["loops.js"]!,
+    "packages/project/namer-source.js": namerSourceModule(namer),
   };
+}
+
+/** One offering of a `GET /api/tenants/:id/models` row, as far as choosing the namer's model reads it. */
+export type ResolvedOfferingPrice = {
+  readonly offeringId: string;
+  readonly plugin: string;
+  readonly capabilities: readonly string[];
+  readonly pricing: readonly { readonly currency: string; readonly inputTokenPrice: string | null; readonly outputTokenPrice: string | null }[];
+};
+export type ResolvedModelPrices = { readonly canonicalName: string; readonly offerings: readonly ResolvedOfferingPrice[] };
+
+/**
+ * The model the `name` step runs on: the cheapest chat-capable offering of
+ * the leading offering's provider, by the tenant's own active prices. An
+ * offering with no price on file is never assumed cheap, so with no prices
+ * the name step runs on the leading offering, as every other step does.
+ * Only offerings the deploy hands the hub (`deployable`) are considered.
+ */
+export function namerPin(lead: InferenceSourcePin, deployable: ReadonlySet<string>, models: readonly ResolvedModelPrices[]): InferenceSourcePin {
+  const priceOf = (offering: ResolvedOfferingPrice, currency: string): number | null => {
+    const row = offering.pricing.find((entry) => entry.currency === currency);
+    const total = Number(row?.inputTokenPrice ?? NaN) + Number(row?.outputTokenPrice ?? NaN);
+    return Number.isFinite(total) ? total : null;
+  };
+  const candidates = models.flatMap((model) =>
+    model.offerings
+      .filter((offering) => offering.plugin === lead.provider && deployable.has(offering.offeringId) && isChatCapable(offering.capabilities))
+      .map((offering) => ({ model: model.canonicalName, offering })),
+  );
+  const leading = candidates.find((entry) => entry.model === lead.model);
+  const currency = leading?.offering.pricing[0]?.currency ?? "USD";
+  let best: { model: string; price: number } | null = null;
+  for (const { model, offering } of candidates) {
+    const price = priceOf(offering, currency);
+    if (price !== null && (best === null || price < best.price)) best = { model, price };
+  }
+  return best ? { provider: lead.provider, model: best.model } : lead;
+}
+
+/** The namer's pin for `tenantId`, over the offerings a deploy there hands the hub. */
+async function namerPinFor(transport: Transport, tenantId: string, catalog: VisibleCatalog): Promise<InferenceSourcePin> {
+  const offerings = [...catalog.offerings].sort((a, b) => a.priority - b.priority);
+  const lead = offerings[0] ? pinFor(catalog, offerings[0]) : undefined;
+  if (!lead) throw new Error("connect a model provider before deploying the project workflow");
+  const models = await transport.fetch<ResolvedModelPrices[]>("GET", `/api/tenants/${tenantId}/models`);
+  return namerPin(lead, new Set(offerings.map((offering) => offering.id)), models);
+}
+
+/** The module `workflow.js` imports its namer pin from (see `namer-source.ts`). */
+function namerSourceModule(pin: InferenceSourcePin): string {
+  return `export const NAMER_SOURCE = ${JSON.stringify(pin)};\n`;
 }
 
 /** The file whose read-back proves a push is visible to the hub's deploy path. */
@@ -745,6 +816,8 @@ export type EnsureProjectWorkflowOptions = {
   /** Rebuild the project's run from its recorded decisions rather than its
    *  last state: a fresh deployment replayed onto, whatever is live (#299). */
   readonly repair?: boolean;
+  /** The project's opening statement, handed to a fresh run for its `name` step. */
+  readonly problemStatement?: string;
 };
 
 type DeployContext = {
@@ -759,6 +832,7 @@ type DeployContext = {
   readonly assetName: string;
   readonly rendered: Record<string, string>;
   readonly code: ProjectWorkflowCode;
+  readonly problemStatement: string | undefined;
   /** The state the fresh run starts from, when it revives a run (#299). */
   readonly snapshot?: ProjectState;
 };
@@ -813,6 +887,7 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
     projectId: context.projectId,
     stages: context.stages,
     code: context.code,
+    ...(context.problemStatement ? { problemStatement: context.problemStatement } : {}),
     ...(context.snapshot ? { snapshot: context.snapshot } : {}),
   };
   const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
@@ -873,7 +948,8 @@ async function ensureProjectWorkflowOnce(
 
   const assetName = projectWorkflowAssetName(projectId);
   const assetId = await ensureWorkflowAsset(transport, tenantId, assetName, `${projectId} project workflow`);
-  const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
+  const namer = await namerPinFor(transport, tenantId, await visibleCatalog(transport, tenant));
+  const rendered = { ...renderProjectWorkflowSource(assetName, source, namer), ...vendoredWorkflowMemberFiles };
   const digest = await treeDigest({ ...rendered, [TRIGGER_STAGES_PATH]: JSON.stringify(stages) });
 
   const everywhere = async () => (await projectWorkflowDeployments(transport, home, assetName)).groups;
@@ -894,6 +970,7 @@ async function ensureProjectWorkflowOnce(
     assetName,
     rendered,
     code: { digest, generation },
+    problemStatement: options.problemStatement,
     ...(snapshot ? { snapshot } : {}),
   });
 

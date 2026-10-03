@@ -30,6 +30,7 @@ import type { RequirementEntry } from "@solutions-builder/app/stack";
 const LOOP_STEP_ID = "rework";
 const APPLY_STEP_ID = "apply";
 const HOLD_STEP_ID = "hold";
+const NAME_STEP_ID = "name";
 
 export type ProjectWorkflowView = {
   readonly stage: StageNumber;
@@ -69,6 +70,9 @@ export type ProjectWorkflowView = {
   readonly surface: Surface | null;
   /** Stages that surface makes not applicable. */
   readonly skipped: readonly StageNumber[];
+  /** The `name` step's reply, once it has completed with one; null before
+   *  then, and for good when it failed. */
+  readonly generatedTitle: string | null;
 };
 
 const EMPTY_STATE: ProjectState = {
@@ -154,11 +158,18 @@ export function foldProjectWorkflow(
   topEvents: readonly WorkflowRunEvent[],
   iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>,
 ): ProjectWorkflowView {
-  return projectWorkflowViewOf(projectStateOf(topEvents, iterationEventsByRunId));
+  return projectWorkflowViewOf(projectStateOf(topEvents, iterationEventsByRunId), generatedTitleOf(topEvents));
+}
+
+/** The `name` step's trimmed `reply` (an agent step's output is `{ reply, turn }`). */
+function generatedTitleOf(topEvents: readonly WorkflowRunEvent[]): string | null {
+  const output = outputOf(topEvents, NAME_STEP_ID) as { reply?: unknown } | undefined;
+  const reply = typeof output?.reply === "string" ? output.reply.trim() : "";
+  return reply.length > 0 ? reply : null;
 }
 
 /** The view one carried `ProjectState` renders as; `foldProjectWorkflow` over the state it finds in the events. */
-export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView {
+export function projectWorkflowViewOf(state: ProjectState, generatedTitle: string | null = null): ProjectWorkflowView {
   const openReview = state.reviews[state.stage]?.status === "open" ? state.reviews[state.stage]! : null;
   const lastRefusal = [...state.decisions].reverse().find((d) => !d.accepted) ?? null;
   // A run deployed before stage-5 reviews named each stakeholder's package
@@ -187,6 +198,7 @@ export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView 
     // A run deployed before surfaces were recorded carries neither field.
     surface: state.surface ?? null,
     skipped: state.skipped ?? [],
+    generatedTitle,
   };
 }
 

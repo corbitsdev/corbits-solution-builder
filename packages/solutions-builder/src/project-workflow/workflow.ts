@@ -1,5 +1,8 @@
-import { action, awaitSignal, defineWorkflow, loop } from "@intx/workflow";
+import { defineAgent } from "@intx/agent";
+import { action, awaitSignal, defineWorkflow, loop, step } from "@intx/workflow";
+import { agentById } from "../kit.js";
 import { projectWorkflowLoopCarry, projectWorkflowLoopWhile } from "./loops.js";
+import { NAMER_SOURCE } from "./namer-source.js";
 
 export { projectWorkflowLoopCarry, projectWorkflowLoopWhile };
 
@@ -14,28 +17,43 @@ export const PROJECT_DECISION_SIGNAL = "project.decision";
  */
 export const MAX_ITERATIONS = 500;
 
+export const NAME_STEP_ID = "name";
+
+/** Bounds how long the loop waits on the namer, and so a fresh run's first park. */
+const NAME_TIMEOUT_MS = 60_000;
+
+const namerRole = agentById("namer");
+if (!namerRole) throw new Error("namer role missing from the kit");
+
+const namerAgent = defineAgent({
+  id: namerRole.id,
+  systemPrompt: namerRole.system,
+  tools: [],
+  capabilities: [],
+  inference: { sources: [NAMER_SOURCE] },
+});
+
 /**
  * ONE top-level loop. Body: awaitSignal -> action. `carry` is the whole
  * ProjectState, threaded as the body's next `trigger.payload`; `while` reads
  * the same state off the iteration's output. No sleep, onTrigger, child
  * workflow, or sibling loop lives in the body.
  *
- * Nothing runs beside the loop. The kit's namer used to, as an agent step
- * naming the project off the trigger's `problemStatement`, and it killed
- * runs: the runtime numbers an event when it creates it and a parked run
- * flushes nothing until it wakes, so the namer finishing while the loop was
- * parked left its completion events buffered under the numbers the next
- * decision's `SignalReceived` took, and the run died on that decision
- * (#201). The loop cannot wait for the namer either way: a dependency on
- * the step skips the loop when the namer fails, one on its failure handler
- * skips the loop when the namer succeeds (#203). Naming happens outside
- * the run, as one inference call from the host (#205).
+ * Naming runs before the loop, never beside it: an agent step finishing while the loop is
+ * parked leaves its events buffered under the sequence numbers the next
+ * decision's `SignalReceived` takes, and the run dies on it (#201). So the
+ * loop waits for naming to settle, through both sides of its route: the
+ * runtime skips the untaken side, and a dependency on the step alone or on
+ * `nameFailed` alone skips the loop whenever that side is not taken (#203).
  */
 export const projectWorkflow = defineWorkflow({
   id: "sb-project-loop-driven",
   trigger: { type: "manual" },
   steps: {
     init: action({ handler: "initProject", input: { from: "trigger.payload" } }),
+    [NAME_STEP_ID]: step({ agent: namerAgent, input: { from: "trigger.payload" }, onFailure: "nameFailed", timeout: NAME_TIMEOUT_MS }),
+    named: action({ handler: "holdState", input: { from: `steps.${NAME_STEP_ID}.output` }, after: [NAME_STEP_ID] }),
+    nameFailed: action({ handler: "recordNameFailed", input: { from: `steps.${NAME_STEP_ID}.output` }, after: [NAME_STEP_ID] }),
     rework: loop({
       body: defineWorkflow({
         id: "sb-project-loop-body",
@@ -58,7 +76,7 @@ export const projectWorkflow = defineWorkflow({
       input: { from: "steps.init.output" },
       maxIterations: MAX_ITERATIONS,
       onExhausted: "exhausted",
-      after: ["init"],
+      after: ["init", "named", "nameFailed"],
     }),
     exhausted: action({ handler: "recordExhausted", input: { from: "steps.rework.output" }, after: ["rework"] }),
   },

@@ -17,9 +17,15 @@ whose input is `merge([steps.hold.output, steps.wait.output])`. `while` and
 `apply` step's output: `while` continues until `state.done`; `carry` threads
 the whole new state forward as the next iteration's `trigger.payload`.
 
-Nothing runs beside the loop. A project is named outside the run: the host's
-`POST /projects/:id/title` makes one inference call with the namer's prompt, and
-the client writes the title through the installer.
+Beside `init`, before the loop, `name` (agent step, the kit's namer, no
+tools, 60 s timeout) reads the trigger payload's `problemStatement` and
+replies with a title; a failure routes to `nameFailed`, so it never fails the
+run. The loop starts after `init`, `named` and `nameFailed`: one of the last
+two is skipped, and a dependency on either alone would skip the loop (#203),
+while a namer still running beside a parked loop kills the run (#201). A
+decision is sent only once the run is parked (`waitForPark`), since a fresh
+run's first park now waits on naming. Its model pin is `namer-source.js`,
+written by the installer at deploy time.
 
 500 `maxIterations` (see `workflow.ts`): headroom for a nine-stage project at
 ~50 decisions/stage (refusals, opens, send-backs, reapprovals).

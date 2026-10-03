@@ -19,6 +19,7 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     stage5Quorum: null,
     surface: null,
     skipped: [],
+    generatedTitle: null,
     ...overrides,
   };
 }

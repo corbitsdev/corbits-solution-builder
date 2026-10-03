@@ -44,3 +44,6 @@ export const recordExhausted: ActionHandler = async (input) => ({
   exhausted: true,
   carry: input,
 });
+
+/** The `name` step's failure sentinel, kept so the run carries on with the fallback title. */
+export const recordNameFailed: ActionHandler = async (input) => input;
