@@ -245,13 +245,18 @@ export function StageWorkspace({
   // (a person turn with no reply) speaks only when the run cannot be read.
   const threadKey = `${String(foldedMessages.length)}:${foldedMessages.at(-1)?.id ?? ""}`;
   const runState = useSpecialistRunState(detail.project.id, stage, agentAddress, pending !== null, threadKey);
-  const busy = specialistBusy(runState, pending?.at ?? null);
+  // An ended workflow has no specialist turn to wait on.
+  const busy = !workflowView?.done && specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
   const lastFromPerson = foldedMessages.findLast((message) => message.author === "me");
   const ask = lastFromPerson && isEvaluatorNotes(lastFromPerson)
     ? "review"
-    : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+    : askKind(
+        pending?.body ?? null,
+        // Concept approval's draft is the packages, not a reply: its opening turn is not one.
+        stage === 5 ? detail.nodes.some((node) => node.kind === "audience_package") : foldedMessages.some((message) => message.author === "agent"),
+      );
   useBusyWhile(busy, specialistActivity(stage, ask));
 
   const openingDispatch = useOpeningDispatch({
