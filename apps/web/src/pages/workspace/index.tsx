@@ -44,10 +44,10 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { artifactSubject } from "./composed-mail.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -76,7 +76,6 @@ import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
@@ -649,12 +648,6 @@ export function StageWorkspace({
     }
   };
 
-  // The stage's companion documents (#345): named in a message, they go along with it.
-  const [stageDocuments, setStageDocuments] = useState<MentionedDocument[]>([]);
-  useEffect(() => {
-    setStageDocuments([]);
-  }, [stage, detail.project.id]);
-
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -670,20 +663,14 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      // A document kept in an artifact is named, not pasted: the specialist
-      // already holds it, or reads it once.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
-      const turn = withAttachedDocuments(body, stageDocuments);
-      const mail =
-        work?.state === "ready"
-          ? artifactRevisionRequest({ userInput: turn, artifactId: work.artifact.id, version: work.artifact.version })
-          : revising
-            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
-            : turn;
-      await api.sendStageMail(tenantId, agentAddress, { body: mail });
+      // The body is the person's words alone. The artifact holding the
+      // stage's document travels in the subject, so a specialist that never
+      // wrote it, such as one taking over after a model hand-off, revises it
+      // instead of starting a second.
+      await api.sendStageMail(tenantId, agentAddress, {
+        body,
+        ...(work?.state === "ready" ? { subject: artifactSubject(work.artifact, body) } : {}),
+      });
       await loadThread();
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
@@ -1138,7 +1125,6 @@ export function StageWorkspace({
           }
           reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
         />
       ) : null}
 
@@ -1157,7 +1143,6 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
-          onDocuments={setStageDocuments}
           onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}

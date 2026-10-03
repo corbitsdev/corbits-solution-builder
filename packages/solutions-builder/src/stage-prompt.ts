@@ -2,10 +2,8 @@
  * The prose a stage specialist actually reads.
  *
  * Pure rendering: the approved inputs a stage opens with (`renderInputs`,
- * read by `apps/web`'s approved chain), a revision turn that carries the
- * current version (`revisionRequest`), and the stage 3 choice reminder and
- * repair. Nothing here touches a database, an inference call or
- * Interchange; the client composes the mail and this renders the pieces.
+ * read by `apps/web`'s approved chain), and the stage 3 choice repair.
+ * Nothing here touches a database, an inference call or Interchange.
  */
 import { MATERIAL_KIND } from "./artifacts.js";
 
@@ -40,88 +38,7 @@ export function renderInputs(inputs: Inputs, stage: number): string {
     .join("\n\n");
 }
 
-export const REVISION_LEAD = "--- THE CURRENT VERSION OF THIS DOCUMENT ---";
-export const REVISION_ASK = "--- WHAT THE PERSON IS ASKING FOR NOW ---";
-
-/**
- * A revision turn as alpha main sent one (#431): the current version of the
- * document, the instruction to revise it rather than start over, then the
- * person's own words. Without the current version in the turn the model
- * re-rolls the stage and version two is a different draft rather than a
- * better one, which is not what "revise" means to anyone. The chat shows
- * only the person's words; `splitRevision` is how it finds them.
- */
-export function revisionRequest(args: { stage: number; userInput: string; currentDocument: string }): string {
-  return [
-    REVISION_LEAD,
-    args.currentDocument.trim(),
-    "",
-    `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the structure and format your instructions specify.`,
-    "",
-    REVISION_ASK,
-    args.userInput.trim() || "(No further instruction. Improve the current version without changing what was agreed.)",
-  ].join("\n");
-}
-
-/**
- * A revision turn for a stage whose document is an artifact. It names the
- * artifact and its version instead of carrying the document, in the same
- * envelope as `revisionRequest`, so the chat folds it the same way and the
- * person's words are found by `splitRevision`.
- */
-export function artifactRevisionRequest(args: { userInput: string; artifactId: string; version: number }): string {
-  return [
-    REVISION_LEAD,
-    `Artifact ${args.artifactId}, version ${String(args.version)}. If you have not seen this version in this conversation, read it once with artifact_read; otherwise do not read it.`,
-    "",
-    `Revise it with artifact_write on that same id, with expectedVersion ${String(args.version)} and edits for the passages that change. Keep every part that was not objected to and honour the directions the person has given.`,
-    "",
-    REVISION_ASK,
-    args.userInput.trim() || "(No further instruction. Improve the current version without changing what was agreed.)",
-  ].join("\n");
-}
-
-/**
- * A person's message with what the app adds for the specialist. Whatever the
- * app adds goes first and the person's own words go last, after the one
- * marker every composed message ends with, so the chat can always tell them
- * apart. With nothing to add, the words go alone.
- */
-export function composedTurn(context: readonly string[], words: string): string {
-  const added = context.map((part) => part.trim()).filter((part) => part.length > 0);
-  if (added.length === 0) return words;
-  return [...added, "", REVISION_ASK, words.trim()].join("\n");
-}
-
-/** A composed message taken apart: the person's words, and what the app added. Null for a message the person typed alone. */
-export function personWordsIn(text: string): { readonly words: string; readonly added: string } | null {
-  const at = text.lastIndexOf(REVISION_ASK);
-  if (at === -1) return null;
-  return { words: text.slice(at + REVISION_ASK.length).trim(), added: text.slice(0, at).trim() };
-}
-
-/** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
-export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
-  if (!text.startsWith(REVISION_LEAD)) return null;
-  const at = text.indexOf(REVISION_ASK);
-  if (at === -1) return null;
-  const inner = text.slice(REVISION_LEAD.length, at).trim();
-  const cut = inner.lastIndexOf("\n\nProduce the next version");
-  return { document: (cut === -1 ? inner : inner.slice(0, cut)).trim(), ask: text.slice(at + REVISION_ASK.length).trim() };
-}
-
-/**
- * A stage-3 choice the revised document must record, not relitigate. The
- * workspace shows the choice buttons instead of approval until a
- * `## Chosen approach` section exists, so a draft that absorbs the choice
- * anywhere else leaves the person choosing again. Anything that is not a
- * stage-3 choice passes through untouched.
- *
- * The reminder below is only a prompt: when the model ignores it,
- * `ensureChoiceSection` writes the section deterministically after the
- * draft lands, so approval is never stuck behind a missed instruction.
- */
-/** A stage-3 choice the person's message made, taken apart for the prompt and the repair alike. */
+/** A stage-3 choice the person's message made, taken apart for the repair. */
 function choiceIn(stage: number, userInput: string): { heading: string; letter: string; name: string | null } | null {
   if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return null;
   const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
@@ -129,20 +46,12 @@ function choiceIn(stage: number, userInput: string): { heading: string; letter: 
   return { heading: `Chosen approach: ${match[2]!.trim()}`, letter: match[1]!.toUpperCase(), name: match[2]!.trim() };
 }
 
-export function withChoiceReminder(stage: number, userInput: string): string {
-  const choice = choiceIn(stage, userInput);
-  if (!choice) return userInput;
-  const heading = `## ${choice.heading}`;
-  return composedTurn(
-    [`The choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`],
-    userInput,
-  );
-}
-
 /**
- * The deterministic fallback for a model that ignored the reminder above: a
- * stage-3 draft written after the person chose, but with no
- * `## Chosen approach` section, gains one naming the choice. The section
+ * The deterministic fallback for a proposer that ignored its instruction to
+ * record the choice (#430): the workspace offers the choice buttons instead
+ * of approval until a `## Chosen approach` section exists. A stage-3 draft
+ * written after the person chose, but with no such section, gains one
+ * naming the choice. The section
  * records the decision — the comparison under Side by side still carries the
  * trade-offs — so the workspace offers approval instead of asking again. A
  * compliant draft, and anything that is not a stage-3 choice, passes through

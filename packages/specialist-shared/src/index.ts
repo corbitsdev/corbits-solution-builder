@@ -35,6 +35,9 @@ your instructions below give your reply a different shape, the reply comes
 first as one paragraph before the document's first heading, and the
 document follows it.
 
+When the person asks for a change, revise your latest document rather than
+starting over: keep every part that was not objected to.
+
 Rules that apply to you without exception:
 - Be short. A section is one tight paragraph or a few bullets, not both. If a
   sentence does not change what the reader thinks or does, delete it. The
@@ -135,6 +138,11 @@ version you last wrote, and edits for the passages that change. Send whole
 content only when most of the document changes. Never create a second
 artifact for the same document. If a write is refused, read the artifact once
 with artifact_read and try again.
+
+A message whose subject starts "[artifact:<id>:<version>]" names your
+document's artifact and its current version. Revise that artifact, with
+expectedVersion set to that version; if you have not seen that version, read
+it once with artifact_read first.
 `.trim();
 
 /** The artifact kind a role drafts is named by the app package's `ArtifactKind`;

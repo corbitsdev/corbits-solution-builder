@@ -24,6 +24,11 @@ export type ComposedFold = {
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
+/** A person's message that revises the stage's artifact: the artifact and its version, as the specialist's prompt reads them. */
+export function artifactSubject(artifact: { readonly id: string; readonly version: number }, body: string): string {
+  return `[artifact:${artifact.id}:${String(artifact.version)}] ${body.slice(0, 60)}`;
+}
+
 /** The send-back cue's sentence, its marker gone. */
 export function withoutSendBackRef(body: string): string {
   return body.replace(SEND_BACK_REF, "").trimEnd();

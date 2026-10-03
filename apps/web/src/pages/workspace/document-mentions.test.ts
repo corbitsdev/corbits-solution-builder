@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { personWordsIn } from "@solutions-builder/app/stage-prompt";
 import { ATTACHED_HEADING, documentAsMessage, mentionedDocuments, requirementsDocument, reviewDocument, withAttachedDocuments } from "./document-mentions.ts";
 
 const prd = requirementsDocument("# Product requirements\n\nFR-1 …");
@@ -22,7 +21,7 @@ describe("mentionedDocuments", () => {
 describe("withAttachedDocuments", () => {
   test("appends each named document once under its heading, and leaves an unrelated message alone", () => {
     const out = withAttachedDocuments("Revise the PRD using the application review.", [prd, app, sec]);
-    expect(personWordsIn(out)?.words).toBe("Revise the PRD using the application review.");
+    expect(out.startsWith("Revise the PRD using the application review.\n\n---")).toBe(true);
     expect(out).toContain(`${ATTACHED_HEADING} Product requirements\n\n# Product requirements`);
     expect(out).toContain(`${ATTACHED_HEADING} Application review\n\n## Verdict`);
     expect(out).not.toContain("Security");
