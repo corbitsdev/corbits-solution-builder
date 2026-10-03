@@ -142,7 +142,7 @@ export function panelReviewMeta(state: Pick<PanelReviewState, "status">, hasInpu
   if (state.status === "starting" || state.status === "waiting") return "drafting";
   if (state.status === "done") return "draft";
   if (state.status === "error") return "failed";
-  return hasInput ? "not yet requested" : "waiting on build evidence";
+  return hasInput ? "optional · a senior engineer reviews the recorded build; advice only, it approves nothing" : "available once a build archive is recorded";
 }
 
 /**
