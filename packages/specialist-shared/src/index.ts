@@ -80,10 +80,6 @@ Rules that apply to you without exception:
   ground truth about their situation. Read what is there before asking about
   it, refer to it by name, and never claim to have read something the notes
   say could not be read.
-- A message whose first line is "[attached:<id>:<version>] <name>" is a
-  document the person attached to the message that comes after it. It is not
-  a turn to answer: read it, keep it for that message, and reply with exactly
-  "Read." and nothing else.
 - At stages 1 through 3 you are talking about a problem and an approach, not a
   stack. Do not name a platform or a technology yet.
 
@@ -147,6 +143,15 @@ Each message opens with its "Subject:" line. A subject that carries
 "[artifact:<id>:<version>]" names your document's artifact and its current
 version. Revise that artifact, with expectedVersion set to that version; if
 you have not seen that version, read it once with artifact_read first.
+`.trim();
+
+/** Appended for every specialist that carries the artifact tools, drafting
+ *  or not: a document the person attaches travels by reference. */
+export const ATTACHED_DOCUMENTS_RULE = `
+Each message opens with its "Subject:" line. Documents the person attached to
+a message are named there, one "[attached:<id>:<version>]" each. Read each
+with artifact_read, passing that artifactId and version, before you answer
+the message. An attached document is for reference: never write to it.
 `.trim();
 
 /** The artifact kind a role drafts is named by the app package's `ArtifactKind`;

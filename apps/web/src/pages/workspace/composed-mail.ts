@@ -22,7 +22,7 @@ export type ComposedFold = {
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
-const ATTACHED_SUBJECT = /^\[attached:[^\]]+:(\d+)\] (.+)$/;
+const ATTACHED_TAG = /\[attached:([^\]]+):(\d+)\]/g;
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /** The stage artifact a message revises and its version, as the specialist's prompt reads them in a subject. */
@@ -35,11 +35,14 @@ export function attachedTag(document: { readonly artifactId: string; readonly ve
   return `[attached:${document.artifactId}:${String(document.version)}]`;
 }
 
-/** The chat's one line for a document the person attached; null for any other mail. */
-export function attachedLine(message: Pick<ChatMessage, "author" | "subject">): string | null {
-  if (message.author !== "me" || !message.subject) return null;
-  const tag = ATTACHED_SUBJECT.exec(message.subject);
-  return tag ? `Attached: ${tag[2]!}, version ${tag[1]!}` : null;
+/** A subject carrying the app's tags ahead of the message's opening words; none without tags, so the mailbox's own default applies. */
+export function taggedSubject(tags: readonly string[], body: string): { readonly subject: string } | Record<string, never> {
+  return tags.length > 0 ? { subject: `${tags.join(" ")} ${body.slice(0, 60)}` } : {};
+}
+
+/** The documents a subject's `attachedTag`s name, in order. */
+export function attachedTags(subject: string | undefined): { readonly artifactId: string; readonly version: number }[] {
+  return [...(subject ?? "").matchAll(ATTACHED_TAG)].map((tag) => ({ artifactId: tag[1]!, version: Number(tag[2]) }));
 }
 
 /** The send-back cue's sentence, its marker gone. */

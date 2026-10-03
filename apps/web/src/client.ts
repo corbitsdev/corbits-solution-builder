@@ -8,7 +8,6 @@
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
-import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -2268,10 +2267,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // Drafting stages write their document with the artifact tools,
-        // which need the hub credential binding; stage 8's archive is
-        // recorded by the build panel, not uploaded from a sidecar.
-        stageUsesArtifactTools(stage as Stage),
+        // Every stage's own specialist carries the artifact tools and their
+        // hub credential: a drafting stage writes its document with them,
+        // and any stage reads the documents a person attaches.
+        true,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2307,7 +2306,7 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
-        stageUsesArtifactTools(stage as Stage),
+        true,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);

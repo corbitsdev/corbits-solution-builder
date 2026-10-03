@@ -1,14 +1,15 @@
 /**
- * Project documents attached to a message on purpose. The person's words
- * stay the body of their own mail; each attached document goes to the same
- * specialist as a mail of its own, tagged in its subject with the version
- * the person picked, and the chat shows it as one line (`attachedLine`).
+ * Project documents attached to a message on purpose, by reference. The
+ * person's words stay the body of their mail; each attached document is one
+ * `[attached:<artifactId>:<version>]` tag in its subject, and the specialist
+ * reads that version itself with `artifact_read`. The chat shows the tags as
+ * chips on the person's own bubble.
  */
 import { useRef } from "react";
 import { ChatInputButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, type ChatAttachment } from "@corbits/react-ui";
 import { Plus } from "lucide-react";
 import { api } from "../../client.js";
-import { attachedTag } from "./composed-mail.ts";
+import { attachedTag, attachedTags } from "./composed-mail.ts";
 import type { ArtifactTab } from "./use-project-artifacts.ts";
 
 export type AttachedDocument = { readonly artifactId: string; readonly version: number; readonly label: string };
@@ -27,12 +28,11 @@ export function attachmentChips(attached: readonly AttachedDocument[]): ChatAtta
 }
 
 /**
- * Sends each document before the person's words, so their message is the
- * turn the specialist answers last. Every version is read first: one that
- * has moved on since it was attached refuses the send rather than mail a
- * text the person never saw.
+ * The subject tags naming the attached documents. Each document is read
+ * first: one that has moved on since it was attached refuses the send, so
+ * the version the specialist is pointed at is the one the person saw.
  */
-export async function sendAttachedDocuments(tenantId: string, address: string, attached: readonly AttachedDocument[]): Promise<void> {
+export async function attachedSubjectTags(tenantId: string, attached: readonly AttachedDocument[]): Promise<string[]> {
   const reads = await Promise.all(attached.map((document) => api.artifactContent(tenantId, document.artifactId)));
   for (const [at, document] of attached.entries()) {
     const { version } = reads[at]!;
@@ -41,12 +41,26 @@ export async function sendAttachedDocuments(tenantId: string, address: string, a
       throw new Error(`${document.label} is at version ${String(version)} now, not the version ${String(document.version)} you attached. Attach it again.`);
     }
   }
-  for (const [at, document] of attached.entries()) {
-    await api.sendStageMail(tenantId, address, {
-      subject: `${attachedTag(document)} ${document.label}`,
-      body: `${attachedTag(document)} ${document.label}\n\n${reads[at]!.content.trim()}`,
-    });
-  }
+  return attached.map(attachedTag);
+}
+
+/** A sent message's attached documents, named as the strip names them. */
+export function attachedIn(subject: string | undefined, labels: ReadonlyMap<string, string>): AttachedDocument[] {
+  return attachedTags(subject).map((tag) => ({ ...tag, label: labels.get(tag.artifactId) ?? tag.artifactId }));
+}
+
+/** The chips under a person's bubble for what they attached. */
+export function AttachedList({ documents }: { documents: readonly AttachedDocument[] }) {
+  if (documents.length === 0) return null;
+  return (
+    <ul className="material-list" aria-label="Attached">
+      {documents.map((document) => (
+        <li key={document.artifactId} className="material-chip">
+          {document.label} · v{document.version}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /** The composer's (+): the project's documents to attach, and a file to upload as material. */

@@ -28,7 +28,7 @@ import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
-import { AttachMenu, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
+import { AttachMenu, AttachedList, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 
@@ -60,6 +60,7 @@ export function StageDocument({
   onRevise,
   onAddMaterial,
   documents = [],
+  attachedByTurn = EMPTY_ATTACHED,
   onSubmit,
   soloApproval,
   canSubmit,
@@ -103,6 +104,8 @@ export function StageDocument({
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
+  /** The documents each of the person's turns attached. */
+  attachedByTurn?: ReadonlyMap<string, readonly AttachedDocument[]>;
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
@@ -471,6 +474,7 @@ export function StageDocument({
               <>
                 {who}
                 <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <AttachedList documents={attachedByTurn.get(message.id) ?? []} />
               </>
             );
           }}
@@ -763,6 +767,7 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
+const EMPTY_ATTACHED: ReadonlyMap<string, readonly AttachedDocument[]> = new Map();
 
 /** A passage attached to the message being written, with the optional
  *  per-passage note the selection popover collects. The note folds into the

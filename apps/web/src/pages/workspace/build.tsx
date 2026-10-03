@@ -26,8 +26,9 @@ import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import { StageConversation } from "./thread.jsx";
-import { sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
-import { foldAttachments, type StageEvent } from "./stage-events.ts";
+import { attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
+import { taggedSubject } from "./composed-mail.ts";
+import type { StageEvent } from "./stage-events.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -142,6 +143,7 @@ export function BuildPanel({
   popover = null,
   onAttach,
   documents,
+  documentLabels,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -169,6 +171,8 @@ export function BuildPanel({
   onAttach?: (files: FileList) => void;
   /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
+  /** The strip's name for each artifact, for the chips on a sent message. */
+  documentLabels?: ReadonlyMap<string, string>;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -364,8 +368,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
-            // Attachment lines arrive with `stageEvents`: the workspace reads this same thread.
-            messages={foldAttachments(messages).messages}
+            messages={messages}
             value={composer}
             onValueChange={setComposer}
             onSend={(attached) => {
@@ -373,8 +376,8 @@ export function BuildPanel({
               setComposer("");
               return run("message", async () => {
                 if (!address) return;
-                await sendAttachedDocuments(tenantId, address, attached);
-                await api.sendStageMail(tenantId, address, { body });
+                const tags = await attachedSubjectTags(tenantId, attached);
+                await api.sendStageMail(tenantId, address, { body, ...taggedSubject(tags, body) });
                 await load();
               });
             }}
@@ -385,6 +388,7 @@ export function BuildPanel({
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
             {...(documents ? { documents } : {})}
+            {...(documentLabels ? { documentLabels } : {})}
             popover={popover}
           />
         </>

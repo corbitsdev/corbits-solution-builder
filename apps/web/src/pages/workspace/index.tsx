@@ -48,8 +48,8 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag } from "./composed-mail.ts";
-import { attachableDocuments, sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
+import { artifactTag, taggedSubject } from "./composed-mail.ts";
+import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft } from "./stack-repair.ts";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
@@ -72,7 +72,7 @@ import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { foldAttachments, stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
+import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -261,8 +261,7 @@ export function StageWorkspace({
     },
     setError,
   );
-  const attachments = useMemo(() => foldAttachments(withdrawn.messages), [withdrawn.messages]);
-  const foldedMessages = attachments.messages;
+  const foldedMessages = withdrawn.messages;
   const withdrawnIds = withdrawn.ids;
   const pending = withdrawn.pending;
   const stopTurn = withdrawn.stop;
@@ -431,10 +430,9 @@ export function StageWorkspace({
     () => [
       ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
       ...switchEvents(foldedMessages),
-      ...attachments.events,
       ...routedEvents,
     ],
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, attachments.events, routedEvents],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],
   );
 
   // CL-8899: the current stage's provider/model, reporting-only (read off
@@ -660,12 +658,9 @@ export function StageWorkspace({
       // The body is the person's words alone. The artifact holding the
       // stage's document travels in the subject, so a specialist that never
       // wrote it, such as one taking over after a model hand-off, revises it
-      // instead of starting a second.
-      await sendAttachedDocuments(tenantId, agentAddress, attached);
-      await api.sendStageMail(tenantId, agentAddress, {
-        body,
-        ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
-      });
+      // instead of starting a second; so does each document attached.
+      const tags = [...(work?.state === "ready" ? [artifactTag(work.artifact)] : []), ...(await attachedSubjectTags(tenantId, attached))];
+      await api.sendStageMail(tenantId, agentAddress, { body, ...taggedSubject(tags, body) });
       await loadThread();
       return true;
     } catch (cause) {
@@ -838,6 +833,7 @@ export function StageWorkspace({
     ) : null;
 
   const attachDocuments = attachableDocuments(artifacts.tabs);
+  const documentLabels = new Map(artifacts.tabs.flatMap((tab) => tab.versions.map((node) => [node.artifactId, tab.label] as const)));
   const conversation = (
     <StageConversation
       stage={stage}
@@ -867,6 +863,7 @@ export function StageWorkspace({
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
       documents={attachDocuments}
+      documentLabels={documentLabels}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1110,6 +1107,7 @@ export function StageWorkspace({
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
           documents={attachDocuments}
+          documentLabels={documentLabels}
         />
       ) : null}
 
@@ -1211,6 +1209,7 @@ export function StageWorkspace({
               return send(quoted ? `${quoted}\n\n${message}` : message, attached);
             }}
             documents={attachDocuments}
+            attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
             onAddMaterial={async (files) => {
               await api.attachMaterial(detail.project.id, files);
               void refreshWorkflow();

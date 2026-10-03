@@ -5,7 +5,7 @@ import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
 import { composedMailFold, isStageOpening } from "./composed-mail.ts";
-import { AttachMenu, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
+import { AttachMenu, AttachedList, attachedIn, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -129,6 +129,7 @@ export function StageConversation({
   who = "Specialist",
   onAttach,
   documents = EMPTY_DOCUMENTS,
+  documentLabels = EMPTY_LABELS,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
   onAnswer,
@@ -164,6 +165,8 @@ export function StageConversation({
   onAttach?: (files: FileList) => void;
   /** The project's documents the (+) menu offers to attach. */
   documents?: readonly AttachedDocument[];
+  /** The strip's name for each artifact, for the chips on a sent message. */
+  documentLabels?: ReadonlyMap<string, string>;
   /** Which version each draft reply became (#158): such a reply is one line
    *  naming its version, never the draft itself. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
@@ -276,7 +279,10 @@ export function StageConversation({
                       onDraft={onValueChange}
                     />
                   ) : (
-                    <MessageBody text={text} />
+                    <>
+                      <MessageBody text={text} />
+                      <AttachedList documents={attachedIn(source?.subject, documentLabels)} />
+                    </>
                   )}
                 </div>
               </div>
@@ -333,6 +339,7 @@ const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 const EMPTY_DOCUMENTS: readonly AttachedDocument[] = [];
+const EMPTY_LABELS: ReadonlyMap<string, string> = new Map();
 
 /**
  * A draft reply's line in the chat (#158): "Drafted v2 of the problem
