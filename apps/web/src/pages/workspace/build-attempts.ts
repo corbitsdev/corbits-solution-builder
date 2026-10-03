@@ -185,10 +185,10 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ...input.verification.unverified.map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
     targets,
     ``,
-    `## Stage 7 forecast`,
+    `## Forecast from the cost approval`,
     input.forecast?.trim()
       ? input.forecast.trim()
-      : "No forecast could be read from stage 7's estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
+      : "No forecast could be read from the cost approval. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
     `The worker's own cost is not reported by its interface; say so if you cannot read it from its final text.`,
   ].join("\n");
 }

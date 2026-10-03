@@ -135,12 +135,12 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("- web: responded");
     expect(brief).toContain("no session, steering or checkpoint exists");
     // Without a forecast the brief says there is none, so the heading is answered honestly.
-    expect(brief).toContain("No forecast could be read from stage 7's estimate");
+    expect(brief).toContain("No forecast could be read from the cost approval");
   });
 
   test("stage 7's forecast is carried for the cost heading when it can be read", () => {
     const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, unverified: [], targets: [] } });
-    expect(brief).toContain("## Stage 7 forecast\n- **Build:** $1,200");
+    expect(brief).toContain("## Forecast from the cost approval\n- **Build:** $1,200");
   });
 
   test("a cancelled worker is said by its signal, a failed check by name, and silence as silence", () => {

@@ -54,7 +54,7 @@ describe("deliveryOpeningLine", () => {
     expect(at("- src/index.ts — 5 bytes")).toBeGreaterThan(0);
     expect(at("Verification recorded with the archive")).toBeGreaterThan(at("- src/index.ts — 5 bytes"));
     expect(at("No web or api target was started or probed.")).toBeGreaterThan(0);
-    expect(at("Checks stage 8 declared:")).toBeGreaterThan(at("Verification recorded with the archive"));
+    expect(at("What the build supervisor reported:")).toBeGreaterThan(at("Verification recorded with the archive"));
     expect(body.endsWith("bun test")).toBe(true);
   });
 

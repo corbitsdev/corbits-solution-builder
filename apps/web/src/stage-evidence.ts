@@ -240,12 +240,13 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
   };
 }
 
-/** A short "Frozen for this build" line for stage 8's opening mail, so the
+/** A short "Approved for this build" line for stage 8's opening mail, so the
  *  build specialist sees the target and every frozen reference without
  *  re-deriving them from the plan. Takes only the two fields it renders, so
  *  a caller reading `workflowView.freeze` back (no `stack` needed here)
  *  does not have to carry the rest of `Stage7Evidence` just to call it. */
 export function frozenSummaryLine(evidence: Pick<Stage7Evidence, "target" | "frozen">): string {
-  const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `${stageName(ref.stage)} version ${String(ref.version)}`);
-  return `Frozen for this build: target ${evidence.target}; ${refs.join(", ")}.`;
+  // Stages by name: the specialist copies whatever it is handed into the status the person reads.
+  const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `${stageName(ref.stage)} v${String(ref.version)}`);
+  return `Approved for this build: target ${evidence.target}; ${refs.join(", ")}.`;
 }
