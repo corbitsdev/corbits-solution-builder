@@ -102,6 +102,7 @@ export function useProjectArtifacts(
       stage,
       title: stageName(stage),
       version: (head?.version ?? 0) + 1,
+      position: nodes.filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null).length + 1,
       artifactId: `reply:${draftMessage.id}`,
       contentHash: "",
       sizeBytes: draftMessage.body.length,
