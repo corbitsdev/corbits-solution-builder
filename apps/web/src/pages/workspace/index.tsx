@@ -1007,25 +1007,6 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {!agentAddress && agent.error ? (
-        <Banner
-          tone="error"
-          title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
-          action={{ label: "Try again", onClick: agent.retry }}
-        >
-          {agent.error}
-        </Banner>
-      ) : null}
-
-      {!agentAddress && !agent.error ? (
-        <OpeningScreen
-          resuming={resuming}
-          who={openingWho}
-          opening={openingStatement}
-          draft={openingDraft}
-        />
-      ) : null}
-
       {!agent.error ? (
         <div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>
           {/* The flame burns while a specialist turn is in flight and sits
@@ -1066,6 +1047,25 @@ export function StageWorkspace({
             ))}
           </select>
         </div>
+      ) : null}
+
+      {!agentAddress && agent.error ? (
+        <Banner
+          tone="error"
+          title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
+          action={{ label: "Try again", onClick: agent.retry }}
+        >
+          {agent.error}
+        </Banner>
+      ) : null}
+
+      {!agentAddress && !agent.error ? (
+        <OpeningScreen
+          resuming={resuming}
+          who={openingWho}
+          opening={openingStatement}
+          draft={openingDraft}
+        />
       ) : null}
 
       {/* The owner's ask: a calm inline prompt, never a modal wall, and never
