@@ -708,7 +708,7 @@ export function App() {
       });
       downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setExporting(false);
     }
@@ -817,7 +817,7 @@ export function App() {
           void refresh();
         }}
         onNotice={(message) => toast.success(message)}
-        onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
+        onError={(cause) => toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
           setFocusArtifact({ stage, at: Date.now() });

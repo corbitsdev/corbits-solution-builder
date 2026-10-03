@@ -5,6 +5,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Compass, Copy, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import {
   Badge,
   Button as UiButton,
@@ -600,8 +601,8 @@ export const MATERIAL_ACCEPT = ".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,
 
 /**
  * The one way to hand documents or images over mid-project, wherever it
- * appears: a link that opens the file picker, and the reason if the files
- * were refused. The caller attaches them; this only asks for them.
+ * appears: a link that opens the file picker; a refusal is a toast. The
+ * caller attaches them; this only asks for them.
  */
 export function AddMaterial({
   onAdd,
@@ -614,15 +615,13 @@ export function AddMaterial({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const add = async (files: FileList) => {
     if (files.length === 0) return;
     setAdding(true);
-    setError(null);
     try {
       await onAdd([...files]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      toast.error(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setAdding(false);
       if (input.current) input.current.value = "";
@@ -644,7 +643,6 @@ export function AddMaterial({
       <Button variant="link" loading={adding} onClick={() => input.current?.click()}>
         {label}
       </Button>
-      {error ? <p className="inline-note">{error}</p> : null}
     </div>
   );
 }

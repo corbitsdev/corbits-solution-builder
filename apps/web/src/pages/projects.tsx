@@ -152,7 +152,7 @@ export function Projects({
   };
 
   const failed = (cause: unknown) =>
-    setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
 
   return (
     <div className="home-page">
