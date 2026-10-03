@@ -120,6 +120,7 @@ import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
 import { beginBusy } from "./busy.ts";
+import { subscribeMailbox } from "./mailbox-events.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
@@ -588,49 +589,106 @@ if (!NAMER_ROLE) {
   throw new Error(`kit role "${NAMER_ROLE_KEY}" is missing`);
 }
 
-/** Marks the one mail that asks the namer for a title. */
-const NAME_SUBJECT = "[name]";
-/** How long the namer may take to reply, and how often its thread is read meanwhile. */
+/** How long the namer may take to reply, and how often its thread is reread
+ *  when no mailbox event has arrived (the stream can drop one). */
 const NAME_REPLY_BUDGET_MS = 180_000;
-const NAME_POLL_MS = 3_000;
+const NAME_BACKSTOP_MS = 10_000;
+
+/** The subject that marks the one mail asking the namer to name `projectId`. */
+function nameSubject(projectId: string): string {
+  return `[name:${projectId}]`;
+}
+
+type Namer = SpecialistDeployment & { readonly workspaceTenantId: string };
+
+/** The workspace's one namer, memoised while it stays the live deployment. */
+let namerCall: Promise<Namer> | null = null;
 
 /**
- * Names a just-created project from its opening statement: the namer runs as
- * its own deployment, apart from the project workflow's run, is mailed the
- * statement once and replies with one line. The title is written through the
- * installer only while the record still carries `fallback`, so a title a
- * person chose meanwhile is never overwritten. Any failure leaves `fallback`
- * and is logged with its reason.
+ * The namer every project shares: one deployment in the workspace tenant,
+ * apart from any project's workflow run, so naming never adds a sidecar per
+ * project. `ensureSpecialistDeployment` resolves its "project" to a tenant,
+ * and the workspace is one.
+ */
+const ensureNamer = async (): Promise<Namer> => {
+  if (namerCall) {
+    const remembered = await namerCall;
+    if (await memoStillLive(remembered.workspaceTenantId, 1 as Stage, NAMER_ROLE_KEY, remembered)) return remembered;
+    namerCall = null;
+  }
+  const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    const deployment = await ensureSpecialistDeployment(
+      transport,
+      await hostSidecar(),
+      await lifecycleClosureSource(),
+      lifecycleGitPush,
+      workspaceTenantId,
+      1 as Stage,
+      specialistHubOrigin(),
+      false,
+      NAMER_ROLE_KEY,
+      await localizedRole(transport, workspaceTenantId, NAMER_ROLE),
+    );
+    const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+    if (placement.outcome !== "placed") throw placementFailure("the namer", placement);
+    return { ...deployment, workspaceTenantId };
+  });
+  namerCall = call;
+  try {
+    return await call;
+  } catch (cause) {
+    if (namerCall === call) namerCall = null;
+    throw cause;
+  }
+};
+
+/**
+ * The namer's reply to the mail marked `subject`, matched by id: the hub
+ * records the Message-ID it minted for that mail on its Sent copy
+ * (`triggerMessageId`) and the reply names it in `inReplyTo` -- the id pass
+ * of `pairReplies`, never queue order or text. The thread is reread on each
+ * mailbox event and every `NAME_BACKSTOP_MS`; past `NAME_REPLY_BUDGET_MS` it
+ * throws, saying how far the request got.
+ */
+async function namerReply(namer: Namer, subject: string): Promise<ChatMessage> {
+  const deadline = Date.now() + NAME_REPLY_BUDGET_MS;
+  let wake = () => {};
+  const subscription = subscribeMailbox(namer.workspaceTenantId, () => wake());
+  try {
+    for (;;) {
+      const thread = await api.readStageThread(namer.workspaceTenantId, [namer.address]);
+      const request = thread.find((message) => message.author === "me" && message.subject === subject);
+      const triggerId = request?.triggerMessageId;
+      const reply = triggerId ? thread.find((message) => message.author === "agent" && message.inReplyTo === triggerId) : undefined;
+      if (reply) return reply;
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        const stage = !request ? "its Sent copy was never found" : !triggerId ? "the hub did not record it as delivered" : "no reply names it";
+        throw new Error(`the namer did not answer ${subject} within ${NAME_REPLY_BUDGET_MS / 1000}s: ${stage}`);
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        setTimeout(resolve, Math.min(left, NAME_BACKSTOP_MS));
+      });
+    }
+  } finally {
+    subscription.unsubscribe();
+  }
+}
+
+/**
+ * Names a just-created project from its opening statement: the workspace's
+ * namer is mailed the statement once and replies with one line. The title is
+ * written through the installer only while the record still carries
+ * `fallback`, so a title a person chose meanwhile is never overwritten. Any
+ * failure leaves `fallback` and is logged with its reason.
  */
 const nameProject = async (projectId: string, problem: string, fallback: string): Promise<void> => {
   try {
-    const namer = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const deployment = await ensureSpecialistDeployment(
-        transport,
-        sidecarCapabilityOf(status),
-        await lifecycleClosureSource(),
-        lifecycleGitPush,
-        projectId,
-        1 as Stage,
-        specialistHubOrigin(),
-        false,
-        NAMER_ROLE_KEY,
-        await localizedRole(transport, workspaceTenantId, NAMER_ROLE),
-      );
-      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure("the namer", placement);
-      return deployment;
-    });
-    await api.sendStageMail(projectId, namer.address, { body: JSON.stringify({ problemStatement: problem }), subject: NAME_SUBJECT });
-    const deadline = Date.now() + NAME_REPLY_BUDGET_MS;
-    let reply: ChatMessage | undefined;
-    while (!reply) {
-      if (Date.now() >= deadline) throw new Error(`the namer did not reply within ${NAME_REPLY_BUDGET_MS / 1000}s`);
-      await new Promise((resolve) => setTimeout(resolve, NAME_POLL_MS));
-      reply = (await api.readStageThread(projectId, [namer.address])).find((message) => message.author === "agent");
-    }
-    const title = reply.body.trim();
+    const namer = await ensureNamer();
+    const subject = nameSubject(projectId);
+    await api.sendStageMail(namer.workspaceTenantId, namer.address, { body: JSON.stringify({ problemStatement: problem }), subject });
+    const title = (await namerReply(namer, subject)).body.trim();
     if (!title || title.length > TITLE_MAX || title.includes("\n")) throw new Error(`the namer's reply is not a title: ${title.slice(0, 120)}`);
     const transport = createHubTransport();
     const record = await installerRequireProject(transport, projectId);
