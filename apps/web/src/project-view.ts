@@ -66,11 +66,18 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
 
 type GraphNode = Awaited<ReturnType<typeof artifactGraphFor>>["nodes"][number];
 
-/** The graph's nodes, in the graph's order, each numbered by its place in its lineage (stage, kind and variant), oldest first. */
+/** The graph's nodes, in the graph's order, each numbered by its place in its lineage. */
 export function artifactNodesOf(graphNodes: readonly GraphNode[]): ArtifactNode[] {
+  return withLineagePositions(graphNodes.map(toArtifactNode));
+}
+
+type LineageMember = { stage: number; kind: string; variant: string | null; createdAt: string };
+
+/** `nodes`, in their order, each numbered by its place in its lineage (stage, kind and variant), oldest first. */
+export function withLineagePositions<T extends LineageMember>(nodes: readonly T[]): (T & { position: number })[] {
   const counts = new Map<string, number>();
-  return graphNodes
-    .map((graphNode, at) => ({ at, node: toArtifactNode(graphNode) }))
+  return nodes
+    .map((node, at) => ({ at, node }))
     .sort((a, b) => Date.parse(a.node.createdAt) - Date.parse(b.node.createdAt))
     .map(({ at, node }) => {
       const lineage = `${String(node.stage)}:${node.kind}:${node.variant ?? ""}`;

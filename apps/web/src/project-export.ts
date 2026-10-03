@@ -13,6 +13,7 @@ import { STAGES } from "@solutions-builder/app/ledger";
 import type { ArtifactNode } from "./client.ts";
 import { bytesOf, documentExtension } from "./documents-archive.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
+import { withLineagePositions } from "./project-view.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
@@ -179,12 +180,10 @@ function claim(taken: Set<string>, path: string): string {
 function archivePaths(artifacts: readonly ExportedArtifact[]): Map<ExportedVersion, string> {
   const taken = new Set<string>([ARCHIVE_STATE_FILE]);
   const paths = new Map<ExportedVersion, string>();
-  const positions = new Map<string, number>();
-  const oldestFirst = [...artifacts].sort((a, b) => Date.parse(a.node.createdAt) - Date.parse(b.node.createdAt));
-  for (const { node, versions } of oldestFirst) {
+  const positioned = withLineagePositions(artifacts.map(({ node, versions }) => ({ ...node, versions })));
+  const oldestFirst = positioned.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  for (const { versions, position, ...node } of oldestFirst) {
     const folder = `${String(node.stage).padStart(2, "0")}-${slug(node.kind)}${node.variant ? `-${slug(node.variant)}` : ""}`;
-    const position = (positions.get(folder) ?? 0) + 1;
-    positions.set(folder, position);
     for (const entry of versions) {
       const current = entry.version === node.version;
       const path = isBuildArchive(node)
