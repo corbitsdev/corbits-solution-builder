@@ -40,7 +40,8 @@ export async function sidecarPidFiles(hubDataDir: string): Promise<string[]> {
 
 export async function stopSpawnedSidecars(
   hubDataDir: string,
-  signal: (pid: number) => void = (pid) => process.kill(pid, "SIGTERM"),
+  // A sidecar leads its own process group, so its workflow processes stop with it.
+  signal: (pid: number) => void = (pid) => process.kill(-pid, "SIGTERM"),
 ): Promise<number> {
   let stopped = 0;
   for (const file of await sidecarPidFiles(hubDataDir)) {
