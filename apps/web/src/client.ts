@@ -1085,8 +1085,10 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
     } finally {
       release();
     }
-    const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
-    if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
+    if (!ref.delivered) {
+      const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
+    }
     cacheProjectWorkflowRef(projectId, ref);
     return ref;
   });

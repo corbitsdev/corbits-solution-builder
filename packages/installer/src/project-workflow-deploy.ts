@@ -702,8 +702,10 @@ export type ProjectWorkflowDeployment = {
 };
 
 /** `ensureProjectWorkflow`'s answer: the run to read and signal, plus what
- *  was replayed onto it when it was brought up from another run's history. */
-export type EnsuredProjectWorkflow = ProjectWorkflowDeployment & { readonly replay?: ProjectWorkflowReplay };
+ *  was replayed onto it when it was brought up from another run's history.
+ *  `delivered` marks a finished project's last run, handed back to read
+ *  only: it is not placed and takes no signal. */
+export type EnsuredProjectWorkflow = ProjectWorkflowDeployment & { readonly replay?: ProjectWorkflowReplay; readonly delivered?: true };
 
 /** The asset a project workflow deploys into: a root workspace `package.json`,
  *  a member whose `interchange.workflow`/`actions`/`loops` point at the
@@ -1009,6 +1011,9 @@ async function ensureProjectWorkflowOnce(
    */
   const revive = async (from: ProjectWorkflowDeployment, history: readonly ReceivedDecision[], generation: number, known: ReadonlySet<string>): Promise<EnsuredProjectWorkflow> => {
     const snapshot = options.repair ? null : await latestStateOf(workflowsOf(transport, from), from.deploymentId, from.runId);
+    // A delivered project takes no further decision, so its last run is read
+    // as it stands rather than replaced on every open.
+    if (snapshot?.done) return { ...from, delivered: true };
     if (snapshot) {
       progress({ phase: "deploying" });
       const target = await deployFreshRun(context(generation, snapshot), known);
