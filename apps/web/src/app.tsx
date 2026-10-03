@@ -889,7 +889,7 @@ export function App() {
             </>
           ) : detailError ? (
             <ProjectLoadFailure detail={detailError} onRetry={retryDetail} onBackToProjects={() => navigate("projects")} />
-          ) : (
+          ) : selected ? null : (
             <Banner title="No project open" />
           )
         ) : null}

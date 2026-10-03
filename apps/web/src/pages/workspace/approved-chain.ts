@@ -12,7 +12,9 @@
  * other attached file. A design is handed as its text, never its markup
  * (#219), capped the way a hand-off is.
  */
+import { queryOptions } from "@tanstack/react-query";
 import { api, type ArtifactNode } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import type { ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { renderInputs, type Inputs } from "@solutions-builder/app/stage-prompt";
@@ -142,4 +144,18 @@ export async function composeApprovedChain(deps: {
 }): Promise<string> {
   const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
   return renderApprovedChain(await readHandedItems(deps.tenantId, chain), deps.stage);
+}
+
+/**
+ * The chain as a query, keyed on the exact nodes it reads: the architect's
+ * opening and stage 6's requirements author read one composition. A node's
+ * content never changes under its id, so a composed chain is never stale.
+ */
+export function approvedChainQuery(deps: Parameters<typeof composeApprovedChain>[0]) {
+  const nodeIds = approvedChainNodes(deps.nodes, deps.reviews, deps.stage).map((node) => node.id);
+  return queryOptions({
+    queryKey: keys.approvedChain.of(deps.tenantId, deps.stage, nodeIds),
+    queryFn: () => composeApprovedChain(deps),
+    staleTime: Infinity,
+  });
 }

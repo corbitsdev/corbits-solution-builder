@@ -325,7 +325,7 @@ export function BuildPanel({
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
-          archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes },
+          archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes, fileCount: packaged.manifest.fileCount },
           probeSkipped: probe.skipped,
           forecast,
           verification: packaged.verification,
