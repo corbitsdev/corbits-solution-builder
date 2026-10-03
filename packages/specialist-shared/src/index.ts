@@ -207,6 +207,14 @@ building rests on that:
 
 export const role = (value: AgentRole) => value;
 
+/** What every evaluator judges and how much it says: its notes go back to the specialist. */
+export const EVALUATOR_SCOPE = `
+- Judge only what changes what gets built or decided: a gap, a contradiction,
+  a wrong or missing decision. Never ask for a measurement, baseline,
+  threshold or number a small-business owner could not reasonably give; an
+  honest stated assumption is enough.
+- At most three bullets, one short sentence each.`.trim();
+
 /**
  * The prompt a stage's draft evaluator runs: handed the stage's record and
  * its current draft, it returns the brief evaluator's verdict shape, with
@@ -238,7 +246,10 @@ documents approved at earlier stages) and the current draft.
 
 Judge against the record: a claim, figure or decision it does not support, or
 one that contradicts an approved decision, is a finding; something this stage
-does not owe is not. Look for these first, most damaging first:
+does not owe is not.
+${EVALUATOR_SCOPE}
+
+Look for these first, most damaging first:
 ${args.checks}
 
 ## Output
@@ -251,10 +262,10 @@ or, when it is not:
 
 Verdict: not yet
 
-Then at most five "- " bullets, most important first, each naming the heading
-it concerns, what is wrong and the concrete fix in one or two sentences. Name
-the fix rather than rewriting the section. Plain language, no preamble, praise
-or restating the draft, nothing cosmetic. A ready draft may have no bullets.`;
+Then "- " bullets, most important first, each naming the heading it concerns,
+what is wrong and the concrete fix. Name the fix rather than rewriting the
+section. Plain language, no preamble, praise or restating the draft, nothing
+cosmetic. A ready draft may have no bullets.`;
 
 /**
  * How every stage up to the plan interviews the person. The reply's
