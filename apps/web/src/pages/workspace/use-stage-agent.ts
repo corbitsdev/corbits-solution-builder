@@ -8,6 +8,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type Remediation } from "../../client.js";
 import { describeFailure } from "./failure-message.ts";
+import { evaluatorFor } from "@solutions-builder/app/kit";
+import type { Stage } from "@solutions-builder/app/ledger";
 
 export type StageAgentState = {
   /** The address for the CURRENT stage — carried with the stage it was
@@ -102,6 +104,10 @@ export function useStageAgent(
             setAgent(next);
             agentSnapshots.set(`${projectId}:${requestedStage}`, next);
           }
+          // The evaluator deploys while the specialist drafts, so the first
+          // verdict does not wait on a deploy. A failure is not remembered and
+          // is reported when the draft asks for the evaluator.
+          if (evaluatorFor(requestedStage as Stage)) void api.ensureEvaluatorAgent(projectId, requestedStage as Stage).catch(() => undefined);
         })
         .catch((cause: unknown) => {
           if (cancelled) return;
