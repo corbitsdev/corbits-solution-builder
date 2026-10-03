@@ -3,7 +3,7 @@
  * component here exists only where behaviour or an accessibility obligation
  * travels with the markup.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Compass, Copy, Loader2, X } from "lucide-react";
 import {
   Badge,
@@ -404,112 +404,75 @@ export function GuideDock({
   now?: { title: string; detail: string } | null;
 }) {
   const [open, setOpen] = useState(false);
+  const panelId = useId();
   const next = step.ending || at === step.where ? step.title : `Next: ${step.title}`;
-  const where = stage ? `Stage ${stage} of 9 · ${stageName(stage)}` : null;
-  const panel = useRef<HTMLDivElement>(null);
-  const fab = useRef<HTMLButtonElement>(null);
+  const where = stage ? stageName(stage) : null;
 
-  // `role="dialog"` is a promise about the keyboard: Escape closes it, focus
-  // moves into it on open and back to the control it came from on close, and
-  // clicking away dismisses it. Without those it is a div wearing a role.
-  useEffect(() => {
-    if (!open) return;
-    panel.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-        fab.current?.focus();
-      }
-    };
-    const onPointer = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (panel.current?.contains(target) || fab.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onPointer);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onPointer);
-    };
-  }, [open]);
-
+  // A native popover: it opens only from the ring, Escape and a click
+  // anywhere else close it, and that click still reaches what it landed on.
   return (
     <div className="guide-dock" data-tour="next-step">
-      {open ? (
-        <div
-          ref={panel}
-          className="guide-panel"
-          role="dialog"
-          aria-modal="false"
-          aria-label="What happens next"
-          tabIndex={-1}
-        >
-          <div className="guide-panel-head">
-            <p className="guide-where">{where ?? "Where this stands"}</p>
-            <button
-              type="button"
-              className="guide-close"
-              aria-label="Close"
-              onClick={() => {
-                setOpen(false);
-                fab.current?.focus();
-              }}
-            >
-              <X aria-hidden="true" />
-            </button>
-          </div>
-          {now ? (
-            <div className="guide-now">
-              <p className="guide-title">{now.title}</p>
-              <p className="guide-detail">{now.detail}</p>
-            </div>
-          ) : null}
-          <div className="guide-next">
-            <p className="guide-label">{step.ending ? "Where it ends" : "Next step"}</p>
-            <p className="guide-title">{step.title}</p>
-            <p className="guide-detail">{step.detail}</p>
-          </div>
-
-          {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
-
-          <div className="guide-actions">
-            {step.ending || step.where === at ? null : (
-              <Button variant="primary" onClick={() => onGo(step.where)}>
-                {step.where === "decisions"
-                  ? "Go to the decision queue"
-                  : step.where === "artifacts"
-                    ? "Open artifacts"
-                    : step.where === "settings"
-                      ? "Open settings"
-                      : "Take me there"}
-              </Button>
-            )}
-            {/* Always offered while there is someone to ask: a guide that timed
-                out, or answered before the project moved on, must be askable
-                again. No handler, no button: a control that does nothing is
-                absent. */}
-            {onExplain ? (
-              <Button loading={explaining} onClick={onExplain}>
-                {guidance ? "Ask again" : "Where does this stand?"}
-              </Button>
-            ) : null}
-          </div>
+      <div
+        id={panelId}
+        popover="auto"
+        className="guide-panel"
+        role="dialog"
+        aria-label="What happens next"
+        onToggle={(event) => setOpen(event.newState === "open")}
+      >
+        <div className="guide-panel-head">
+          <p className="guide-where">{where ?? "Where this stands"}</p>
+          <button type="button" className="guide-close" aria-label="Close" popoverTarget={panelId} popoverTargetAction="hide">
+            <X aria-hidden="true" />
+          </button>
         </div>
-      ) : null}
+        {now ? (
+          <div className="guide-now">
+            <p className="guide-title">{now.title}</p>
+            <p className="guide-detail">{now.detail}</p>
+          </div>
+        ) : null}
+        <div className="guide-next">
+          <p className="guide-label">{step.ending ? "Where it ends" : "Next step"}</p>
+          <p className="guide-title">{step.title}</p>
+          <p className="guide-detail">{step.detail}</p>
+        </div>
+
+        {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
+
+        <div className="guide-actions">
+          {step.ending || step.where === at ? null : (
+            <Button variant="primary" onClick={() => onGo(step.where)}>
+              {step.where === "decisions"
+                ? "Go to the decision queue"
+                : step.where === "artifacts"
+                  ? "Open artifacts"
+                  : step.where === "settings"
+                    ? "Open settings"
+                    : "Take me there"}
+            </Button>
+          )}
+          {/* Always offered while there is someone to ask: a guide that timed
+              out, or answered before the project moved on, must be askable
+              again. No handler, no button: a control that does nothing is
+              absent. */}
+          {onExplain ? (
+            <Button loading={explaining} onClick={onExplain}>
+              {guidance ? "Ask again" : "Where does this stand?"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
 
       <button
-        ref={fab}
         type="button"
         className={`guide-fab${open ? " is-open" : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
-        // A ring alone read as a spinner: the tooltip and the number inside
-        // it say this is progress through the stages, and a guide.
+        popoverTarget={panelId}
+        // A ring alone read as a spinner: the tooltip says this is progress
+        // through the stages, and a guide.
         title={`${where ? `${where}. ` : ""}${next}. Open the guide.`}
-        onClick={() => setOpen(!open)}
       >
         <span key={step.title} className="guide-live">
           {stage ? <StageRing stage={stage} /> : <Compass aria-hidden="true" />}
