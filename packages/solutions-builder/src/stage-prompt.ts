@@ -82,6 +82,25 @@ export function artifactRevisionRequest(args: { userInput: string; artifactId: s
 }
 
 /**
+ * What a stage's draft evaluator is mailed: the record the stage opened
+ * with, then the draft. Without the record it could judge only the page,
+ * never whether the page is faithful to what was approved.
+ */
+export function evaluationRequest(args: { record: string | null; draft: string }): string {
+  if (!args.record) return args.draft;
+  return ["--- THE RECORD THE DRAFT WAS WRITTEN FROM ---", args.record.trim(), "", "--- THE DRAFT TO JUDGE ---", args.draft.trim()].join("\n");
+}
+
+/** The evaluator's notes, as the one revision the app asks the specialist for before the person reviews. */
+export function evaluatorNotesAsk(notes: readonly string[]): string {
+  return [
+    "A reviewer read this version against the record and noted the points below. Fix each one that holds up against the record; where one does not, leave that part as it is. Change nothing else.",
+    "",
+    ...notes.map((note) => `- ${note}`),
+  ].join("\n");
+}
+
+/**
  * A person's message with what the app adds for the specialist. Whatever the
  * app adds goes first and the person's own words go last, after the one
  * marker every composed message ends with, so the chat can always tell them
