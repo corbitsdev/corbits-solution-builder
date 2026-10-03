@@ -110,7 +110,7 @@ describe("importProject", () => {
       }),
     );
     expect(created).toEqual([{ title: "Renew the lease (imported)", policy: { audiences: [] } }]);
-    expect(result).toEqual({ projectId: "proj_new", artifacts: 1, conversations: 1 });
+    expect(result).toEqual({ projectId: "proj_new", artifacts: 1, conversations: 1, ids: new Map([["node_1", "art:Problem discovery draft"]]) });
   });
 
   test("writes every artifact and conversation, and reports progress as it goes", async () => {
@@ -153,7 +153,7 @@ describe("readImportPayload", () => {
         createProject: async () => ({ projectId: "proj_from_zip" }),
       }),
     );
-    expect(result).toEqual({ projectId: "proj_from_zip", artifacts: 1, conversations: 1 });
+    expect(result).toEqual({ projectId: "proj_from_zip", artifacts: 1, conversations: 1, ids: new Map([["node_1", "art:Problem discovery draft"]]) });
   });
 });
 

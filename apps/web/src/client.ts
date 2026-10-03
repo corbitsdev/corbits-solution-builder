@@ -6,6 +6,7 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
+import { digestOf } from "./stage-approval.ts";
 import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
@@ -66,6 +67,7 @@ import { parseBundle } from "./project-export.ts";
 import { importProject as importProjectBundle } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
+import { bundleAdoptionPlan } from "./bundle-adoption.ts";
 import { replayAdoption } from "./adoption-replay.ts";
 import { DECK_DESIGN_DOCUMENT_KIND, DECK_DESIGN_READING_KIND, DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial, readingHasText } from "./material-reading.ts";
@@ -452,9 +454,9 @@ export type ImportOutcome = {
   readonly conversations: number;
   /** Version 1 bundles only: versions written across every artifact. */
   readonly versions?: number;
-  /** Version 1 bundles only: the stage the workflow reports after the
-   *  replay (null when there was nothing to replay or it never started),
-   *  why the replay stopped short, and what the plan could not do. */
+  /** The stage the workflow reports after the replay (null when there was
+   *  nothing to replay or it never started), why the replay stopped short,
+   *  and what the plan could not do. */
   readonly landing?: { readonly landed: number | null; readonly stopped: string | null; readonly notes: readonly string[] };
 };
 
@@ -1575,8 +1577,8 @@ export const api = {
    */
   importProject: async (raw: unknown): Promise<ImportOutcome> => {
     if (!isLegacyBundle(raw)) {
-      return asWorkspaceOwner(async (transport, workspaceTenantId) => {
-        const bundle = parseBundle(raw);
+      const bundle = parseBundle(raw);
+      const written = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
         return importProjectBundle(bundle, {
           createProject: async ({ title, policy }) => {
             const { project } = await installerCreateProject(transport, workspaceTenantId, {
@@ -1597,6 +1599,27 @@ export const api = {
           },
         });
       });
+      // Land the workflow where the exported one was (#652): the plan the
+      // legacy import replays, built from the bundle's workflow or, for a
+      // v2 bundle, from its artifact heads.
+      const digests = new Map<string, string>();
+      for (const { node, content } of bundle.artifacts) {
+        if (node.kind === "source_material" || node.kind === "material_reading") continue;
+        digests.set(node.id, await digestOf(content));
+      }
+      const plan = bundleAdoptionPlan(bundle, written.projectId, written.ids, digests);
+      const { ids: _ids, ...outcome } = written;
+      if (plan.steps.length === 0) return { ...outcome, landing: { landed: null, stopped: null, notes: plan.notes } };
+      const landing = await api
+        .ensureProjectWorkflow(written.projectId)
+        .then(() =>
+          replayAdoption(
+            { view: (projectId) => api.projectWorkflowView(projectId), decide: (projectId, decision) => api.decide(projectId, decision), now: () => new Date().toISOString() },
+            plan,
+          ),
+        )
+        .catch((cause: unknown) => ({ landed: null, stopped: cause instanceof Error ? cause.message : String(cause) }));
+      return { ...outcome, landing: { ...landing, notes: plan.notes } };
     }
     const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const bundle = parseLegacyBundle(raw);
