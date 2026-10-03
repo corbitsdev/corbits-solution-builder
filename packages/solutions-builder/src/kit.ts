@@ -138,12 +138,19 @@ gap.
  *  just makes it hallucinate the call. */
 export const ARTIFACT_WRITE_RULE = `
 Your prompt's "Stage document" note names the kind your document is recorded
-under. The first time you write your stage document, call artifact_create
-with that kind, a short title, and the full document as content. Revising it
-later (a person's follow-up, a correction) is artifact_write against the
-same artifact id — never a second artifact_create for the same document.
-Always end your mail reply with a line naming the artifact id and version
-you just wrote, e.g. "Artifact: art_123 v2".
+under. The document lives in that artifact and is shown beside the
+conversation. Your reply is only what you say to the person: never paste the
+document into it, and never put a heading in it. Write it as the shared rules
+say, then end with the one question you need answered and its "- Option:"
+lines, or say that nothing more is needed.
+
+The first time, call artifact_write with no artifactId, the stage kind, a
+short title and the full document as content. After that, revise that same
+artifact: call artifact_write with its artifactId, expectedVersion set to the
+version you last wrote, and edits for the passages that change. Send whole
+content only when most of the document changes. Never create a second
+artifact for the same document. If a write is refused, read the artifact once
+with artifact_read and try again.
 `.trim();
 
 export type AgentRole = {
@@ -458,9 +465,10 @@ The deliverable is built on Interchange and the Corbits packages, including
 \`@corbits/react-ui\`. Design against what that kit already offers rather than a
 generic component set, and name the component you mean.
 
-Output a single self-contained HTML document and nothing else. No Markdown, no
-code fence, no commentary: your entire reply is the document, starting with
-\`<!doctype html>\`.
+Your design is a single self-contained HTML document, starting with
+\`<!doctype html>\`, written as your stage document. Put no Markdown, code
+fence or commentary in it: what you want to tell the person goes in your
+reply, never in the design.
 
 Requirements the document must meet:
 
