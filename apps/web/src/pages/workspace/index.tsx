@@ -19,7 +19,7 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { toast } from "sonner";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   api,
   ApiFailure,
@@ -839,7 +839,7 @@ export function StageWorkspace({
     />
   );
 
-  const conversation = (
+  const conversationWith = (row: ReactNode) => (
     <StageConversation
       stage={stage}
       messages={foldedMessages}
@@ -864,12 +864,19 @@ export function StageWorkspace({
       rows={
         <>
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
-          {stage === 4 && approveAllowed ? approveRow : null}
+          {row}
         </>
       }
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
+  );
+  const conversation = conversationWith(stage === 4 && approveAllowed ? approveRow : null);
+  // A stage whose pane holds what approving waits on draws its own row.
+  const panesWith = (row: ReactNode, pane: ReactNode) => (
+    <StagePanes strip={stripEl} conversation={conversationWith(row)} busy={busy}>
+      {reader ?? <div className="stage-inner">{pane}</div>}
+    </StagePanes>
   );
 
   return (
@@ -1056,28 +1063,23 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 5 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
-          {reader ?? (
-            <div className="stage-inner">
-              <AudiencePackages
-                detail={detail}
-                tenantId={tenantId}
-                messages={foldedMessages}
-                onChanged={() => {
-                  void refreshWorkflow();
-                  void loadThread();
-                }}
-                onApprove={approve}
-                approving={approving || workflow.refreshingAfterAction}
-                canApprove={approveAllowed}
-                approveReason={workflowView?.allowed.approveReason ?? null}
-                lastRefusal={workflowView?.lastRefusal ?? null}
-                workflowView={workflowView}
-                onStakeholdersSaved={() => void openReviewNow()}
-              />
-            </div>
-          )}
-        </StagePanes>
+        <AudiencePackages
+          detail={detail}
+          tenantId={tenantId}
+          messages={foldedMessages}
+          onChanged={() => {
+            void refreshWorkflow();
+            void loadThread();
+          }}
+          onApprove={approve}
+          approving={approving || workflow.refreshingAfterAction}
+          canApprove={approveAllowed}
+          approveReason={workflowView?.allowed.approveReason ?? null}
+          lastRefusal={workflowView?.lastRefusal ?? null}
+          workflowView={workflowView}
+          onStakeholdersSaved={() => void openReviewNow()}
+          panes={panesWith}
+        />
       ) : null}
 
       {agentAddress && stage === 8 ? (
@@ -1230,24 +1232,19 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
-          {reader ?? (
-            <div className="stage-inner">
-              <DeliveryPanel
-                detail={detail}
-                tenantId={tenantId}
-                archiveRef={
-                  workflowView?.reviews[8]?.status === "approved"
-                    ? { artifactId: workflowView.reviews[8].artifactId, version: workflowView.reviews[8].version }
-                    : null
-                }
-                latestReply={latestSpecialistMessage}
-                onAccept={acceptDelivery}
-                onRejectSendBack={() => void sendBack(8)}
-              />
-            </div>
-          )}
-        </StagePanes>
+        <DeliveryPanel
+          detail={detail}
+          tenantId={tenantId}
+          archiveRef={
+            workflowView?.reviews[8]?.status === "approved"
+              ? { artifactId: workflowView.reviews[8].artifactId, version: workflowView.reviews[8].version }
+              : null
+          }
+          latestReply={latestSpecialistMessage}
+          onAccept={acceptDelivery}
+          onRejectSendBack={() => void sendBack(8)}
+          panes={panesWith}
+        />
       ) : null}
     </div>
   );

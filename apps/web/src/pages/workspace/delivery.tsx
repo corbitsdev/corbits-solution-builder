@@ -29,6 +29,7 @@ import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { downloadBuild } from "../graph.jsx";
+import { ApproveRow, type Panes } from "./workspace-chrome.tsx";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
  *  awaiting review must refresh on its own, not just once at mount. */
@@ -122,6 +123,7 @@ function DeliveryDecision({
   howToRun,
   onAccept,
   onRejectSendBack,
+  panes,
 }: {
   tenantId: string;
   projectId: string;
@@ -141,6 +143,7 @@ function DeliveryDecision({
    *  (CL-8687), so the build specialist's next reply lands where the person
    *  can review and re-approve it rather than leaving stage 9 stuck. */
   onRejectSendBack: () => void;
+  panes: Panes;
 }) {
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [delivered, setDelivered] = useState<PendingApproval | null>(null);
@@ -247,7 +250,7 @@ function DeliveryDecision({
     };
   }, [tenantId, verificationNode?.id]);
 
-  if (!loaded) return null;
+  if (!loaded) return panes(null, null);
 
   const summary = pending && typeof pending.toolArguments["summary"] === "string" ? (pending.toolArguments["summary"] as string) : null;
   const artifacts =
@@ -302,7 +305,14 @@ function DeliveryDecision({
       ? `Draft · ${VERIFIER} · awaiting review`
       : VERIFIER;
 
-  return (
+  return panes(
+    delivered ? null : (
+      <ApproveRow
+        waiting={pending ? null : `Waiting on ${VERIFIER} to submit a delivery for review.`}
+        busy={busy === "approve"}
+        onApprove={() => void decide("approve")}
+      />
+    ),
     <div className="doc" data-tour="document-body">
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
@@ -319,7 +329,6 @@ function DeliveryDecision({
         </>
       ) : null}
       {error ? <Banner tone="error" title={error} /> : null}
-      {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
         artifacts.map((artifact, index) => (
@@ -355,16 +364,13 @@ function DeliveryDecision({
             />
           </div>
           <div className="button-row">
-            <Button variant="primary" loading={busy === "approve"} onClick={() => void decide("approve")}>
-              Accept
-            </Button>
             <Button loading={busy === "reject"} onClick={() => void decide("reject")}>
               Reject
             </Button>
           </div>
         </>
       ) : null}
-    </div>
+    </div>,
   );
 }
 
@@ -375,6 +381,7 @@ export function DeliveryPanel({
   latestReply,
   onAccept,
   onRejectSendBack,
+  panes,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -387,6 +394,8 @@ export function DeliveryPanel({
   /** Called once a delivery rejection has been recorded on the hub, so the
    *  caller can route the project workflow back to stage 8. */
   onRejectSendBack: () => void;
+  /** Lays the delivery out beside the conversation, with the approve row above its composer. */
+  panes: Panes;
 }) {
   return (
     <DeliveryDecision
@@ -397,6 +406,7 @@ export function DeliveryPanel({
       howToRun={extractHowToRun(latestReply?.body ?? null)}
       onAccept={onAccept}
       onRejectSendBack={onRejectSendBack}
+      panes={panes}
     />
   );
 }

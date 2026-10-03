@@ -112,6 +112,9 @@ export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
   );
 }
 
+/** Lays a stage's pane beside the conversation, with `row` directly above the composer. */
+export type Panes = (row: ReactNode, pane: ReactNode) => ReactNode;
+
 /**
  * A stage's approval, one row above the composer: the evaluator's stance and
  * anything approving waits on to the left, Continue to the right. One click

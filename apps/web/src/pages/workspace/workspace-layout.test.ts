@@ -297,7 +297,8 @@ describe("project chrome paint", () => {
     expect(delivery).toContain('className="checklist"');
     expect(delivery).toContain('className="cost-row"');
     expect(delivery).toContain("parseDeliveryVerification");
-    expect(delivery).toMatch(/>\s*Accept\s*</);
+    expect(delivery).not.toMatch(/>\s*Accept\s*</);
+    expect(delivery).toContain("<ApproveRow");
     expect(delivery).toMatch(/>\s*Reject\s*</);
     expect(delivery).not.toContain("<Screen");
     expect(delivery).not.toContain("stage-companions");

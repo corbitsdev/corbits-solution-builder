@@ -36,6 +36,7 @@ import { unrecordedPackageRevisions } from "../package-revisions.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
+import { ApproveRow, type Panes } from "./workspace/workspace-chrome.tsx";
 import type { ProjectWorkflowView } from "../project-workflow.ts";
 import {
   approveReasonText,
@@ -362,6 +363,7 @@ export function AudiencePackages({
   workflowView,
   onStakeholdersSaved,
   messages = [],
+  panes,
 }: {
   detail: ProjectDetail;
   /** The stage's thread (#597): a package rewritten on request in the chat is recorded from it. */
@@ -387,6 +389,8 @@ export function AudiencePackages({
    *  policy (CL-8891). Best-effort: a review not yet open simply stays
    *  unopened until it is reachable. */
   onStakeholdersSaved?: () => void;
+  /** Lays the packages out beside the conversation, with the approve row above its composer. */
+  panes: Panes;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then waits for the reply that follows it and keeps
@@ -759,7 +763,13 @@ export function AudiencePackages({
       : staleBy.length > 0
         ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
         : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
-  const approveReasonDisplay = reason ?? quorumReason;
+  const tally = requiredQuorum > 0 ? `${proceeded} of ${requiredQuorum} required have proceeded.` : "";
+  const waiting =
+    packages.length === 0
+      ? "Each stakeholder's package is written first."
+      : !quorumMet || !canApprove
+        ? [tally, reason ?? quorumReason].filter(Boolean).join(" ")
+        : null;
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -824,7 +834,10 @@ export function AudiencePackages({
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
-  return (
+  return panes(
+    canApprove || waiting ? (
+      <ApproveRow waiting={waiting} busy={approving} onApprove={onApprove} />
+    ) : null,
     <div data-tour="audience-packages">
       {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
       {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
@@ -886,26 +899,6 @@ export function AudiencePackages({
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {/* The gate and the button it opens, together at the top (#240): a
-              person who has just proceeded reads the tally and acts on it here
-              rather than under the packages and slides. */}
-          <div className="button-row audience-gate">
-            {requiredQuorum > 0 ? (
-              <p className="inline-note">
-                {proceeded} of {requiredQuorum} required have proceeded.
-              </p>
-            ) : null}
-            <Button
-              variant="primary"
-              loading={approving}
-              disabled={!canApprove || packages.length === 0 || !quorumMet}
-              doing="Approving the packages and opening the next stage"
-              onClick={onApprove}
-            >
-              Approve and continue
-            </Button>
-            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
-          </div>
           <Tabs
             label="Stakeholder packages"
             active={selected?.variant ?? ""}
@@ -1031,6 +1024,6 @@ export function AudiencePackages({
           ) : null}
         </>
       ) : null}
-    </div>
+    </div>,
   );
 }
