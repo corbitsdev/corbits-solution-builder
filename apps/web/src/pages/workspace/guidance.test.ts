@@ -28,7 +28,7 @@ describe("workspace guidance", () => {
   test("does not treat an acknowledgement as a draft", () => {
     expect(isSubstantialDraft("Thanks — I will update that.")).toBe(false);
     const guidance = workspaceGuidance(1, [person("Build a CRM"), agent("ack", "Thanks — I will update that.")]);
-    expect(guidance.title).toBe("A reply needs clarification");
+    expect(guidance.title).toBe("The specialist replied");
     expect(guidance.draft).toBeNull();
   });
 
