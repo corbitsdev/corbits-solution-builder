@@ -18,6 +18,7 @@
  * and each render block a focused component (`workspace-chrome.tsx`). What
  * stays here is the wiring between them and the stage-specific composition.
  */
+import { isStageOpening } from "./composed-mail.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -391,7 +392,9 @@ export function StageWorkspace({
   // or result-node bookkeeping under mail-chat).
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.map((message) => ({
+      // The stage opening is what the specialist is sent, not something the
+      // person said; the document strip already shows the record it carried.
+      foldedMessages.filter((message) => !isStageOpening(message)).map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
