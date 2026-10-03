@@ -4,7 +4,7 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
+import { composedMailFold, isStageOpening } from "./composed-mail.ts";
 import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -244,10 +244,14 @@ export function StageConversation({
                 </div>
               );
             }
+            const source = byId.get(message.id);
+            // The opening is what the specialist is sent to start the stage;
+            // the person never said it, and the document strip already shows
+            // what it carried.
+            if (source && isStageOpening(source)) return null;
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
-            const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
