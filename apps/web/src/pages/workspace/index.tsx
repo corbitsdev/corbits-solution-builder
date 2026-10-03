@@ -285,10 +285,6 @@ export function StageWorkspace({
   // so a reply Stop hid can never surface as the latest turn, the draft, or
   // the open question (CL-8695).
   const latestSpecialistMessage = [...foldedMessages].reverse().find((message) => message.author === "agent") ?? null;
-  // Mail has no separate draft record before approval. Keep a substantial
-  // draft separate from the latest conversational turn so an acknowledgement
-  // or a follow-up question never replaces the document being reviewed.
-  const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
   // A drafting stage with artifact tools keeps its document in an artifact
   // the specialist writes; the host reads the newest one of the stage's kind
   // rather than trusting what the reply says it wrote. It is read again as
@@ -313,6 +309,11 @@ export function StageWorkspace({
     if (workQuery.data === undefined) return null;
     return workQuery.data ? { state: "ready", artifact: workQuery.data } : { state: "none" };
   }, [workQuery.error, workQuery.data]);
+  const documented = work?.state === "ready";
+  // Mail has no separate draft record before approval. Keep a substantial
+  // draft separate from the latest conversational turn so an acknowledgement
+  // or a follow-up question never replaces the document being reviewed.
+  const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages, documented), [stage, foldedMessages, documented]);
   // The stage 3 choice (#430) and the stage 6 Stack block (#437) are
   // repaired in the document itself, as its next version, so the pane, the
   // review and the approval all name a version that holds the repair.
