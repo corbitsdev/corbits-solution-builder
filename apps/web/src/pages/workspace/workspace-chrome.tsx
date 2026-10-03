@@ -6,7 +6,7 @@
  */
 import { useEffect, useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { ChatInput, Textarea } from "@corbits/react-ui";
+import { Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
@@ -14,8 +14,10 @@ import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import type { StageEvaluator } from "./use-advisory.ts";
-import { COMPOSER_BOX_CLASS, CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { usePanesWidth } from "./use-panes-width.ts";
+import { WaitingTips } from "./waiting-tips.tsx";
+import { BusyLine } from "../../zen-garden.tsx";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
 
@@ -245,28 +247,26 @@ function capitalize(word: string): string {
   return word.length > 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
 }
 
-/** Same centered, chat-first chrome as a stage with no draft yet, empty, for
- *  every phase before the first specialist reply lands — no clock, no
- *  sidecar-dependent copy: what shows here is only what is already on hand.
- *  A calm chat start: the stage's own intro, the person's opening statement
- *  as their own chat bubble (once a brand-new project's read resolves), a
- *  quiet status line in the specialist's slot, and the composer already in
- *  place — never a loading screen. A project reopening (`resuming`) shows
- *  its current stage's own latest persisted draft (`draft`, read off the
- *  artifact fold the same way the document pane does) beside a
- *  "Reconnecting…" status line while the mail thread catches up; a
- *  brand-new project shows its opening statement plus a "getting ready"
- *  status line — both real reads, never simulated, so either renders blank
- *  rather than a fake state until its read resolves. */
+/** Same centered, chat-first chrome as a stage with no draft yet, for every
+ *  phase before the stage's specialist can take a message: a project
+ *  opening, or the next stage's specialist being set up after an approval.
+ *  No composer, since nothing could be sent yet; it arrives with the
+ *  conversation once the specialist is live. What shows is only what is
+ *  already on hand: the person's opening statement as their own chat bubble
+ *  (once a brand-new project's read resolves), a quiet status line in the
+ *  specialist's slot, and a rotating tip in the space below. A project
+ *  reopening (`resuming`) shows its current stage's own latest persisted
+ *  draft (`draft`, read off the artifact fold the same way the document
+ *  pane does) beside a "Reconnecting…" status line while the mail thread
+ *  catches up; both reads are real, never simulated, so either renders
+ *  blank rather than a fake state until its read resolves. */
 export function OpeningScreen({
   resuming = false,
-  stage,
   who,
   opening,
   draft,
 }: {
   resuming?: boolean;
-  stage: number;
   /** The specialist's name, lowercased, for the reconnect line — e.g.
    *  "brainstormer". */
   who: string;
@@ -285,10 +285,6 @@ export function OpeningScreen({
         conversation={
           <div className="stage-conversation">
             <div className={CONV_SCROLL_CLASS}>
-              <div className="opening-intro">
-                <p className="opening-stage-name">{stageName(stage)}</p>
-                <p className="inline-note">{STAGE_GOAL[stage] ?? ""}</p>
-              </div>
               {!resuming && opening ? (
                 <div className="msg you">
                   <span className="who conv-who">You</span>
@@ -303,16 +299,8 @@ export function OpeningScreen({
                   {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
                 </span>
               </div>
-            </div>
-            <div className="composer" aria-hidden="true">
-              <ChatInput
-                className={COMPOSER_BOX_CLASS}
-                value=""
-                onValueChange={() => {}}
-                onSend={() => {}}
-                disabled
-                placeholder={`Message the ${who}…`}
-              />
+              <BusyLine />
+              <WaitingTips />
             </div>
           </div>
         }
@@ -438,6 +426,27 @@ export function WaitingSection({
 }
 
 /**
+ * `value`, one render late, so a layout that switches on it switches inside
+ * a view transition: the first draft moves the centered conversation, its
+ * composer with it, over to the left pane while the document arrives,
+ * rather than the page jumping. At once where the API is missing or motion
+ * is reduced.
+ */
+export function useViewTransitioned<T>(value: T): T {
+  const [shown, setShown] = useState(value);
+  useEffect(() => {
+    if (Object.is(shown, value)) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || typeof document.startViewTransition !== "function") {
+      setShown(value);
+      return;
+    }
+    document.startViewTransition(() => flushSync(() => setShown(value)));
+  }, [value, shown]);
+  return shown;
+}
+
+/**
  * The stage workspace's two panes: the conversation on the left, the
  * artifact strip and the stage's surface on the right. Every stage shares
  * this shell — a stage's panel never replaces the conversation.
@@ -465,23 +474,9 @@ export function StagePanes({
   paneTour?: string;
   tour?: string;
 }) {
-  // The first draft turns the centered conversation into the side-by-side
-  // view. The layout lags one render so the change runs inside a view
-  // transition: the conversation slides over and the document arrives,
-  // rather than the page jumping.
-  const [layout, setLayout] = useState(className);
-  useEffect(() => {
-    if (layout === className) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduced || typeof document.startViewTransition !== "function") {
-      setLayout(className);
-      return;
-    }
-    document.startViewTransition(() => flushSync(() => setLayout(className)));
-  }, [className, layout]);
-  const split = !solo && layout !== "chat-first";
+  const split = !solo && className !== "chat-first";
   const panesWidth = usePanesWidth();
-  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, layout].filter(Boolean).join(" ");
+  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, className].filter(Boolean).join(" ");
   return (
     <div
       className={panesClass}
