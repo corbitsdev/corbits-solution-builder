@@ -367,7 +367,12 @@ export function StageWorkspace({
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
   useBusyWhile(!threadLoaded, "Loading the conversation");
-  const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
+  // Stage 4's design is the designer's artifact; a design sent as a reply is
+  // read only for a project drafted before the tools.
+  const latestDesign = useMemo(
+    () => (usesArtifact && work !== null && work.state !== "none" ? workDraft : latestDesignReply(foldedMessages)),
+    [usesArtifact, work, workDraft, foldedMessages],
+  );
   // While the specialist is still answering, the pane follows its artifact
   // writes live, but nothing is opened for review: an intermediate write is
   // not a version, and recording one numbered the lineage twice per reply.
