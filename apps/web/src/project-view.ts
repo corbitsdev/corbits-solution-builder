@@ -127,7 +127,7 @@ async function workflowStage(
   transport: Transport,
   projectId: string,
 ): Promise<Pick<ProjectDetail, "stage" | "done" | "surface" | "skipped">> {
-  const ref = await resolveProjectWorkflowRef(transport, projectId).catch(() => null);
+  const ref = await resolveProjectWorkflowRef(transport, projectId);
   if (!ref) return { stage: 1, done: false, surface: null, skipped: [] };
   const view = await loadProjectWorkflowView(transport, ref);
   return { stage: view.done ? LAST_STAGE : view.stage, done: view.done, surface: view.surface, skipped: view.skipped };

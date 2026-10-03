@@ -292,13 +292,18 @@ function ProjectCard({
       return;
     }
     let cancelled = false;
-    void displayTurn(project.id, stage, project.needsDecision, {
-      workspaceTenantId: api.workspaceTenantId,
-      stageAgentStatus: api.stageAgentStatus,
-      readStageThread: api.readStageThread,
-    }).then((resolved) => {
-      if (!cancelled) setTurn(resolved);
-    });
+    void (async () => {
+      try {
+        const resolved = await displayTurn(project.id, stage, project.needsDecision, {
+          workspaceTenantId: api.workspaceTenantId,
+          stageAgentStatus: api.stageAgentStatus,
+          readStageThread: api.readStageThread,
+        });
+        if (!cancelled) setTurn(resolved);
+      } catch (cause) {
+        if (!cancelled) onError(cause);
+      }
+    })();
     return () => {
       cancelled = true;
     };

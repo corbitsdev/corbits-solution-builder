@@ -51,24 +51,16 @@ export async function composeStage9Opening(deps: {
   const manifestNode = archiveNode ? manifestCompanionOf(deps.nodes, archiveNode) : null;
   let manifestRef: Parameters<typeof deliveryOpeningLine>[0] = null;
   if (manifestNode) {
-    try {
-      const result = await api.artifactContent(deps.tenantId, manifestNode.id);
-      const parsed = parseDeliveryManifest(result.content);
-      if (parsed) manifestRef = { artifactId: manifestNode.artifactId, version: manifestNode.version, content: parsed };
-    } catch {
-      // No manifest could be read — deliveryOpeningLine's null branch says so.
-    }
+    const result = await api.artifactContent(deps.tenantId, manifestNode.id);
+    const parsed = parseDeliveryManifest(result.content);
+    if (parsed) manifestRef = { artifactId: manifestNode.artifactId, version: manifestNode.version, content: parsed };
   }
   let buildStatusBody = deps.fallbackBuildStatusBody ?? "";
-  try {
-    const stage8 = await api.stageAgentStatus(deps.projectId, 8);
-    if (stage8) {
-      const messages = await api.readStageThread(deps.tenantId, [stage8.address]);
-      const lastAgent = [...messages].reverse().find((message) => message.author === "agent");
-      if (lastAgent) buildStatusBody = lastAgent.body;
-    }
-  } catch {
-    // Keep the fallback (or empty) body — deliveryOpeningLine still sends something.
+  const stage8 = await api.stageAgentStatus(deps.projectId, 8);
+  if (stage8) {
+    const messages = await api.readStageThread(deps.tenantId, [stage8.address]);
+    const lastAgent = [...messages].reverse().find((message) => message.author === "agent");
+    if (lastAgent) buildStatusBody = lastAgent.body;
   }
   return deliveryOpeningLine(manifestRef, buildStatusBody || "No build status text was found.");
 }
