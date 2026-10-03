@@ -140,6 +140,7 @@ export function BuildPanel({
   onSendHold,
   popover = null,
   onAttach,
+  attachNote = null,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -165,6 +166,7 @@ export function BuildPanel({
   popover?: ReactNode;
   /** The paperclip: files join the project as material. */
   onAttach?: (files: FileList) => void;
+  attachNote?: string | null;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -358,6 +360,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
+            rows={attachNote ? <p className="inline-note" role="status">{attachNote}</p> : null}
             messages={messages}
             value={composer}
             onValueChange={setComposer}

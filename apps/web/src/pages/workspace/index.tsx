@@ -589,12 +589,14 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  const [attachNote, setAttachNote] = useState<string | null>(null);
   const addMaterial = async (files: File[]) => {
+    setAttachNote(null);
     try {
       await api.attachMaterial(detail.project.id, files);
       void refreshWorkflow();
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      setAttachNote(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   };
 
@@ -805,6 +807,7 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
+      rows={attachNote ? <p className="inline-note" role="status">{attachNote}</p> : null}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1041,6 +1044,7 @@ export function StageWorkspace({
           onSendHold={openSendBack}
           popover={sendBackPopover}
           onAttach={(files) => void addMaterial([...files])}
+          attachNote={attachNote}
         />
       ) : null}
 
@@ -1145,6 +1149,7 @@ export function StageWorkspace({
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
             onAddMaterial={addMaterial}
+            attachNote={attachNote}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
