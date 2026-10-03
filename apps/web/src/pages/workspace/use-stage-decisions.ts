@@ -32,7 +32,7 @@ import {
   stage6StackProblem,
   stage7StackProblem,
   stageEvidence,
-  stageRefusalMessage, stage6StackRemediation } from "../../stage-evidence.ts";
+  stageRefusalMessage } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import { designHandoff } from "../../design-handoff.ts";
@@ -64,6 +64,8 @@ export type StageDecisions = {
   /** The Approve control's ONE gate — the workflow's own verdict, never
    *  re-derived from chat or artifact presence. */
   readonly approveAllowed: boolean;
+  /** Why stage 6's plan cannot be approved as it stands, or null. */
+  readonly stackProblem: string | null;
   readonly approving: boolean;
   /** Stage 8's own readiness rule: a review may only open once the host has
    *  packaged an ended attempt and the archive is recorded, with no worker
@@ -362,6 +364,14 @@ export function useStageDecisions({
     });
   }, [workflowView, stage, chosenTarget, reviewMessage, documentRef, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow, onError]);
 
+  // The workflow's own `stage6Rule` refuses a plan without a usable Stack
+  // section (#55); the same check, run first, holds the approval with what is
+  // wrong in the plan's own terms.
+  const stackProblem =
+    stage === 6 && reviewMessage
+      ? stage6StackProblem(reviewMessage.body, new Set((workflowView?.requirements ?? []).map((r) => r.id)))
+      : null;
+
   /**
    * Sends the workflow's `approve` decision for this stage's already-open
    * review (`approveStage` opens one itself, belt-and-braces, if somehow
@@ -372,19 +382,6 @@ export function useStageDecisions({
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
     if ((stage === 3 || stage === 7) && !chosenTarget) return;
-    // The workflow's own `stage6Rule` refuses a plan without a usable Stack
-    // section (#55); this runs the same check first so the person reads
-    // what is wrong in the plan's own terms before the approval is sent.
-    if (stage === 6) {
-      const requirementIds = new Set((workflowView?.requirements ?? []).map((r) => r.id));
-      const problem = stage6StackProblem(reviewMessage.body, requirementIds);
-      if (problem) {
-        onError(problem);
-        // One click asks the architect for the block in full (#325).
-        onRemediation(stage6StackRemediation());
-        return;
-      }
-    }
     setApproving(true);
     onError(null);
     onRemediation(undefined);
@@ -573,6 +570,7 @@ export function useStageDecisions({
 
   return {
     approveAllowed: workflowView?.allowed.approve ?? false,
+    stackProblem,
     approving,
     stage8Evidence,
     openReviewNow,

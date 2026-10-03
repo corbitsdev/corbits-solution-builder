@@ -16,6 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
 import { GuideDock } from "../apps/web/src/components.js";
 import { StageDocument } from "../apps/web/src/pages/workspace/document.jsx";
+import { ApproveControl } from "../apps/web/src/pages/workspace/approve-control.jsx";
 import { ArtifactStrip, VersionStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
 import { AppBar } from "../apps/web/src/app.js";
@@ -239,14 +240,12 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       openQuestion={{ text: "Which customer group should be the first priority?" }}
       // Renders the evaluator's ready cue on the approve control, so the
       // layout gate sees it rather than only the un-evaluated state.
-      evaluation={{ ready: true, notes: [] }}
+      approve={<ApproveControl evaluator={{ status: "verdict", verdict: { ready: true, notes: [] } }} onApprove={() => {}} />}
       canSubmit
-      soloApproval
       busy={null}
       events={fixtureEvents}
       onSelectVersion={() => {}}
       onRevise={() => {}}
-      onSubmit={() => {}}
     />
   );
 }

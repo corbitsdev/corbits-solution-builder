@@ -11,7 +11,7 @@
  * records the vote, not a gate -- `stage5Rule` (`project-workflow/contracts.ts`)
  * is the only place quorum is enforced.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
@@ -376,6 +376,7 @@ export function AudiencePackages({
   lastRefusal,
   workflowView,
   onStakeholdersSaved,
+  panes,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -399,6 +400,8 @@ export function AudiencePackages({
    *  policy (CL-8891). Best-effort: a review not yet open simply stays
    *  unopened until it is reachable. */
   onStakeholdersSaved?: () => void;
+  /** Lays the packages out beside the conversation, with the approve row under its composer. */
+  panes: (row: ReactNode, pane: ReactNode) => ReactNode;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then waits for the reply that follows it and keeps
@@ -760,7 +763,7 @@ export function AudiencePackages({
         : `Waiting for ${awaited.map((audience) => (isOwner(audience.name) ? "you" : audience.name)).join(awaited.length > quorumWaiting ? " or " : " and ")} to say Proceed`;
   // The workflow's own verdict explains an approve it refused; until quorum is
   // met the live tally is the more useful line.
-  const approveReasonDisplay = quorumMet ? reason : (quorumReason ?? reason);
+  const waiting = packages.length === 0 ? "Each stakeholder's package is written first." : quorumMet ? reason : (quorumReason ?? reason);
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -834,7 +837,10 @@ export function AudiencePackages({
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
-  return (
+  return panes(
+    canApprove || waiting ? (
+      <ApproveControl waiting={waiting} busy={approving} doing="Approving the packages and opening the next stage" onApprove={onApprove} />
+    ) : null,
     <div data-tour="audience-packages">
       {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
       {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
@@ -896,28 +902,17 @@ export function AudiencePackages({
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {/* The gate and the button it opens, together at the top (#240): a
-              person who has just proceeded reads the tally and acts on it here
-              rather than under the packages and slides. */}
-          <div className="button-row audience-gate">
-            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
-            <ApproveControl
-              label="Approve"
-              busy={approving}
-              disabled={!canApprove || packages.length === 0 || !quorumMet}
-              doing="Approving the packages and opening the next stage"
-              onApprove={onApprove}
-            />
-            {voteNode?.variant ? (
+          {/* The awaited decision at the top (#240), where a person reads the
+              tally; the approve row under the composer says what it waits on. */}
+          {voteNode?.variant ? (
+            <div className="button-row audience-gate">
               <p className="inline-note audience-gate-vote">{isOwner(voteNode.variant) ? "Your" : `${voteNode.variant}'s`} decision:</p>
-            ) : null}
-            {voteNode?.variant ? (
               <DecisionButtons
                 busy={gateBusy}
                 onDecide={(decision) => void recordDecision(voteNode, decision, "", setGateBusy)}
               />
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           <Tabs
             label="Stakeholder packages"
             active={selected?.variant ?? ""}
@@ -1018,6 +1013,6 @@ export function AudiencePackages({
           ) : null}
         </>
       ) : null}
-    </div>
+    </div>,
   );
 }

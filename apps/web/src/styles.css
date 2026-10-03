@@ -161,24 +161,6 @@ input[type="file"]:not(:disabled) {
   outline: none;
 }
 
-/* The design's approval floats at the foot of the pane, where reading ends,
-   clear of the round busy indicator in the window's corner. */
-.pane-approve {
-  position: sticky;
-  bottom: var(--space-4);
-  display: flex;
-  justify-content: flex-end;
-  /* The guide's 44px button and its 24px inset, plus a step of air. */
-  padding-right: calc(44px + var(--space-6) + var(--space-2));
-  margin-top: var(--space-4);
-  pointer-events: none;
-}
-
-.pane-approve > * {
-  pointer-events: auto;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--wb-foreground) 18%, transparent);
-}
-
 /* ChatInput's textarea sits inside a rounded wrapper; a plain focus-visible
    outline on the textarea itself draws a sharp rectangle inside that curve.
    Ring the rounded wrapper instead via :focus-within, and drop the inner
@@ -2134,6 +2116,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   min-width: 0;
 }
 
+/* What approving waits on can run to a sentence; it wraps beside the button. */
+.composer-approve-lead .composer-note {
+  white-space: normal;
+}
+
 /* The brief evaluator's stance, one line in the approval bar (#157). Its
    notes open beneath the pointer or the focus, or on a click, as a popover
    anchored to the stance rather than a paragraph in the column. */
@@ -3875,10 +3862,6 @@ button[aria-disabled="true"] {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.audience-gate > .inline-note:first-child {
-  margin-right: auto;
 }
 
 .audience-gate > .audience-gate-vote,

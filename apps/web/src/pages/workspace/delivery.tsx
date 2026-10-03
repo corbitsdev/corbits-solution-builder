@@ -8,7 +8,7 @@
  * `approveTool`/`rejectTool` helpers — but inline, on the project's own
  * stage, instead of making the person leave for the queue.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Textarea } from "@corbits/react-ui";
 import { keys } from "../../queries/keys.ts";
@@ -30,6 +30,7 @@ import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, CopyButton, documentName, shortHash } from "../../components.jsx";
 import { formatSize } from "../graph.jsx";
 import { Markdown } from "../../markdown.jsx";
+import { ApproveControl } from "./approve-control.tsx";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
  *  awaiting review must refresh on its own, not just once at mount. */
@@ -141,6 +142,7 @@ function DeliveryDecision({
   finished,
   onAccept,
   onRejectSendBack,
+  panes,
 }: {
   tenantId: string;
   projectId: string;
@@ -162,6 +164,8 @@ function DeliveryDecision({
    *  (CL-8687), so the build specialist's next reply lands where the person
    *  can review and re-approve it rather than leaving stage 9 stuck. */
   onRejectSendBack: () => void;
+  /** Lays the delivery out beside the conversation, with the approve row under its composer. */
+  panes: (row: ReactNode, pane: ReactNode) => ReactNode;
 }) {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -234,7 +238,7 @@ function DeliveryDecision({
     };
   }, [tenantId, verificationNode?.id]);
 
-  if (!loaded) return null;
+  if (!loaded) return panes(null, null);
 
   const summary = pending && typeof pending.toolArguments["summary"] === "string" ? (pending.toolArguments["summary"] as string) : null;
   const artifacts =
@@ -279,7 +283,14 @@ function DeliveryDecision({
       ? `Draft · ${VERIFIER} · awaiting review`
       : VERIFIER;
 
-  return (
+  return panes(
+    isDelivered ? null : (
+      <ApproveControl
+        waiting={pending ? null : `Waiting on ${VERIFIER} to submit a delivery for review.`}
+        busy={busy === "approve"}
+        onApprove={() => void decide("approve")}
+      />
+    ),
     <div className="doc" data-tour="document-body">
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
@@ -289,7 +300,6 @@ function DeliveryDecision({
           Delivered. The project is finished. Each file handed over is recorded with a fingerprint, so what you received can be checked against it.
         </p>
       ) : null}
-      {!pending && !isDelivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {howToRun ? (
         <section className="delivery-how-to-run">
           <Markdown source={howToRun} />
@@ -325,16 +335,13 @@ function DeliveryDecision({
             />
           </div>
           <div className="button-row">
-            <Button variant="primary" loading={busy === "approve"} onClick={() => void decide("approve")}>
-              Accept
-            </Button>
             <Button loading={busy === "reject"} onClick={() => void decide("reject")}>
               Reject
             </Button>
           </div>
         </>
       ) : null}
-    </div>
+    </div>,
   );
 }
 
@@ -346,6 +353,7 @@ export function DeliveryPanel({
   finished,
   onAccept,
   onRejectSendBack,
+  panes,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -360,6 +368,8 @@ export function DeliveryPanel({
   /** Called once a delivery rejection has been recorded on the hub, so the
    *  caller can route the project workflow back to stage 8. */
   onRejectSendBack: () => void;
+  /** Lays the delivery out beside the conversation, with the approve row under its composer. */
+  panes: (row: ReactNode, pane: ReactNode) => ReactNode;
 }) {
   return (
     <DeliveryDecision
@@ -371,6 +381,7 @@ export function DeliveryPanel({
       finished={finished}
       onAccept={onAccept}
       onRejectSendBack={onRejectSendBack}
+      panes={panes}
     />
   );
 }

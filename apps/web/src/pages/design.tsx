@@ -26,7 +26,6 @@ import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/
 import { Banner, Button, CopyButton, Field, StateLabel, documentName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
-import { ApproveControl } from "./workspace/approve-control.tsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
@@ -79,17 +78,6 @@ export function anchorLabel(anchor: Anchor): string {
 }
 
 /**
- * How the design on screen moves on. `canApprove` is false while the stage is
- * not open for it — waiting on a decision already, or routed back — and the
- * row is not drawn then.
- */
-export type DesignApproval = {
-  soloApproval: boolean;
-  canApprove: boolean;
-  onApprove: (design: ArtifactNode) => Promise<unknown>;
-};
-
-/**
  * One anchored comment as the submitted-state table renders it, with its
  * disposition (CL-8699). `addressable` is false for a row carried over from
  * before ids existed — `id` is then a positional fallback for rendering
@@ -134,7 +122,6 @@ export function DesignFeedbackView({
   designs,
   contentByNode,
   tenantId,
-  approval,
   onChanged,
   revise,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -151,7 +138,6 @@ export function DesignFeedbackView({
   contentByNode: Map<string, string>;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  approval: DesignApproval;
   onChanged: () => void;
   /**
    * Delivers the feedback and its deterministic revision prompt to the run
@@ -358,16 +344,6 @@ export function DesignFeedbackView({
             <Markdown source={content} />
           </div>
         )}
-        {design && approval.canApprove ? (
-          <div className="pane-approve">
-            <ApproveControl
-              label={approval.soloApproval ? "Approve" : "Send for approval"}
-              busy={busy === "approve"}
-              disabled={busy !== null && busy !== "approve"}
-              onApprove={() => run("approve", () => approval.onApprove(design))}
-            />
-          </div>
-        ) : null}
       </div>
 
       {feedbackMode && !submitted ? (
