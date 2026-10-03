@@ -362,7 +362,10 @@ export function useStageDecisions({
    */
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
-    if (stage === 7 && !chosenTarget) return;
+    if (stage === 7 && !chosenTarget) {
+      onError("Choose where it will be used before approving.");
+      return;
+    }
     // The workflow's own `stage6Rule` refuses a plan without a usable Stack
     // section (#55); this runs the same check first so the person reads
     // what is wrong in the plan's own terms before the approval is sent.
