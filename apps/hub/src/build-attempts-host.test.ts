@@ -69,7 +69,7 @@ describe("the host's build attempts", () => {
   }, CANCEL_GRACE_MS + 15_000);
 
   onlyOnPosix("an attempt an earlier host run started is detached while its group lives, lost once it is gone, and cancel reaches it", async () => {
-    const { attemptRecord, cancelBuildAttempt, projectBuildsDirectory, projectHasRunningAttempt } = await import("./build-attempts.js");
+    const { attemptRecord, cancelBuildAttempt, projectBuildsDirectory } = await import("./build-attempts.js");
     const directory = projectBuildsDirectory("proj_restart");
     await mkdir(join(directory, "1"), { recursive: true });
     // Stands in for the worker a previous host run left behind: alive, in its own group.
@@ -77,8 +77,6 @@ describe("the host's build attempts", () => {
     const pgid = orphan.pid!;
     await writeFile(join(directory, "1.started.json"), JSON.stringify({ startedAt: new Date().toISOString(), continuedFrom: null, pid: pgid, pgid }));
     expect((await attemptRecord("proj_restart", 1))?.state).toBe("detached");
-    // A live detached worker counts as running: no second worker beside it.
-    expect(await projectHasRunningAttempt("proj_restart")).toBe(true);
 
     expect(await cancelBuildAttempt("proj_restart", 1)).toBe(true);
     await until(async () => (await attemptRecord("proj_restart", 1))?.state === "lost", CANCEL_GRACE_MS + 5_000);

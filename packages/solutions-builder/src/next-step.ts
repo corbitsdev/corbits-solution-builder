@@ -9,7 +9,7 @@
  * Pure, and exhaustive over the ledger's states, so `smoke:guidance` can prove
  * there is no state that leaves a person without a next move.
  */
-import type { RunState, Stage } from "./ledger.js";
+import type { RunState } from "./ledger.js";
 
 export type NextStep = {
   /** The action, in the imperative. Short enough to be a button. */
@@ -214,57 +214,4 @@ export function nextStep(input: {
         ending: true,
       };
   }
-}
-
-/**
- * "What is happening right now" — a status headline, not an instruction.
- *
- * `nextStep` answers "what should I do"; this answers "what is going on",
- * which is a different sentence for the same moment (compare its
- * `waiting_approval` title, "Approve it or send it back", to this one,
- * "Waiting for your approval"). The runtime executor is what makes this
- * possible at all: `parked` and `hasDraft` come from actually asking the
- * platform's own workflow run where it is, not from guessing at a state
- * string. Words only — no step id, no signal name, no enum value ever
- * reaches this function's return value.
- */
-export function activityHeadline(input: {
-  state: RunState;
-  stage: Stage;
-  /** Whether the stage's runtime run is currently parked at a signal gate. */
-  parked: boolean;
-  hasDraft: boolean;
-  quorum?: { recorded: number; needed: number; blocked: number };
-  /** Set when the stage cannot run at all — no model provider, or no host to place a sidecar on. */
-  executionUnavailable?: "no_offering" | "no_host";
-}): string {
-  const { state, stage, parked, hasDraft, quorum, executionUnavailable } = input;
-
-  if (executionUnavailable) {
-    return executionUnavailable === "no_offering"
-      ? "Can't run yet — no model provider is connected"
-      : "Can't run yet — no host is free for this project's sidecar";
-  }
-
-  if (state === "waiting_approval") {
-    if (stage === 5 && quorum) {
-      if (quorum.blocked > 0) return "An audience asked for changes";
-      const remaining = quorum.needed - quorum.recorded;
-      if (remaining > 0) {
-        return `Waiting on ${remaining} more audience decision${remaining === 1 ? "" : "s"}`;
-      }
-      return "Waiting for your approval";
-    }
-    if (stage === 7) return "Waiting for you to approve the cost";
-    return "Waiting for your approval";
-  }
-
-  if (state === "in_progress") {
-    if (parked && hasDraft) return "Revising the draft";
-    return "Drafting";
-  }
-
-  // Every other state already has a plain, person-facing title — reused
-  // rather than restated, so there is exactly one place these words live.
-  return nextStep({ state, stage, hasDraft: true, ...(quorum ? { quorum } : {}) }).title;
 }

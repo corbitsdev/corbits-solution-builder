@@ -275,18 +275,6 @@ export async function stopBuildAttempts(): Promise<void> {
 }
 
 /**
- * True while any attempt for the project is running on this host: one this
- * host is driving or setting up, or one an earlier run of the host started
- * that is still alive (`detached`) — a second worker beside it would write
- * into the same project's builds.
- */
-export async function projectHasRunningAttempt(projectId: string): Promise<boolean> {
-  if (starting.has(projectId)) return true;
-  for (const entry of inFlight.keys()) if (entry.startsWith(`${projectId}:`)) return true;
-  return (await listAttempts(projectId)).some((record) => record.state === "detached");
-}
-
-/**
  * Starts the next attempt for a project and returns at once with its
  * number; the worker runs on, and the record files say how it ended.
  * One attempt per project at a time: two workers in one project's builds

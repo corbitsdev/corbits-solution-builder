@@ -51,19 +51,6 @@ export type OrderedProvider = {
 };
 
 /**
- * The provider the default model comes from: the first in order that has an
- * enabled model. A provider whose every offering is disabled has nothing to
- * draft with, so the default falls through it to the next.
- */
-export function defaultProviderId(order: readonly string[], providers: readonly OrderedProvider[]): string | null {
-  for (const id of order) {
-    const provider = providers.find((entry) => entry.id === id);
-    if (provider && provider.selectedModel !== null) return id;
-  }
-  return null;
-}
-
-/**
  * Whether two connected providers share a priority block. Blocks are what
  * make provider order mean anything -- a saved order re-bases each
  * provider's offerings into `rank * 1000 + offset` -- and two providers

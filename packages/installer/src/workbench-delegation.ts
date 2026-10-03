@@ -273,20 +273,6 @@ export async function delegateWorkspaceDefaultsIfSealed(
   return delegateMore(store, { projectId, delegatedCredentialIds });
 }
 
-/** What the owner consented to plus the live grants carrying it: the audit view. */
-export async function delegationAudit(
-  store: DelegationStore,
-  projectId: string,
-): Promise<{ consent: DelegationRecord | null; grants: HubGrant[] }> {
-  const consent = await store.readRecord(projectId);
-  if (!consent) return { consent: null, grants: [] };
-  const existing = await store.listChildGrants(projectId);
-  const grants = existing.filter((grant) =>
-    consent.credentialIds.some((id) => isDelegationGrant(grant, consent.principalId, id)),
-  );
-  return { consent, grants };
-}
-
 /** Revokes every delegation grant on a workbench and clears its record. */
 export async function revokeAllDelegations(
   store: DelegationStore,

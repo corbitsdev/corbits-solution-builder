@@ -60,9 +60,6 @@ export type InferenceSourcePin = { readonly provider: string; readonly model: st
  *  in this specialist's sidecar: it carries no shell and no delivery tool. */
 export const BUILD_STAGE = 8;
 
-/** The stage whose rounds write one package per stakeholder, each behind its own gate. */
-export const PACKAGE_STAGE = 5;
-
 /** The stage whose specialist checks a delivery manifest. */
 export const DELIVERY_STAGE = 9;
 
