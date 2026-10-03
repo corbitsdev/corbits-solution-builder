@@ -26,11 +26,13 @@ import { buildPackageDeck, deckFileName } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
-import { packageNudge, packageReplyProblem, packageRequest } from "../package-request.ts";
+import { isOwner, packageNudge, packageOf, packageReplyProblem, packageRequest, type PackageAudience } from "../package-request.ts";
 import { mockupShots, placeMockups, type MockupShot } from "../mockup-shots.ts";
 import { isHtmlDocument } from "./workspace/guidance.ts";
+import { packageSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
-import { packageReplyFor } from "../package-reply.ts";
+import { packageReplyFor, unrecordedPackageRequest } from "../package-reply.ts";
+import { useMountEffect } from "../use-mount-effect.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
@@ -95,11 +97,9 @@ async function awaitPackageReply(
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
-/** A role's name as a person reads it. */
-/** The person's own entry — the stakeholder named "You" — ahead of everyone else, the rest as listed. */
-function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
-  const isYou = (entry: T) => entry.name.trim().toLowerCase() === "you";
-  return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
+/** The person's own entry, the project owner, ahead of everyone else, the rest as listed. */
+function youFirst<T extends { role: string }>(list: readonly T[]): T[] {
+  return [...list.filter(isOwner), ...list.filter((entry) => !isOwner(entry))];
 }
 
 function roleLabel(role: string): string {
@@ -344,9 +344,9 @@ function Stakeholders({
   );
 }
 
-/** What the strip says while `name`'s package is being written. */
-function packageWork(name: string): string {
-  return `Writing ${name}'s package`;
+/** What the strip says while the audience's package is being written. */
+function packageWork(audience: PackageAudience): string {
+  return `Writing ${packageOf(audience)}`;
 }
 
 export function AudiencePackages({
@@ -393,15 +393,26 @@ export function AudiencePackages({
   const [writeError, setWriteError] = useState<string | null>(null);
   // The round is work the person waits on whichever tab is open, and the
   // strip says whose package is being written (#223).
-  const writingNames = [...writing];
-  useBusyWhile(writingNames.length > 0, writingNames.length === 1 ? packageWork(writingNames[0]!) : `Writing ${String(writingNames.length)} packages`);
-  const cancelledRef = useRef(false);
-  useEffect(() => () => {
-    cancelledRef.current = true;
-  }, []);
-
   const policy = (detail.project.policy ?? {}) as Policy;
   const audiences = youFirst(policy.audiences ?? []);
+  const writingFor = audiences.filter((audience) => writing.has(audience.name));
+  useBusyWhile(writingFor.length > 0, writingFor.length === 1 ? packageWork(writingFor[0]!) : `Writing ${String(writingFor.length)} packages`);
+  const cancelledRef = useRef(false);
+  // Until the thread is read for a request a reload left in flight, no
+  // package is asked for again.
+  const [resuming, setResuming] = useState(true);
+  const resumedRef = useRef(false);
+  useMountEffect(() => {
+    cancelledRef.current = false;
+    if (!resumedRef.current) {
+      resumedRef.current = true;
+      void resumePackages();
+    }
+    return () => {
+      cancelledRef.current = true;
+    };
+  });
+
   const quorum = policy.audienceQuorum ?? 0;
 
   // The approved stage 4 design, read once per approved version: its
@@ -463,31 +474,59 @@ export function AudiencePackages({
     // project and the theme render_deck should draw with. Best effort — a
     // brief that cannot be read never stops a package being asked for.
     const brief = await api.deckBrief(detail.project.id, audience.role).catch(() => null);
-    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design, brief) });
-    let reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
+    await api.sendStageMail(tenantId, deployment.address, { subject: packageSubject(audience), body: packageRequest(audience, design, brief) });
+    await recordPackage(audience, deployment.address, seenIds, true);
+  };
+
+  /** Waits for the reply to the request for `audience` sent after `seenIds` and records it as their package. */
+  const recordPackage = async (audience: PackageAudience, address: string, seenIds: ReadonlySet<string>, mayNudge: boolean) => {
+    let reply = await awaitPackageReply(tenantId, address, seenIds, audience.name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     // Not every reply is a package (#220): one with no deck outline is
     // refused and never recorded. The specialist is asked once more in the
     // same thread, told what was missing and that the reply itself is the
     // package (#225); a second miss is said so "Write it" stays offered.
-    let problem = packageReplyProblem(name, reply.body);
-    if (problem) {
-      const seenBefore = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
-      await api.sendStageMail(tenantId, deployment.address, { body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
-      reply = await awaitPackageReply(tenantId, deployment.address, seenBefore, name, () => cancelledRef.current);
+    let problem = packageReplyProblem(audience, reply.body);
+    if (problem && mayNudge) {
+      const seenBefore = new Set((await api.readStageThread(tenantId, [address])).map((message) => message.id));
+      await api.sendStageMail(tenantId, address, { subject: packageSubject(audience), body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
+      reply = await awaitPackageReply(tenantId, address, seenBefore, audience.name, () => cancelledRef.current);
       if (cancelledRef.current) return;
-      problem = packageReplyProblem(name, reply.body);
-      if (problem) throw new Error(problem);
+      problem = packageReplyProblem(audience, reply.body);
     }
-    await api.persistAudiencePackage(detail.project.id, name, reply.body);
+    if (problem) throw new Error(problem);
+    await api.persistAudiencePackage(detail.project.id, audience.name, reply.body);
   };
 
-  const writePackages = async (names: string[]) => {
+  const resumePackages = async () => {
+    try {
+      const deployment = await api.ensureStageAgent(detail.project.id, 5);
+      const messages = await api.readStageThread(tenantId, [deployment.address]);
+      const unrecorded = new Map(
+        audiences.flatMap((audience) => {
+          const seenIds = unrecordedPackageRequest(messages, audience.name, packages.find((node) => node.variant === audience.name)?.createdAt ?? null);
+          return seenIds ? [[audience.name, { audience, seenIds }] as const] : [];
+        }),
+      );
+      await runPackages([...unrecorded.keys()], (name) => {
+        const { audience, seenIds } = unrecorded.get(name)!;
+        return recordPackage(audience, deployment.address, seenIds, false);
+      });
+    } catch (cause) {
+      if (!cancelledRef.current) setWriteError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      if (!cancelledRef.current) setResuming(false);
+    }
+  };
+
+  const writePackages = (names: string[]) => runPackages(names, writeOnePackage);
+
+  const runPackages = async (names: string[], work: (name: string) => Promise<void>) => {
     if (names.length === 0 || writing.size > 0) return;
     setWriteError(null);
     setWriting(new Set(names));
     try {
-      await Promise.all(names.map((name) => writeOnePackage(name)));
+      await Promise.all(names.map(work));
       if (!cancelledRef.current) onChanged();
     } catch (cause) {
       if (!cancelledRef.current) {
@@ -644,7 +683,8 @@ export function AudiencePackages({
   const [preview, setPreview] = useState<{ deck: Deck; note: string | null } | { deck: null; note: string } | null>(null);
   // A string, not the stakeholder row: `audiences` is a fresh array every
   // render, and an effect keyed on it would rebuild the deck on every click.
-  const previewRole = selected ? (audiences.find((audience) => audience.name === selected.variant)?.role ?? "") : "";
+  const selectedAudience = selected ? audiences.find((audience) => audience.name === selected.variant) : undefined;
+  const previewRole = selectedAudience?.role ?? "";
   useEffect(() => {
     if (!selected || !content) {
       setPreview(null);
@@ -833,7 +873,7 @@ export function AudiencePackages({
                 {writing.has(audience.name) ? (
                   <StateLabel tone="info">Writing…</StateLabel>
                 ) : (
-                  <Button loading={false} disabled={writing.size > 0} onClick={() => void writePackages([audience.name])}>
+                  <Button loading={false} disabled={writing.size > 0 || resuming} onClick={() => void writePackages([audience.name])}>
                     Write it
                   </Button>
                 )}
@@ -844,7 +884,7 @@ export function AudiencePackages({
             <Button
               variant="primary"
               loading={writing.size > 1}
-              disabled={writing.size > 0}
+              disabled={writing.size > 0 || resuming}
               onClick={() => void writePackages(missing.map((audience) => audience.name))}
             >
               Write all {missing.length}
@@ -993,14 +1033,14 @@ export function AudiencePackages({
                     <MenuItem onSelect={() => void exportSlides(selected.id, "pdf")}>Save as PDF</MenuItem>
                   </MenuContent>
                 </Menu>
-                {selected.variant ? (
+                {selectedAudience ? (
                   <Button
-                    loading={writing.has(selected.variant)}
-                    disabled={writing.size > 0}
-                    doing={packageWork(selected.variant)}
-                    onClick={() => void writePackages([selected.variant!])}
+                    loading={writing.has(selectedAudience.name)}
+                    disabled={writing.size > 0 || resuming}
+                    doing={packageWork(selectedAudience)}
+                    onClick={() => void writePackages([selectedAudience.name])}
                   >
-                    {writing.has(selected.variant) ? "Writing…" : "Write it again"}
+                    {writing.has(selectedAudience.name) ? "Writing…" : "Write it again"}
                   </Button>
                 ) : null}
               </div>

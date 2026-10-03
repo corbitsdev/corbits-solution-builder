@@ -46,8 +46,9 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { appSubject } from "./composed-mail.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { revisionRequest, withChoiceReminder } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -327,6 +328,7 @@ export function StageWorkspace({
         resultNodeId: null,
         questions: null,
         createdAt: message.at,
+        ...(message.subject ? { subject: message.subject } : {}),
       })),
     [foldedMessages],
   );
@@ -589,7 +591,8 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
-  const send = async (body: string) => {
+  /** `choice` names the stage 3 approach the chooser sent, so the chat shows the mail as that event. */
+  const send = async (body: string, choice?: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
@@ -610,7 +613,7 @@ export function StageWorkspace({
       const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
       const turn = withAttachedDocuments(body, stageDocuments);
       const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
-      await api.sendStageMail(tenantId, agentAddress, { body: mail });
+      await api.sendStageMail(tenantId, agentAddress, { body: mail, ...(choice === undefined ? {} : { subject: appSubject("choice", choice) }) });
       await loadThread();
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
@@ -776,7 +779,6 @@ export function StageWorkspace({
 
   const conversation = (
     <StageConversation
-      stage={stage}
       messages={foldedMessages}
       value={composer}
       onValueChange={setComposer}
@@ -1137,6 +1139,10 @@ export function StageWorkspace({
               artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
+            }}
+            onChoose={(letter, name) => {
+              artifacts.selectVersion(null);
+              void send(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), name);
             }}
             onAddMaterial={async (files) => {
               await api.attachMaterial(detail.project.id, files);

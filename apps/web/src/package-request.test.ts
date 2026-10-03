@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { packageAsk, packageNudge, packageReplyProblem, packageRequest } from "./package-request.ts";
+import { packageNudge, packageReplyProblem, packageRequest } from "./package-request.ts";
 
 // #41 step 3: the request names the stakeholder and their role, since the
 // one stage 5 specialist's prompt names nobody. #115: it carries the
@@ -25,19 +25,17 @@ describe("packageRequest", () => {
 
   test("a reply with a deck outline is a package; one without is refused with the reason", () => {
     const pkg = "## Audience: Mr Finance\n### One-pager\nWorth it.\n### Deck outline\n1. **Problem: costs** — Manual work.\n2. **Solution** — The app.\n### Decision request\nProceed.";
-    expect(packageReplyProblem("Mr Finance", pkg)).toBeNull();
-    expect(packageReplyProblem("Mr Finance", "The deck for Mr Finance has rendered as slides.pptx — nine slides.")).toBe(
+    expect(packageReplyProblem({ name: "Mr Finance", role: "budget_approver" }, pkg)).toBeNull();
+    expect(packageReplyProblem({ name: "Mr Finance", role: "budget_approver" }, "The deck for Mr Finance has rendered as slides.pptx — nine slides.")).toBe(
       "Mr Finance's package was not written: the reply it has no \"### Deck outline\" section, and a package's slides are built from that outline. Ask for it again.",
     );
-    expect(packageReplyProblem("Mr Tech", "### Deck outline\n\nSome prose, no numbered slides.")).toStartWith("Mr Tech's package was not written: the reply its \"### Deck outline\" section has no numbered slides");
+    expect(packageReplyProblem({ name: "Mr Tech", role: "security_reviewer" }, "### Deck outline\n\nSome prose, no numbered slides.")).toStartWith("Mr Tech's package was not written: the reply its \"### Deck outline\" section has no numbered slides");
   });
 
-  // #225: the follow-up after a reply that was not a package opens with the
-  // same ask line, so its reply is paired the same way, and says where the
+  // #225: the follow-up after a reply that was not a package says where the
   // package has to be.
-  test("the nudge re-asks by the same line and says the reply itself is the package", () => {
+  test("the nudge says the reply itself is the package", () => {
     const nudge = packageNudge({ name: "You", role: "project_owner" }, 'it has no "### Deck outline" section');
-    expect(nudge).toStartWith(packageAsk("You"));
     expect(nudge).toContain("Your last reply was not the package: it has no \"### Deck outline\" section.");
     expect(nudge).toContain("in this reply");
     expect(nudge).toContain("Markdown handed to render_deck is not read as the package.");
@@ -60,9 +58,5 @@ describe("packageRequest", () => {
 
   test("a brief with nothing in it adds nothing", () => {
     expect(packageRequest({ name: "Mr Tech", role: "security_reviewer" }, null, { theme: null, guidelines: null, documents: [] })).toBe("Write the package for: Mr Tech, the security reviewer.");
-  });
-
-  test("opens with the ask line the reply is found by", () => {
-    expect(packageRequest({ name: "You", role: "project_owner" }, null)).toStartWith(packageAsk("You"));
   });
 });

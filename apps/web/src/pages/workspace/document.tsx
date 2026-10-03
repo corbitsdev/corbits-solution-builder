@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { withChoiceReminder } from "@solutions-builder/app/stage-prompt";
 import {
   api,
   type ArtifactNode,
@@ -14,6 +13,7 @@ import {
   type ChatMessage,
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { appEventLine } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -58,6 +58,7 @@ export function StageDocument({
   draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
+  onChoose,
   onAddMaterial,
   onSubmit,
   soloApproval,
@@ -97,6 +98,8 @@ export function StageDocument({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
+  /** Sends stage 3's choice of approach. */
+  onChoose: (letter: string, name: string) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   onSubmit: () => void;
@@ -239,6 +242,7 @@ export function StageDocument({
   // Memoised: the thread re-pins its scroll whenever this array is new, and a
   // fresh one on every keystroke in the composer made the transcript twitch.
   // The turns that report a round the platform could not complete, set apart in the transcript.
+  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
   const failedTurns = useMemo(() => new Set(turns.filter((turn) => turn.failed).map((turn) => turn.id)), [turns]);
 
   const messages: ChatMessage[] = useMemo(() => {
@@ -401,6 +405,9 @@ export function StageDocument({
                 </span>
               );
             }
+            const turn = turnById.get(message.id);
+            const line = turn && message.role === "user" ? appEventLine({ author: "me", ...(turn.subject ? { subject: turn.subject } : {}) }, undefined) : null;
+            if (line) return <span className="event conv-event">{line}</span>;
             const who = (
               <span className="who conv-who">
                 {message.role === "user" ? "You" : agentFor(node.stage as Stage).title}
@@ -504,9 +511,7 @@ export function StageDocument({
                     key={section.heading}
                     variant="primary"
                     disabled={busy !== null}
-                    onClick={() =>
-                      onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
-                    }
+                    onClick={() => onChoose(letter, name)}
                   >
                     {name}
                   </Button>
