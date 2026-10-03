@@ -4,7 +4,7 @@ import { FileText, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { attachedLine, composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { composedMailFold, isStageOpening } from "./composed-mail.ts";
 import { AttachMenu, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -137,8 +137,8 @@ export function StageConversation({
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
-  /** Sends the composer's words, with the documents attached to them. */
-  onSend: (attached: readonly AttachedDocument[]) => void;
+  /** Sends the composer's words, with the documents attached to them; false when it did not go. */
+  onSend: (attached: readonly AttachedDocument[]) => void | Promise<boolean>;
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
@@ -243,14 +243,6 @@ export function StageConversation({
             // the person never said it, and the document strip already shows
             // what it carried.
             if (source && isStageOpening(source)) return null;
-            const attachment = source ? attachedLine(source) : null;
-            if (attachment) {
-              return (
-                <div key={message.id} className="event conv-event">
-                  {attachment}
-                </div>
-              );
-            }
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
@@ -301,8 +293,12 @@ export function StageConversation({
           value={value}
           onValueChange={onValueChange}
           onSend={() => {
-            onSend(attached);
+            const sent = attached;
             setAttached([]);
+            void (async () => {
+              if ((await onSend(sent)) !== false) return;
+              setAttached((current) => [...sent, ...current.filter((entry) => !sent.includes(entry))]);
+            })();
           }}
           working={working || pending}
           {...(pending && onStop ? { onStop } : {})}

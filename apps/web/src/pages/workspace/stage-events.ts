@@ -12,6 +12,7 @@ import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { stageName } from "../../components.jsx";
 import { handoffMarkerOf } from "./use-model-handoff.ts";
+import { attachedLine } from "./composed-mail.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -124,6 +125,29 @@ export function switchEvents(messages: readonly ChatMessage[]): StageEvent[] {
     out.push({ id: `ev:switch:${id}`, at: message.at, text: secondLine || "This stage continued on a different model.", tone: "boundary" });
   }
   return out;
+}
+
+/**
+ * Attached documents (`attach-documents.tsx`) out of the transcript: each
+ * is one line, and the specialist's reply to it, which the shared rules
+ * make a bare acknowledgement, is not a turn of the conversation. The reply
+ * is paired by the trigger id the hub recorded on the sent mail (#62).
+ */
+export function foldAttachments(messages: readonly ChatMessage[]): { messages: ChatMessage[]; events: StageEvent[] } {
+  const events: StageEvent[] = [];
+  const acknowledgements = new Set<string>();
+  for (const message of messages) {
+    const text = attachedLine(message);
+    if (text === null) continue;
+    events.push({ id: `ev:attached:${message.id}`, at: message.at, text, tone: "line" });
+    if (message.triggerMessageId !== undefined) acknowledgements.add(message.triggerMessageId);
+  }
+  const kept = messages.filter(
+    (message) =>
+      attachedLine(message) === null &&
+      !(message.author === "agent" && message.inReplyTo !== undefined && acknowledgements.has(message.inReplyTo)),
+  );
+  return { messages: kept, events };
 }
 
 /** Events as chat messages — `system` rows ChatThread renders as quiet

@@ -25,9 +25,9 @@ import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
-import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
 import { sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
+import { foldAttachments, type StageEvent } from "./stage-events.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -277,13 +277,15 @@ export function BuildPanel({
     if (element) element.scrollTop = element.scrollHeight;
   }, [log]);
 
-  const run = async (label: string, work: () => Promise<void>) => {
+  const run = async (label: string, work: () => Promise<void>): Promise<boolean> => {
     setBusy(label);
     setError(null);
     try {
       await work();
+      return true;
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -362,13 +364,14 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
-            messages={messages}
+            // Attachment lines arrive with `stageEvents`: the workspace reads this same thread.
+            messages={foldAttachments(messages).messages}
             value={composer}
             onValueChange={setComposer}
             onSend={(attached) => {
               const body = composer;
               setComposer("");
-              void run("message", async () => {
+              return run("message", async () => {
                 if (!address) return;
                 await sendAttachedDocuments(tenantId, address, attached);
                 await api.sendStageMail(tenantId, address, { body });

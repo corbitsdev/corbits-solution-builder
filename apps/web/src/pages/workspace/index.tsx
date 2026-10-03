@@ -48,7 +48,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag, attachedLine } from "./composed-mail.ts";
+import { artifactTag } from "./composed-mail.ts";
 import { attachableDocuments, sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft } from "./stack-repair.ts";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
@@ -72,7 +72,7 @@ import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
+import { foldAttachments, stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -261,7 +261,8 @@ export function StageWorkspace({
     },
     setError,
   );
-  const foldedMessages = withdrawn.messages;
+  const attachments = useMemo(() => foldAttachments(withdrawn.messages), [withdrawn.messages]);
+  const foldedMessages = attachments.messages;
   const withdrawnIds = withdrawn.ids;
   const pending = withdrawn.pending;
   const stopTurn = withdrawn.stop;
@@ -365,7 +366,7 @@ export function StageWorkspace({
   // or result-node bookkeeping under mail-chat).
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.filter((message) => attachedLine(message) === null).map((message) => ({
+      foldedMessages.map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -430,21 +431,10 @@ export function StageWorkspace({
     () => [
       ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
       ...switchEvents(foldedMessages),
+      ...attachments.events,
       ...routedEvents,
     ],
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],
-  );
-  // The document pane's transcript is built from `turns`, which carry no
-  // subject: an attached document is one line there as in the chat.
-  const documentEvents = useMemo(
-    () => [
-      ...events,
-      ...foldedMessages.flatMap((message) => {
-        const text = attachedLine(message);
-        return text ? [{ id: `ev:attached:${message.id}`, at: message.at, text, tone: "line" as const }] : [];
-      }),
-    ],
-    [events, foldedMessages],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, attachments.events, routedEvents],
   );
 
   // CL-8899: the current stage's provider/model, reporting-only (read off
@@ -650,8 +640,9 @@ export function StageWorkspace({
     }
   };
 
-  const send = async (body: string, attached: readonly AttachedDocument[] = []) => {
-    if (!agentAddress || body.trim().length === 0) return;
+  /** Whether the message went; a refused one keeps its attachments in the composer. */
+  const send = async (body: string, attached: readonly AttachedDocument[] = []): Promise<boolean> => {
+    if (!agentAddress || body.trim().length === 0) return false;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
     // the chat says so where the message would have been. One with
@@ -660,7 +651,7 @@ export function StageWorkspace({
       const at = new Date().toISOString();
       setRequirementsAsk({ body, at: Date.now() });
       setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
-      return;
+      return true;
     }
     setSending(true);
     setError(null);
@@ -676,6 +667,7 @@ export function StageWorkspace({
         ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
       });
       await loadThread();
+      return true;
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {
         // The specialist's run has ended (#413): ask for it again, which
@@ -688,10 +680,11 @@ export function StageWorkspace({
           .ensureStageAgent(detail.project.id, stage)
           .then(() => agent.retry())
           .catch((again: unknown) => setError(again instanceof ApiFailure ? again.detail.message : String(again)));
-        return;
+        return false;
       }
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
+      return false;
     } finally {
       setSending(false);
     }
@@ -854,7 +847,7 @@ export function StageWorkspace({
       onSend={(attached) => {
         const body = composer;
         setComposer("");
-        void send(body, attached);
+        return send(body, attached);
       }}
       onAnswer={(answer) => {
         setComposer("");
@@ -1215,7 +1208,7 @@ export function StageWorkspace({
             onRevise={(message, quotes, _revise, attached) => {
               artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-              void send(quoted ? `${quoted}\n\n${message}` : message, attached);
+              return send(quoted ? `${quoted}\n\n${message}` : message, attached);
             }}
             documents={attachDocuments}
             onAddMaterial={async (files) => {
@@ -1235,7 +1228,7 @@ export function StageWorkspace({
             onStop={() => void stopTurn()}
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
-            events={documentEvents}
+            events={events}
             strip={stripEl}
             promote={
               superseded

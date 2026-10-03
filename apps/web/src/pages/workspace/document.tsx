@@ -97,7 +97,8 @@ export function StageDocument({
    *  such a reply as one line naming its version, never as its text. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
   onSelectVersion: (id: string) => void;
-  onRevise: (message: string, quotes: Quote[], revise?: boolean, attached?: readonly AttachedDocument[]) => void;
+  /** Resolves false when the message did not go, which puts its attached documents back. */
+  onRevise: (message: string, quotes: Quote[], revise?: boolean, attached?: readonly AttachedDocument[]) => void | Promise<boolean>;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   /** The project's documents the (+) menu offers to attach. */
@@ -362,17 +363,22 @@ export function StageDocument({
       return;
     }
     setQueued(false);
-    onRevise(
+    const documents = attachedDocuments;
+    const sent = onRevise(
       message.trim(),
       attached.map((entry) =>
         entry.note ? { quote: `${entry.quote}\n— ${entry.note}` } : { quote: entry.quote },
       ),
       false,
-      attachedDocuments,
+      documents,
     );
     setMessage("");
     setAttached([]);
     setAttachedDocuments([]);
+    void (async () => {
+      if ((await sent) !== false) return;
+      setAttachedDocuments((current) => [...documents, ...current.filter((entry) => !documents.includes(entry))]);
+    })();
     setRedrafting(false);
     // After the pending turn has rendered, so the scroll reaches it.
     requestAnimationFrame(scrollToBottom);

@@ -9,7 +9,6 @@ import { ChatInputButton, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator,
 import { Plus } from "lucide-react";
 import { api } from "../../client.js";
 import { attachedTag } from "./composed-mail.ts";
-import { ATTACHED_HEADING } from "./document-mentions.ts";
 import type { ArtifactTab } from "./use-project-artifacts.ts";
 
 export type AttachedDocument = { readonly artifactId: string; readonly version: number; readonly label: string };
@@ -45,7 +44,7 @@ export async function sendAttachedDocuments(tenantId: string, address: string, a
   for (const [at, document] of attached.entries()) {
     await api.sendStageMail(tenantId, address, {
       subject: `${attachedTag(document)} ${document.label}`,
-      body: `${ATTACHED_HEADING} ${document.label}, version ${String(document.version)}\n\n${reads[at]!.content.trim()}`,
+      body: `${attachedTag(document)} ${document.label}\n\n${reads[at]!.content.trim()}`,
     });
   }
 }
