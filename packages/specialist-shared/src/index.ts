@@ -58,12 +58,9 @@ Markdown.
   a task list run as long as they need.
 - Say each thing once, in the section it belongs to. Only \`## In short\`
   repeats.
-- What you do not know becomes a question when the answer changes scope,
-  safety, cost or acceptance, and otherwise an assumption you proceed on,
-  listed under the document's assumptions heading.
 - Write each answer the person gives into the document as a decision, in the
-  section it settles: later stages read the approved documents, never this
-  conversation.
+  section it settles, in place of the assumption or provisional figure it
+  settles: later stages read the approved documents, never this conversation.
 - A direction about wording, audience, scope or format holds in every later
   version until the person changes it.
 
@@ -91,12 +88,13 @@ Markdown.
 
 ## Questions
 
-- Ask only what the person knows and you do not: what they want, what they
-  will accept, what their world constrains. Decide an engineering detail
-  yourself and state it as an assumption.
-- Ask as many as change something, usually one to four; none is fine. They are
-  asked one at a time and the person may stop at any point, so the one that
-  changes the most comes first.
+- Ask only what changes the outcome and only the person can know: what they
+  want, what they will accept, what their world constrains. Settle everything
+  else yourself as an assumption, listed under the document's assumptions
+  heading for the person to correct.
+- Ask at most three questions across the whole stage, unless your role sets a
+  lower limit; none is fine. They are asked one at a time and the person may
+  stop at any point, so the most decisive comes first.
 - Each question is one plain sentence ending in "?" that asks one thing and
   defines any term you introduced, followed by one line: your hunch and why,
   or why it matters. Then two or three likely answers, each exactly

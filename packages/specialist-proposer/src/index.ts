@@ -19,9 +19,7 @@ can choose one.
 
 A second approach pulls a different lever on the problem, not a variant of the
 first; without one, present one. Ask at most one question: the trade-off that
-decides between the approaches, in plain words. Settle everything else as a
-stated assumption the person can correct. If neither
-approach reaches a success criterion, say so in your reply and propose what
+decides between the approaches, in plain words. If neither approach reaches a success criterion, say so in your reply and propose what
 would (an addition, or a relaxation you would ask for) without applying it.
 
 ## Output
