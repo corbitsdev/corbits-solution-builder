@@ -30,10 +30,11 @@
  * (`packages/tools-delivery`), kept so the archive and manifest it writes
  * name the attempt the same way.
  */
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
+import { summarizeTurn, type TurnSummary } from "./turn-reports.js";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
@@ -243,6 +244,45 @@ export async function attemptLog(projectId: string, attempt: number): Promise<st
   } catch {
     return "";
   }
+}
+
+/** How much of a turn log's end is read: turn reports carry tool results, so the file outgrows the log. */
+const TURNS_TAIL_BYTES = 2_000_000;
+
+/**
+ * The worker's own turn reports, newest last, from the tail of its hook
+ * log; null for one that could not be read. Empty when the worker has no hook.
+ */
+export async function attemptTurns(projectId: string, attempt: number): Promise<(TurnSummary | null)[]> {
+  let text: string;
+  try {
+    const handle = await open(attemptFile(projectId, attempt, ".turns.jsonl"), "r");
+    try {
+      const { size } = await handle.stat();
+      const start = Math.max(0, size - TURNS_TAIL_BYTES);
+      const buffer = Buffer.alloc(size - start);
+      await handle.read(buffer, 0, buffer.length, start);
+      text = buffer.toString("utf8");
+      if (start > 0) text = text.slice(text.indexOf("\n") + 1);
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return [];
+  }
+  const workspace = attemptWorkspace(projectId, attempt);
+  // A worker may name its directory by the resolved path (macOS's /private/var).
+  const roots = [workspace, await realpath(workspace).catch(() => workspace)];
+  return text
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      try {
+        return summarizeTurn(JSON.parse(line), roots);
+      } catch {
+        return null;
+      }
+    });
 }
 
 /** The prompt an attempt was handed, as written when it started. */

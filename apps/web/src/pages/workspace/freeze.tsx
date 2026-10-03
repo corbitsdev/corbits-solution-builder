@@ -9,7 +9,7 @@
  * no freeze step — approving stage 7 with a target chosen is the freeze.
  */
 import { useState } from "react";
-import { Button, StateLabel } from "../../components.jsx";
+import { Button } from "../../components.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 
 /** One line naming the chosen target, prefixed onto stage 8's opening mail so the build specialist knows what it is building without re-deriving it from the plan. */
@@ -27,14 +27,11 @@ export function targetOpeningLine(target: string): string {
 export function TargetPicker({
   chosen,
   onChange,
-  note = "Choose how the finished build will be used. Only a website or a service is actually checked today — the others are honest about not being verified yet.",
-  verification = true,
+  note = "Choose how the finished build will be used.",
 }: {
   chosen: string | null;
   onChange: (target: string) => void;
   note?: string;
-  /** What the build lane can verify only matters once a build is being priced. */
-  verification?: boolean;
 }) {
   const [changing, setChanging] = useState(false);
   const chosenOption = chosen ? SELECTABLE_TARGETS.find((option) => option.target === chosen) : undefined;
@@ -42,12 +39,7 @@ export function TargetPicker({
     return (
       <div className="stage-lead target-picker target-chosen">
         <p className="text-sm">
-          <span className="font-medium">Target:</span> {chosenOption.label}{" "}
-          {!verification ? null : chosenOption.verified ? (
-            <StateLabel tone="okay">verified today</StateLabel>
-          ) : (
-            <StateLabel tone="disabled">not verified yet</StateLabel>
-          )}
+          <span className="font-medium">Target:</span> {chosenOption.label}
         </p>
         <Button variant="link" onClick={() => setChanging(true)}>
           Change
@@ -73,14 +65,7 @@ export function TargetPicker({
                 setChanging(false);
               }}
             />
-            <span>
-              <span className="text-sm">{option.label}</span>{" "}
-              {!verification ? null : option.verified ? (
-                <StateLabel tone="okay">verified today</StateLabel>
-              ) : (
-                <StateLabel tone="disabled">not verified yet</StateLabel>
-              )}
-            </span>
+            <span className="text-sm">{option.label}</span>
           </label>
         ))}
       </div>

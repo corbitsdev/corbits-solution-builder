@@ -19,13 +19,14 @@
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildTurn, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { useQuery } from "@tanstack/react-query";
 import { keys } from "../../queries/keys.ts";
 import { useMailboxNudge } from "../../queries/use-mailbox.ts";
 
 const NO_MESSAGES: ChatMessage[] = [];
+const NO_TURNS: (BuildTurn | null)[] = [];
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Input } from "@corbits/react-ui";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
@@ -124,6 +125,32 @@ function evMark(tone: keyof typeof EV_TONE): string {
   if (tone === "error") return "✗ ";
   if (tone === "warning" || tone === "selected") return "… ";
   return "";
+}
+
+/** Each turn as the worker reported it: what it said, and one line per tool call naming the tool and the path it gave. */
+function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
+  return (
+    <div aria-live="polite">
+      {turns.map((turn, index) =>
+        turn === null ? (
+          <p key={index} className="inline-note">
+            A turn report the host could not read.
+          </p>
+        ) : (
+          <div key={index}>
+            {turn.said ? <Markdown source={turn.said} /> : null}
+            {turn.tools.map((tool, call) => (
+              <p key={call} className="inline-note">
+                <code>{tool.name}</code>
+                {tool.path ? ` ${tool.path}` : ""}
+                {tool.failed ? " — failed" : ""}
+              </p>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
+  );
 }
 
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
@@ -257,14 +284,15 @@ export function BuildPanel({
   // The log of the attempt in view: polled while it runs, read once when it
   // has ended. Both pipes and the worker's turn reports, in arrival order.
   // A failed read keeps the last log; the next poll says.
-  const log =
-    useQuery({
-      queryKey: [...keys.buildAttempts.log(detail.project.id, current?.attempt ?? 0), current?.state],
-      queryFn: async () => (await api.buildAttempt(detail.project.id, current!.attempt)).log,
-      enabled: current !== null,
-      refetchInterval: current?.state === "running" ? 2_000 : false,
-      placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === current?.attempt ? previous : undefined),
-    }).data ?? "";
+  const view = useQuery({
+    queryKey: [...keys.buildAttempts.log(detail.project.id, current?.attempt ?? 0), current?.state],
+    queryFn: () => api.buildAttempt(detail.project.id, current!.attempt),
+    enabled: current !== null,
+    refetchInterval: current?.state === "running" ? 2_000 : false,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === current?.attempt ? previous : undefined),
+  }).data;
+  const log = view?.log ?? "";
+  const turns = view?.turns ?? NO_TURNS;
 
   const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -468,6 +496,18 @@ export function BuildPanel({
                       <summary>Full log</summary>
                       <pre ref={logRef} className="build-log">
                         {log || "The worker wrote nothing."}
+                      </pre>
+                    </details>
+                  </>
+                ) : turns.length > 0 ? (
+                  // The worker's own turn reports, said readably; the raw
+                  // stream they came from stays one click away.
+                  <>
+                    <WorkerTurns turns={turns} />
+                    <details className="build-log-fold">
+                      <summary>Full log</summary>
+                      <pre ref={logRef} className="build-log">
+                        {log}
                       </pre>
                     </details>
                   </>
