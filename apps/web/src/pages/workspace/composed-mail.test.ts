@@ -9,7 +9,7 @@ describe("composedMailFold", () => {
 
   test("an opening folds behind one line naming its stage", () => {
     const fold = composedMailFold({ author: "me", subject: "[opening:proj_1:9] Deliver", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc" });
-    expect(fold).toEqual({ summary: "What stage 9 opened with", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc", lead: null });
+    expect(fold).toEqual({ summary: "What Deliver opened with", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc", lead: null });
   });
 
   test("a send-back cue shows its sentence and never its marker", () => {
