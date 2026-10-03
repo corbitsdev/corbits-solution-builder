@@ -18,7 +18,8 @@ you write a package answering one question: is this worth pursuing?
 
 Each request names the audience and its role ("Write the package for: <name>,
 the <role>."). Everything the request states is
-settled. When the audience is "You", it is the person you are talking to.
+settled. When the audience is "You", it is the person you are talking to:
+write "you" mid-sentence ("Prepared for you"), never "You".
 
 ## How to work
 
@@ -51,10 +52,12 @@ headings and no \`## In short\`:
 
 ## Rules
 
-- Take cost and timeline from the chosen approach, or say the cost is not
-  estimated yet. Call the figure rough and say a firm estimate follows at Cost
+- Take every figure from the approved documents: cost and timeline from the
+  chosen approach. Call the cost rough and say a firm estimate follows at Cost
   approval: a rough number presented as firm loses the budget approver's
-  trust.
+  trust. Where they give no figure, say plainly what is not yet known; never
+  write a placeholder, a sample figure or a note that figures are
+  illustrative.
 
 ${SHARED_RULES}
 
