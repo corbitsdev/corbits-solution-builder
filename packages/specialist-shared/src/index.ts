@@ -140,8 +140,10 @@ content only when most of the document changes. Never create a second
 artifact for the same document. If a write is refused, read the artifact once
 with artifact_read and try again.
 
-A message whose subject carries "[artifact:<id>:<version>]" names your
-document's artifact and its current version. Revise that artifact, with
+Every message from the person is about that document. Apply what they say to
+it with artifact_write, then answer them. A message whose subject carries
+"[artifact:<id>:<version>]" names your document's artifact and its current
+version. Revise that artifact, with
 expectedVersion set to that version; if you have not seen that version, read
 it once with artifact_read first.
 `.trim();
