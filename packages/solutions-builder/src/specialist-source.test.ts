@@ -72,12 +72,11 @@ describe("specialistDependencies", () => {
 });
 
 describe("specialistEntrySource", () => {
-  const entry = (stage: Stage, roleKey = "primary", artifactTools = false) =>
+  const entry = (stage: Stage, artifactTools = false) =>
     specialistEntrySource({
       stage,
       source: { provider: "openai", model: "gpt-5.5" },
       role: agentFor(stage),
-      roleKey,
       artifactTools,
     });
 
@@ -97,7 +96,7 @@ describe("specialistEntrySource", () => {
     expect(entry(9)).toContain('from "@solutions-builder/tools-delivery/sidecar-bundle"');
     expect(entry(9)).not.toContain("tools-deck");
 
-    expect(entry(2, "primary", true)).toContain('from "@corbits/artifacts/sidecar-bundle"');
+    expect(entry(2, true)).toContain('from "@corbits/artifacts/sidecar-bundle"');
   });
 
   // #41 step 3: who a package is for arrives with the request, so the
@@ -106,7 +105,7 @@ describe("specialistEntrySource", () => {
   // #41 step 4: what a document-writing specialist needs to know is its
   // stage and kind, fixed per role; the project is the run's own tenant.
   test("an entry with the artifact tools names its stage and kind, never a project", () => {
-    const stage2 = entry(2, "primary", true);
+    const stage2 = entry(2, true);
     expect(stage2).toContain("## Stage document");
     expect(stage2).toContain("stage 2 specialist");
     expect(stage2).toContain("`solution_constraints`");
@@ -119,9 +118,9 @@ describe("specialistEntrySource", () => {
   // binding is named for the role, so the same role renders the same entry
   // everywhere.
   test("a credential-bound entry names its binding for the role", () => {
-    expect(entry(2, "primary", true)).toContain('name: "workflow-artifacts:constraints-mapper"');
+    expect(entry(2, true)).toContain('name: "workflow-artifacts:constraints-mapper"');
     expect(entry(8)).not.toContain("publishWorkspaceTool");
-    expect(entry(8, "primary", true)).toContain('name: "workflow-artifacts:build-supervisor"');
+    expect(entry(8, true)).toContain('name: "workflow-artifacts:build-supervisor"');
   });
 
   test("stage 5's entry names no audience", () => {

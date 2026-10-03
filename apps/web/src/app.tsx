@@ -20,6 +20,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
@@ -81,12 +82,11 @@ function emptyUntilInstalled<T>(empty: T): (cause: unknown) => T {
  */
 async function loadHome() {
   const [status, providers] = await Promise.all([api.status(), api.providers()]);
-  const [decisions, projects, tenantId] = await Promise.all([
+  const [decisions, projects] = await Promise.all([
     api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
     api.projects().catch(emptyUntilInstalled({ projects: [] })),
-    api.workspaceTenantId(),
   ]);
-  return { status, providers, decisions: decisions.decisions, projects: projects.projects, tenantId };
+  return { status, providers, decisions: decisions.decisions, projects: projects.projects };
 }
 
 /** A 401/403 means the session cookie no longer holds (e.g. the host restarted): "not signed in", not "not answering". */
@@ -212,14 +212,11 @@ function StageStepper({
 }
 
 function stageSteps(stage: number): WorkflowStep[] {
-  return Array.from({ length: 9 }, (_, index) => {
-    const number = index + 1;
-    return {
-      number,
-      label: stageName(number),
-      status: number < stage ? "completed" : number === stage ? "current" : "pending",
-    };
-  });
+  return STAGES.map((number) => ({
+    number,
+    label: stageName(number),
+    status: number < stage ? "completed" : number === stage ? "current" : "pending",
+  }));
 }
 
 /**
@@ -476,9 +473,6 @@ export function App() {
   const providers = home.data?.providers.providers ?? NONE;
   const apiKeyProviders = home.data?.providers.apiKeyProviders ?? NONE;
   const oauthCandidates = home.data?.providers.oauthCandidates ?? NONE;
-  // Resolved once and threaded down as a prop: every artifact read goes
-  // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
-  const tenantId = home.data?.tenantId ?? null;
   // The host going away is a visible state, not a blank screen.
   const offline = home.error !== null && !signedOut(home.error);
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: keys.home }), [queryClient]);

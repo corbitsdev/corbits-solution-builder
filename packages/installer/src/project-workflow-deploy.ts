@@ -26,6 +26,7 @@ import { isProjectStateSnapshot, type ProjectState } from "@solutions-builder/ap
 import { assetsFor, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { isChatCapable } from "./resolved-catalog.js";
+import { normalizedProjectId } from "./specialist-deploy.js";
 import { treeDigest } from "./workflow-closure.js";
 import { visibleCatalog, type VisibleCatalog } from "./visible-catalog.js";
 import {
@@ -42,10 +43,6 @@ import {
   type SidecarCapability,
   type WorkflowGitPush,
 } from "./workflow-deploy.js";
-
-function normalizedProjectId(projectId: string): string {
-  return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-}
 
 /** `sb-project-<projectId>-workflow`, normalized the same way
  *  `specialistAssetName` is. */
@@ -73,7 +70,7 @@ function pickDeployment(deployments: readonly HubDeployment[]): HubDeployment | 
 
 /** A loop-iteration child run id looks like `<runId>__<stepId>__<n>`; only a
  *  bare id (no `__`) is a top-level run this deployment was triggered as. */
-function topLevelRunIds(runIds: readonly string[]): string[] {
+export function topLevelRunIds(runIds: readonly string[]): string[] {
   return runIds.filter((id) => !id.includes("__"));
 }
 
@@ -264,7 +261,8 @@ async function runFacts(
 /** One row of the reducer's ledger, as far as a replay needs to read it. */
 type LedgerRecord = { readonly decisionId: string; readonly accepted: boolean; readonly reason?: unknown; readonly kind?: unknown; readonly stage?: unknown };
 
-function decodeInlineOutput(ref: unknown): unknown {
+/** A step output's `inline:<json>` ref, decoded; `undefined` for any other ref. */
+export function decodeInlineOutput(ref: unknown): unknown {
   if (typeof ref !== "string" || !ref.startsWith("inline:")) return undefined;
   try {
     return JSON.parse(ref.slice("inline:".length));

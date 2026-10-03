@@ -497,7 +497,6 @@
 }
 
 /* ChatInput's toolbar row is the mock's .composer-foot: tools left, ink send right. */
-.composer .composer-foot,
 .composer .composer-box [data-slot="chat-input-footer"] {
   display: flex;
   flex-wrap: nowrap;
@@ -511,7 +510,6 @@
   width: 100%;
 }
 
-.composer .composer-tools,
 .composer .composer-box [data-slot="chat-input-tools"] {
   display: flex;
   align-items: center;
@@ -526,7 +524,6 @@
 
 /* Ink 30×30 send — never the library's primary fill. Stop is the same
    square, with destructive fill, not a separate pill. */
-.composer .sendbtn,
 .composer .composer-box [data-slot="chat-input-submit"],
 .composer .composer-box button[type="submit"] {
   margin-left: auto;
@@ -542,7 +539,6 @@
   box-shadow: none;
 }
 
-.composer .sendbtn.stop,
 .composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"],
 .composer .composer-box button[aria-label="Stop generating"] {
   margin-left: auto;
@@ -558,8 +554,6 @@
   box-shadow: none;
 }
 
-.composer .sendbtn:hover,
-.composer .sendbtn.stop:hover,
 .composer .composer-box [data-slot="chat-input-submit"]:hover:not(:disabled),
 .composer .composer-box button[type="submit"]:hover:not(:disabled),
 .composer .composer-box button[aria-label="Stop generating"]:hover {
@@ -567,13 +561,11 @@
   opacity: 0.85;
 }
 
-.composer .sendbtn.stop:hover,
 .composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"]:hover,
 .composer .composer-box button[aria-label="Stop generating"]:hover {
   background: var(--wb-destructive);
 }
 
-.composer .sendbtn.stop svg,
 .composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"] svg {
   stroke: none;
   fill: currentColor;

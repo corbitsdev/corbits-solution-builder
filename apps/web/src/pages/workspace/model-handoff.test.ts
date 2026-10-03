@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   HANDOFF_BUBBLE_TEXT,
   HANDOFF_CLOSE,
@@ -154,7 +152,6 @@ describe("withoutSwitchMarker", () => {
   });
 });
 
-
 // #105: a send-back cue must never be the first mail a redeployed specialist
 // gets -- the hand-off is, and the cue waits until it has landed.
 describe("handoffLanded and handoffPending", () => {
@@ -186,13 +183,6 @@ describe("handoffLanded and handoffPending", () => {
   test("nothing waits on a stage that was never redeployed, or before the thread has loaded", () => {
     expect(handoffPending({ address: NEW, addresses: [NEW], threadLoaded: true, messages: [head, reply] })).toBe(false);
     expect(handoffPending({ address: NEW, addresses: [OLD, NEW], threadLoaded: false, messages: [head, reply] })).toBe(false);
-  });
-
-  test("the send-back cue is gated on it, with the stage's addresses passed in", () => {
-    const dispatch = readFileSync(join(import.meta.dir, "use-opening-dispatch.ts"), "utf8");
-    expect(dispatch).toContain("if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;");
-    const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
-    expect(index).toMatch(/useOpeningDispatch\(\{[^}]*addresses: agent\.addresses,/s);
   });
 });
 

@@ -56,29 +56,6 @@ function fakeTransport(args: {
   } as Transport;
 }
 
-// #236: a deployment the hub is still restoring, or whose run has ended, is
-// not reused; the shared usability check decides, within the recovery wait.
-describe("ensureSpecialistDeployment reuse", () => {
-  test("reuses an existing deployment only when it is usable", async () => {
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
-    const block = source.slice(source.indexOf("const liveExisting = async"), source.indexOf("const existing = switchToOfferingId"));
-    // CL-9680: both checks carry the host's start, so a deployment from
-    // before it is stalled at once rather than waited on.
-    expect(block).toContain('await deploymentUsabilityFor(transport, tenantId, own.id, own.id, wait, sidecar)) === "usable"');
-    expect(block).toContain('await deploymentUsabilityFor(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar)) !== "usable"');
-    expect(block).not.toContain("deploymentIsLive(");
-  });
-
-  test("the re-check after the push adopts only a deployment this host can still place (CL-9698)", async () => {
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
-    const block = source.slice(source.indexOf("const justDeployed = await resolveLiveDeployment"), source.indexOf("const offeringIds = offerings.map"));
-    expect(block).toContain("deploymentPlaceableHere(justDeployed, sidecar)");
-    expect(source).not.toContain("deploymentIsLive(");
-  });
-});
-
 describe("stageSpecialistAddresses", () => {
   test("collects every deployment's address for the stage's asset, live and ended alike", async () => {
     const transport = fakeTransport({
@@ -217,7 +194,6 @@ describe("specialistEntryIsCurrent", () => {
     stage: 4,
     source: { provider: "openai", model: "gpt-5.5" },
     role,
-    roleKey: "primary",
     artifactTools: false,
   });
 
@@ -239,7 +215,7 @@ describe("specialistEntryIsCurrent", () => {
   }
 
   const check = (deployed: string | null) =>
-    specialistEntryIsCurrent(transportWithEntry(deployed), TENANT.id, "ast_1", 4, offering, false, "primary", role);
+    specialistEntryIsCurrent(transportWithEntry(deployed), TENANT.id, "ast_1", 4, offering, false, role);
 
   test("current when the deployed entry is what the kit renders today", async () => {
     expect(await check(rendered)).toBe(true);
@@ -292,5 +268,4 @@ describe("deploying into a project tenant", () => {
     const catalog = await visibleCatalog(transportWithParentCatalog(), PROJECT.id);
     expect(catalog.offerings.map((row) => row.id)).toEqual(["off_1"]);
   });
-
 });

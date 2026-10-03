@@ -636,7 +636,7 @@ export function AudiencePackages({
   }, [selected?.id, tenantId]);
 
   // The slides on screen, drawn from the same outline, design and style
-  // guide theme `saveSlides` builds the file from, so what is shown is what
+  // guide theme `exportSlides` builds the file from, so what is shown is what
   // would be saved (#95). The designs are read once, a role's theme once per
   // role; a theme that cannot be read falls back to the default look and
   // says so, the way the download does.

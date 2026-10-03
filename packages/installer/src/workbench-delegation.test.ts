@@ -6,7 +6,6 @@ import {
   delegateAtCreation,
   delegateMore,
   delegateWorkspaceDefaultsIfSealed,
-  delegationAudit,
   delegationResource,
   ensureDelegationGrants,
   isDelegationGrant,
@@ -210,15 +209,6 @@ describe("creation, audit and revocation", () => {
     expect(record.credentialIds).toEqual(["cred-shared", "cred-other"]);
     expect(record.grantIds).toHaveLength(2);
     expect(store.grants).toHaveLength(2);
-  });
-
-  test("audit shows the consent and its live grants", async () => {
-    const store = fakeStore();
-    await delegateAtCreation(store, { projectId: "project-a", delegatedCredentialIds: ["cred-shared"] });
-    const audit = await delegationAudit(store, "project-a");
-    expect(audit.consent?.credentialIds).toEqual(["cred-shared"]);
-    expect(audit.grants).toHaveLength(1);
-    expect(await delegationAudit(store, "project-never")).toEqual({ consent: null, grants: [] });
   });
 
   test("revocation deletes the grants and clears the record", async () => {

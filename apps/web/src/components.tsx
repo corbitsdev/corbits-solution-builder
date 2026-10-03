@@ -288,15 +288,7 @@ export function Mark({ size = 26 }: { size?: number }) {
  * In the bar it is laid out with everything else. Closed it still names the
  * next action, because a control that only says "help" is one nobody opens.
  */
-/**
- * Orientation from the Product guide, or the deterministic checklist.
- *
- * Field-for-field the `Guidance` type origin/main's client.ts exports. It is
- * declared here rather than imported as `import("./client.js").Guidance`
- * because CL-8492 deleted that export (with the explain panel and the
- * `api.guidance` endpoint), so naming it would fail typecheck. When the lane
- * converges back, this alias goes away and the import comes back.
- */
+/** Orientation from the Product guide, or the deterministic checklist. */
 export type GuideGuidance = {
   summary: string;
   readiness: "ready" | "not_ready" | "blocked";
@@ -372,12 +364,6 @@ export function GuideDock({
 }: {
   step: import("@solutions-builder/app/next-step").NextStep;
   onGo: (where: import("@solutions-builder/app/next-step").NextStep["where"]) => void;
-  // INTEGRATE (CL-8764): optional here, required on origin/main. CL-8492
-  // deleted the explain panel's backing (the `Guidance` type and the
-  // `api.guidance` endpoint in client.ts) and the app.tsx call site passes
-  // stage/step/at/onGo only, so required props would fail typecheck in files
-  // this lane may not touch. The panel body below is origin/main
-  // line-for-line; passing guidance + onExplain renders exactly as on main.
   onExplain?: () => void;
   guidance?: GuideGuidance | null;
   explaining?: boolean;

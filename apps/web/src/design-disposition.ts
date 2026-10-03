@@ -77,17 +77,6 @@ export function withDisposition<T extends DispositionEntry>(
 }
 
 /**
- * What a new design version does to existing feedback dispositions: nothing.
- * A version is a new artifact write on its own node — it never revises the
- * feedback array of the node(s) it was reviewed against, so this fold is the
- * identity function. Named and exported so that invariant is checked, not
- * assumed.
- */
-export function carryForwardFeedback<T extends DispositionEntry>(entries: readonly T[]): readonly T[] {
-  return entries;
-}
-
-/**
  * Gives every entry a stable id to render and key by, even a row written
  * before ids existed (a legacy `sb.feedback` entry has none). A fallen-back
  * id is positional, not persisted, and never matches a real id, so

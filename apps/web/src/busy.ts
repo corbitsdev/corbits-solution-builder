@@ -63,16 +63,6 @@ export function beginBusy(label?: string): () => void {
   };
 }
 
-/** The promise, counted as busy until it settles either way. */
-export async function trackBusy<T>(work: Promise<T>): Promise<T> {
-  const release = beginBusy();
-  try {
-    return await work;
-  } finally {
-    release();
-  }
-}
-
 /** Called with the new count on every change. Returns the unsubscribe. */
 export function subscribeBusy(listener: Listener): () => void {
   listeners.add(listener);
