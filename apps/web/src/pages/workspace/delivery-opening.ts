@@ -15,6 +15,7 @@
  * importing it, so the web bundle never pulls in `node:child_process`/
  * `node:fs` runtime code.
  */
+import { localTime } from "../../local-time.ts";
 
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
 
@@ -53,7 +54,7 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   }
   const verified = verification.items.filter((item) => item.status === "verified").length;
   const lines = [
-    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
+    `Verification recorded with the archive at ${localTime(verification.checkedAt)} (checked by the tool, not by a model): ${String(verified)} of ${String(verification.items.length)} checks verified; ${
       verification.report.complete ? "no required item failed" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];

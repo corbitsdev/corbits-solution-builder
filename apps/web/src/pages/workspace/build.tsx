@@ -38,6 +38,7 @@ import { appSubject, taggedSubject } from "./composed-mail.ts";
 import type { StageEvent } from "./stage-events.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
+import { localTime } from "../../local-time.ts";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
@@ -451,7 +452,7 @@ export function BuildPanel({
                       {entry.continuedFrom !== null ? ` (continued from ${String(entry.continuedFrom)})` : ""}
                       {" — "}
                       {mark.label}
-                      {entry.startedAt ? ` · ${new Date(entry.startedAt).toLocaleString()}` : ""}
+                      {entry.startedAt ? ` · ${localTime(entry.startedAt)}` : ""}
                     </span>
                   );
                 })}

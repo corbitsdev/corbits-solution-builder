@@ -16,6 +16,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import { localTime } from "../../local-time.ts";
 import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
@@ -172,7 +173,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
-    `- Ran from ${outcome.startedAt} to ${outcome.endedAt}.`,
+    `- Ran from ${localTime(outcome.startedAt)} to ${localTime(outcome.endedAt)}.`,
     `- The interface gives a final text and an exit status and nothing else: no session, steering or checkpoint exists.`,
     ``,
     `### Final text`,

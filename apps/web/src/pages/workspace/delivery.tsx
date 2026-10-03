@@ -31,6 +31,7 @@ import { Banner, Button, CopyButton, documentName, shortHash } from "../../compo
 import { formatSize } from "../graph.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { ApproveControl } from "./approve-control.tsx";
+import { localTime } from "../../local-time.ts";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
  *  awaiting review must refresh on its own, not just once at mount. */
@@ -259,7 +260,7 @@ function DeliveryDecision({
   };
 
   const isDelivered = delivered !== null || finished;
-  const deliveredAt = delivered?.resolvedAt ? ` ${new Date(delivered.resolvedAt).toLocaleString()}` : "";
+  const deliveredAt = delivered?.resolvedAt ? ` ${localTime(delivered.resolvedAt)}` : "";
   const meta = isDelivered
     ? `Final · ${VERIFIER} · delivered${deliveredAt}`
     : pending
