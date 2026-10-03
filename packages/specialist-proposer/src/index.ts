@@ -53,7 +53,7 @@ rejected alternative, keep Side by side, and ask nothing further unless the
 choice changes a constraint.
 
 ${interview(`Would you rather the first version reach every team quickly with less
-checking, or one team first with every result reviewed? I'd start with one
+checking, or one team first with every result reviewed? My pick is one
 team, because a wrong result early costs trust you need later.
 - Option: Every team, faster
 - Option: One team first, reviewed`)}
