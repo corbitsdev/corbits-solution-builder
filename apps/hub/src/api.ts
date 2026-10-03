@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { currentSession, HostError, resolveWorkspace } from "@corbits/embedded-host";
 import { registerHostRoutes, API_VERSION as HOST_API_VERSION } from "./api-host.js";
 import { registerBuildRoutes } from "./api-build.js";
+import { registerProjectTitleRoutes } from "./api-project-title.js";
 
 export const API_VERSION = HOST_API_VERSION;
 
@@ -31,6 +32,7 @@ export function createApi() {
 
   registerHostRoutes(api);
   registerBuildRoutes(api);
+  registerProjectTitleRoutes(api);
 
   // No fallback here to the hub: this app is only the host's own routes.
   // The runtime mounts the hub's own Hono app directly, at its own paths, so

@@ -72,6 +72,7 @@ import {
   type WsHandle,
 } from "@intx/hub-sessions";
 import { createProcessProvisioner, type ProcessProvisionerRole } from "./process-provisioner.js";
+import { createCompletion, type Completion, type CompletionRequest } from "./complete.js";
 import {
   createInMemoryMailboxEventBus,
   createMailboxPersist,
@@ -101,6 +102,7 @@ import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 const STAGE_DOCUMENT_MAX_CHARS = 1_000_000;
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
 export type { CallbackPageCopy };
+export { NoInferenceSourceError, type Completion, type CompletionRequest } from "./complete.js";
 export {
   mountGoogleDrive,
   type GoogleDriveDeps,
@@ -192,6 +194,11 @@ export type MountedHub = {
    * is the single point of decrypt for this material.
    */
   resolveCredentialSecret(tenantId: string, credentialId: string): Promise<string>;
+  /**
+   * One inference call outside any run, on the tenant's default offering
+   * (`complete.ts`). Throws `NoInferenceSourceError` when nothing is connected.
+   */
+  complete(request: CompletionRequest): Promise<Completion>;
   /** The hub's asset store; a workflow source tree is committed through it. */
   readonly assetService: ReturnType<typeof createAssetService>;
   /**
@@ -827,6 +834,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       }
       return material.secret;
     },
+    complete: createCompletion(db.db, credentialCipher),
     assetService,
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),

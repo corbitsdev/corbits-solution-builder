@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { titleFromProblem } from "./client.ts";
-import { foldProjectWorkflow } from "./project-workflow.ts";
+import { titleFromProblem, titleFromReply } from "./client.ts";
 
 describe("titleFromProblem", () => {
   test("takes the first clause, about five words", () => {
@@ -18,20 +17,15 @@ describe("titleFromProblem", () => {
   });
 });
 
-describe("foldProjectWorkflow's generatedTitle", () => {
-  const completed = (stepId: string, output: unknown) => ({
-    seq: 1,
-    type: "StepCompleted",
-    body: { stepId, attempt: 1, output: { ref: `inline:${JSON.stringify(output)}` } },
+describe("titleFromReply", () => {
+  test("strips quotes, a label and trailing punctuation", () => {
+    expect(titleFromReply('"Veterinary Appointment Reminder System."')).toBe("Veterinary Appointment Reminder System");
+    expect(titleFromReply("Title: Bakery Custom Order Tracker\n\nThis names the project.")).toBe("Bakery Custom Order Tracker");
   });
 
-  test("is the name step's trimmed reply", () => {
-    const view = foldProjectWorkflow([completed("name", { reply: "  Invoice Reconciliation  ", turn: {} })] as never, {});
-    expect(view.generatedTitle).toBe("Invoice Reconciliation");
-  });
-
-  test("is null before the step completes, and for a failure sentinel", () => {
-    expect(foldProjectWorkflow([], {}).generatedTitle).toBeNull();
-    expect(foldProjectWorkflow([completed("nameFailed", { failed: true })] as never, {}).generatedTitle).toBeNull();
+  test("is null outside three to eight words", () => {
+    expect(titleFromReply("Untitled Project")).toBeNull();
+    expect(titleFromReply("A Very Long Title That Goes On For Far Too Many Words")).toBeNull();
+    expect(titleFromReply("   ")).toBeNull();
   });
 });
