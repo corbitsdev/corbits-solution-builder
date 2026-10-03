@@ -669,6 +669,11 @@
   font-weight: 400;
 }
 
+.artifact-strip-tabs [role="tab"]:hover,
+.artifact-strip-tabs [role="tab"]:focus-visible {
+  max-width: none;
+}
+
 .artifact-strip-tabs [role="tab"] > span {
   display: inline-block;
   vertical-align: middle;
