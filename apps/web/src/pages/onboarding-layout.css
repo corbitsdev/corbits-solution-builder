@@ -361,24 +361,6 @@ html.light .ob-frame .ob-credit img {
   font-weight: 500;
 }
 
-.ob-frame .loading-line {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted-foreground);
-  padding: var(--space-3) var(--space-4);
-  animation: ob-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes ob-shimmer {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
 .ob-frame .orow .btn {
   padding: 5px 12px;
   font-size: 12.5px;
@@ -388,12 +370,6 @@ html.light .ob-frame .ob-credit img {
 .ob-frame .orow .btn:disabled {
   opacity: 0.55;
   cursor: default;
-}
-
-.ob-frame .field-row {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 2px;
 }
 
 .ob-frame .field {
@@ -591,11 +567,4 @@ html.light .ob-frame .ob-credit img {
 
 .ob .composer-box button[aria-label="Send message"]:hover:not(:disabled) {
   opacity: 0.85;
-}
-
-.ob .start-hint {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted-foreground);
 }
