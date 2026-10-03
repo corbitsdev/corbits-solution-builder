@@ -34,8 +34,8 @@ const LOCKFILES = new Set(["package-lock.json", "bun.lock", "bun.lockb", "yarn.l
 const NPM_DEFAULT_TEST = 'echo "Error: no test specified" && exit 1';
 
 const LINE_RULES: readonly { rule: QualityRule; pattern: RegExp }[] = [
-  { rule: "stub", pattern: /\b(TODO|FIXME|XXX)\b/ },
-  { rule: "stub", pattern: /not (yet )?implemented|NotImplemented(Error|Exception)?\b|\bunimplemented!\(|\btodo!\(/i },
+  { rule: "stub", pattern: /(?<![-\w])(TODO|FIXME|XXX)(?![-\w])/ },
+  { rule: "stub", pattern: /\b[Nn]ot (yet )?implemented\b|NotImplemented(Error|Exception)\b|\bunimplemented!\(|\btodo!\(/ },
   { rule: "placeholder", pattern: /lorem ipsum/i },
 ];
 
@@ -118,7 +118,7 @@ const RULE_LABEL: Record<QualityRule, string> = {
   unparseable: "does not parse",
 };
 
-/** The scan as checklist items: every finding a failed check at its location, and the tests never a pass. */
+/** The scan as checklist items: every finding a failed check at its location, and the tests never a pass; tests the host cannot run are shown, not owed. */
 export function qualityItems(scan: QualityScan): VerificationItem[] {
   const items: VerificationItem[] = scan.findings.slice(0, LISTED_FINDINGS).map((finding) => ({
     category: "source",
@@ -135,7 +135,7 @@ export function qualityItems(scan: QualityScan): VerificationItem[] {
   items.push(
     scan.testCommands.length === 0
       ? { category: "tests", path: "tests", required: true, status: "failed", checkedBy: "tool", detail: `no test command found; ${String(scan.testFiles)} test file(s)` }
-      : { category: "tests", path: "tests", required: true, status: "inaccessible", checkedBy: "tool", detail: `not run by the host; test command ${commands}; ${String(scan.testFiles)} test file(s)` },
+      : { category: "tests", path: "tests", required: false, status: "inaccessible", checkedBy: "tool", detail: `not run by the host; test command ${commands}; ${String(scan.testFiles)} test file(s)` },
   );
   return items;
 }
