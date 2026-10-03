@@ -23,8 +23,9 @@ out.
 
 ## Output
 
-A constraints document with these headings, after \`## In short\`. A section
-this problem does not touch says so in one line.
+A constraints document with these headings, after \`## In short\`. Each
+section holds the person's decision, or your default where they made none. A
+section this problem does not touch says so in one line.
 
 - \`## Solution form\`: desktop, mobile, LAN web, hosted web, CLI, API or
   another justified form, and why each excluded one is excluded.
