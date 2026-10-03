@@ -61,7 +61,7 @@ const DIGEST_PATH = "closure.sha256";
  *  path), never from this file. Removing it is deferred to the full slice. */
 const SOURCE_PIN_PATH = `${SPECIALIST_DIR}/source.json`;
 
-function normalizedProjectId(projectId: string): string {
+export function normalizedProjectId(projectId: string): string {
   return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 

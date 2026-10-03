@@ -9,7 +9,7 @@
  * `packages/solutions-builder/src/project-workflow/{workflow,contracts}.ts`.
  */
 import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
-import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
+import { decodeInlineOutput, workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
 import {
   approveReason,
   quorumState,
@@ -85,15 +85,6 @@ const EMPTY_STATE: ProjectState = {
   audienceDecisions: {},
   audiencePackages: {},
 };
-
-function decodeInlineOutput(ref: unknown): unknown {
-  if (typeof ref !== "string" || !ref.startsWith("inline:")) return undefined;
-  try {
-    return JSON.parse(ref.slice("inline:".length));
-  } catch {
-    return undefined;
-  }
-}
 
 function outputOf(events: readonly WorkflowRunEvent[], stepId: string): unknown {
   const completed = [...events].reverse().find((e) => e.type === "StepCompleted" && e.body["stepId"] === stepId);

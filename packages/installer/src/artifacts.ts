@@ -9,10 +9,7 @@
  * (`versions`).
  */
 import type { Transport } from "@intx/hub-client";
-
-function tenantPathFor(scope: string, rest: string): string {
-  return `/api/tenants/${scope}${rest}`;
-}
+import { tenantPathFor } from "./hub.js";
 
 export type Artifact = {
   id: string;

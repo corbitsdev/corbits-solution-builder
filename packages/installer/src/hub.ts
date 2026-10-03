@@ -43,7 +43,7 @@ export const WORKSPACE_SLUG = "solutions-builder";
 /** The tenant id workspaces carried before the hub owned identity. */
 export const LEGACY_TENANT_ID = "t_local";
 
-function tenantPathFor(scope: string, rest: string): string {
+export function tenantPathFor(scope: string, rest: string): string {
   return `/api/tenants/${scope}${rest}`;
 }
 

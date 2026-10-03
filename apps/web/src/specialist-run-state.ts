@@ -63,11 +63,6 @@ export function newestRun(runs: readonly SpecialistRun[]): SpecialistRun {
   return best ?? UNKNOWN_RUN;
 }
 
-/** A deployment's top-level run ids: those with no `__` iteration suffix. */
-export function topLevelRunIds(runIds: readonly string[]): string[] {
-  return runIds.filter((id) => !id.includes("__"));
-}
-
 /**
  * Whether the chat shows the specialist as working. The run's word first:
  * working is working. Parked or ended, the person's newest turn still
