@@ -126,9 +126,9 @@ describe("the Product guide", () => {
   test("the request carries each live version's content and the recorded decisions", () => {
     const prompt = guidancePrompt(context, [{ id: "n1", title: "Problem brief", stage: 1, content: "Four hours every Friday." }]);
     expect(prompt).toContain("Project: Invoice reconciliation");
-    expect(prompt).toContain("Current stage: 2 of 9. Run state: waiting_approval.");
-    expect(prompt).toContain("--- VERSION n1 — Problem brief (stage 1) ---\nFour hours every Friday.");
-    expect(prompt).toContain("Recorded decisions: stage 1 approve");
+    expect(prompt).toContain("Current stage: Solution shape. Run state: waiting_approval.");
+    expect(prompt).toContain("--- VERSION n1 — Problem brief (Problem discovery) ---\nFour hours every Friday.");
+    expect(prompt).toContain("Recorded decisions: Problem discovery approve");
     expect(prompt).not.toContain("stale_review");
   });
 

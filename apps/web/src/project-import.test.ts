@@ -84,7 +84,7 @@ describe("importPlan", () => {
     const plan = importPlan(bundle(), "proj_new");
     expect(plan.conversations).toHaveLength(1);
     const write = plan.conversations[0]!;
-    expect(write.title).toBe("Stage 1 conversation (imported)");
+    expect(write.title).toBe("Problem discovery conversation (imported)");
     expect(write.sb).toMatchObject({ projectId: "proj_new", kind: IMPORTED_CONVERSATION_KIND, stage: 1 });
     expect(write.content).toContain("What's the deadline?");
     expect(write.content).toContain("End of quarter.");
@@ -126,7 +126,7 @@ describe("importProject", () => {
         onProgress: (done, total) => progress.push([done, total]),
       }),
     );
-    expect(writes).toEqual(["Stage 1 draft", "Stage 1 conversation (imported)"]);
+    expect(writes).toEqual(["Stage 1 draft", "Problem discovery conversation (imported)"]);
     expect(progress).toEqual([[1, 2], [2, 2]]);
   });
 });

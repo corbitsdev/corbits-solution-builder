@@ -36,7 +36,7 @@ export function stageEvents(
   const out: StageEvent[] = [];
   const approved = (decision: DecisionRecord): string => {
     const node = decision.artifactId ? nodeOf.get(decision.artifactId) : undefined;
-    if (!node) return `The owner approved stage ${String(stage)}`;
+    if (!node) return `The owner approved ${stageName(stage)}`;
     return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.position ?? decision.version ?? 1)}`;
   };
   const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
