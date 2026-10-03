@@ -25,7 +25,6 @@ import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
-  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
@@ -66,7 +65,6 @@ import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
-import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { clearQuotedDraft, loadQuotedDraft } from "./quote-store.js";
@@ -698,8 +696,9 @@ export function StageWorkspace({
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
-      // Another tab may already have sent these notes.
-      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      // One round per stage, read from the stage's own thread: notes sent on
+      // an earlier draft's subject, or by another tab, stand this down.
+      if ((await api.readStageThread(tenantId, [...agent.addresses])).some(isEvaluatorNotes)) return;
       // Their own mail, not the person's: the notes' tag leads the subject
       // and the stage document's artifact tag rides after it.
       await api.sendStageMail(tenantId, agentAddress, {
