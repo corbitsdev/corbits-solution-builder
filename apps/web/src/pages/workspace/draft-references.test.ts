@@ -29,6 +29,7 @@ function node(id: string, version: number, createdAt: string): ArtifactNode {
     stage: 1,
     title: "Problem brief",
     version,
+    position: version,
     artifactId: "art_1",
     contentHash: `art_1@${version}`,
     createdAt,
