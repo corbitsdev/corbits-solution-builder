@@ -1243,7 +1243,8 @@ export function StageWorkspace({
           latestReply={latestSpecialistMessage}
           onAccept={acceptDelivery}
           onRejectSendBack={() => void sendBack(8)}
-          panes={panesWith}
+          // A finished project has nothing left to approve.
+          panes={(row, pane) => panesWith(workflowView?.done ? null : row, pane)}
         />
       ) : null}
     </div>
