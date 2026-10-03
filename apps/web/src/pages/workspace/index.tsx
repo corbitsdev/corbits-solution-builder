@@ -19,7 +19,6 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { OPENING_VARIANT } from "../../project-list.ts";
 import {
   api,
   ApiFailure,
@@ -215,11 +214,7 @@ export function StageWorkspace({
   // concurrently with `ensureProjectWorkflow`'s own ensure/poll cycle
   // instead of serially after it, without ever guessing a stage for a
   // project with history.
-  // A workflow at stage 0 has not written its first state: nothing is confirmed yet.
-  // The opening statement `createProject` writes is no stage work, so a
-  // brand-new project still starts its specialist early.
-  const noStageWork = detail.nodes.every((node) => node.variant === OPENING_VARIANT);
-  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && noStageWork) ? detail.stage : null;
+  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && detail.nodes.length === 0) ? detail.stage : null;
 
   const agent = useStageAgent(detail.project.id, stage, workflowResolved, confirmedStage);
   const agentAddress = agent.address;
