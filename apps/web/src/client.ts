@@ -2083,6 +2083,26 @@ export const api = {
    * already return, so every reader downstream (inline preview, download)
    * stays on one code path.
    */
+  /**
+   * The document a drafting stage's specialist keeps with the artifact tools:
+   * the newest artifact of the stage's kind that a workflow run wrote in the
+   * project's tenant. Null when there is none yet. A read that fails throws,
+   * so the workspace can say the document is unavailable rather than fall
+   * back to an older draft.
+   */
+  stageWorkArtifact: async (
+    tenantId: string,
+    kind: string,
+  ): Promise<{ id: string; version: number; content: string; updatedAt: string } | null> => {
+    const transport = createHubTransport();
+    const written = (await listArtifacts(transport, tenantId, { kind }))
+      .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+    if (!written) return null;
+    const artifact = await installerGetArtifact(transport, tenantId, written.id);
+    if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
+    return { id: artifact.id, version: artifact.version, content: artifact.content, updatedAt: artifact.updatedAt };
+  },
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
@@ -2263,11 +2283,6 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // No hub credential binding: a stage 8 deployed with one never
-        // produced a run, while every unbound stage does. Nothing needs it
-        // now — the build runs on the host and the archive is recorded by
-        // the build panel, not uploaded from a sidecar.
-        false,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2303,7 +2318,6 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
-        false,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2344,7 +2358,6 @@ export const api = {
         projectId,
         1 as Stage,
         specialistHubOrigin(),
-        false,
         BRIEF_EVALUATOR_ROLE_KEY,
         await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
       );
@@ -2385,7 +2398,6 @@ export const api = {
         projectId,
         1 as Stage,
         specialistHubOrigin(),
-        false,
         PRODUCT_GUIDE_ROLE_KEY,
         await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE),
       );
@@ -2429,7 +2441,6 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        false,
         roleKey,
         await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey)),
       );

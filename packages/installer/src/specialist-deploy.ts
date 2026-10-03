@@ -19,6 +19,7 @@ import {
   specialistDependencies,
   specialistEntrySource,
   specialistTooling,
+  stageUsesArtifactTools,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
@@ -496,7 +497,6 @@ async function ensureSpecialistDeploymentOnce(
   projectId: string,
   stage: Stage,
   hubOrigin: string,
-  artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
   /** CL-8899 "Switch model": when set, names the offering the new deployment
@@ -511,6 +511,9 @@ async function ensureSpecialistDeploymentOnce(
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
   }
+  // Only a drafting stage's own specialist writes its document with the
+  // artifact tools, so only it is bound the hub credential they need.
+  const artifactTools = roleKey === DEFAULT_ROLE_KEY && stageUsesArtifactTools(stage);
 
   // The project's own tenant is where this deploys (#29): the hub then
   // enforces the owner's delegation choice on every offering the chain
@@ -609,7 +612,6 @@ async function ensureSpecialistDeploymentOnce(
       projectId,
       stage,
       hubOrigin,
-      artifactTools,
       roleKey,
       role,
       leading.id,
@@ -731,9 +733,6 @@ export async function ensureSpecialistDeployment(
   projectId: string,
   stage: Stage,
   hubOrigin: string,
-  /** CL-8719: opt-in, default off -- see `specialist-source.ts`'s
-   *  `SpecialistSourceOptions.artifactTools`. */
-  artifactTools = false,
   /** Which of the stage's roles to deploy -- default is the primary
    *  per-stage agent, whose asset name this keeps byte-identical to before
    *  roles existed (`DEFAULT_ROLE_KEY`, `specialistAssetName`). */
@@ -755,7 +754,6 @@ export async function ensureSpecialistDeployment(
       projectId,
       stage,
       hubOrigin,
-      artifactTools,
       roleKey,
       role,
       undefined,
@@ -829,7 +827,6 @@ export async function switchSpecialistDeployment(
   stage: Stage,
   hubOrigin: string,
   offeringId: string,
-  artifactTools = false,
   roleKey: string = DEFAULT_ROLE_KEY,
   role: AgentRole = agentFor(stage),
 ): Promise<SpecialistDeployment> {
@@ -854,7 +851,6 @@ export async function switchSpecialistDeployment(
         projectId,
         stage,
         hubOrigin,
-        artifactTools,
         roleKey,
         role,
         offeringId,

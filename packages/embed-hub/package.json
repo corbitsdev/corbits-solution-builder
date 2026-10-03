@@ -9,7 +9,7 @@
     "./pg-compat": "./src/pg-compat.ts"
   },
   "dependencies": {
-    "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
+    "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#0e0e17518ed3c49ebcfff8c2599d094e320250ab",
     "@corbits/codex-provider": "^0.1.2",
     "@corbits/mailbox": "github:corbitsdev/corbits-mailbox#8289024",
     "@corbits/oauth-core": "^0.2.0",

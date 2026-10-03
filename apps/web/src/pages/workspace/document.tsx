@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { withChoiceReminder } from "@solutions-builder/app/stage-prompt";
 import {
   api,
   type ArtifactNode,
@@ -507,7 +506,7 @@ export function StageDocument({
                     variant="primary"
                     disabled={busy !== null}
                     onClick={() =>
-                      onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
+                      onRevise(`Chosen: Approach ${letter} (${name}).`, [], true)
                     }
                   >
                     {name}

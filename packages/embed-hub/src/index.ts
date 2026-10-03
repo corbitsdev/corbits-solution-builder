@@ -93,6 +93,9 @@ import {
 import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
+
+/** The longest stage document a specialist may write with the artifact tools. */
+const STAGE_DOCUMENT_MAX_CHARS = 1_000_000;
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
 export type { CallbackPageCopy };
 export {
@@ -752,6 +755,9 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     db: artifactDb,
     contentStore: InlineContentStore,
     resolveRunScope: resolveWorkflowArtifactRunScope,
+    // A stage's whole document is written this way: a build plan or a
+    // design runs past the package's 64,000-character default.
+    maxContentChars: STAGE_DOCUMENT_MAX_CHARS,
   });
   app.route("/api/workflow-artifacts", workflowArtifactsApi);
 
