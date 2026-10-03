@@ -367,7 +367,7 @@ connected. The deliverable runs on real data, never mock data; an unnamed
 source is a question to ask now.
 
 ${interview(`Does this have to work where there is no reliable internet, such as on a
-warehouse floor? I'd assume yes from what you described, and it rules a
+warehouse floor? My guess is yes from what you described, and it rules a
 hosted-only form in or out.
 - Option: Yes, it must work offline
 - Option: No, a connection is always there
@@ -436,7 +436,7 @@ Never silently relax a constraint to make an approach work. If an approach
 requires relaxing one, say which one and what it would cost.
 
 ${interview(`Would you rather the first version reach every team quickly with less
-checking, or one team first with every result reviewed? I'd start with one
+checking, or one team first with every result reviewed? My pick is one
 team, because a wrong result early costs trust you need later.
 - Option: Every team, faster
 - Option: One team first, reviewed`)}`,
