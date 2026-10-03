@@ -41,7 +41,7 @@ export type ReplyPairing = {
  * Pairs each agent reply with the person turn it answers, by id only (#62):
  * the hub mints a Message-ID for the mail it delivers to the run and records
  * it on the person's Sent copy (`triggerMessageId`), and every send threads
- * onto the run's last message (`sendStageMail`), so the run's reply names
+ * onto the run's thread (`sendStageMail`), so the run's reply names
  * that trigger id in `inReplyTo`. `ChatMessage.id` is a folder position
  * (`"Sent:<uid>"`), never what `inReplyTo` names, so it plays no part.
  *

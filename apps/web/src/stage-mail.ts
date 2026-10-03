@@ -17,9 +17,6 @@ export type ChatMessage = {
    *  `[opening:<project>:<stage>]` marker here (`use-opening-dispatch.ts`),
    *  which is how the transcript knows to fold the body. */
   readonly subject?: string;
-  /** The mail's own RFC Message-ID. Absent on a turn imported from a
-   *  legacy transcript, which was never mail. */
-  readonly messageId?: string;
   /** An agent reply: the RFC Message-ID it answers. */
   readonly inReplyTo?: string;
   /** A person turn the hub accepted as a trigger: the Message-ID the hub
@@ -187,7 +184,6 @@ async function readFolder(
         author: folder === "Sent" ? ("me" as const) : ("agent" as const),
         body: frameBody(message.raw),
         at: message.envelope.date,
-        messageId: message.envelope.messageId,
         ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
         ...(message.envelope.inReplyTo !== undefined
           ? { inReplyTo: message.envelope.inReplyTo }
@@ -217,28 +213,25 @@ export async function readStageThread(
 }
 
 /**
- * The Message-ID the specialist's run last saw on this thread: its latest
- * reply, or the latest turn it accepted as a trigger. That is the run's
- * connector `lastMessageId`, so a send naming it in `In-Reply-To` continues
- * the run's thread and its reply names that send's trigger id (#62).
+ * The run's thread root: the trigger id of the first mail it was sent. Named
+ * in `In-Reply-To`, it lands in `References`, on which the run's connector
+ * continues its thread whatever its last Message-ID is by the time it takes
+ * the mail, so a turn sent while another is still being answered is paired
+ * by id too (#62).
  */
-function threadTip(thread: readonly ChatMessage[]): string | undefined {
-  for (const message of [...thread].reverse()) {
-    const id = message.author === "agent" ? message.messageId : message.triggerMessageId;
-    if (id !== undefined) return id;
-  }
-  return undefined;
+function threadRoot(thread: readonly ChatMessage[]): string | undefined {
+  return thread.find((message) => message.author === "me")?.triggerMessageId;
 }
 
 /** Sends (or replies in) a stage conversation: the same send seam a
  * workbench chat uses, scoped to the stage agent's current address and
- * threaded onto what that address last saw. */
+ * threaded onto its run's thread. */
 export async function sendStageMail(
   tenantId: string,
   agentAddress: string,
   input: { readonly body: string; readonly subject?: string },
 ): Promise<void> {
-  const inReplyTo = threadTip(await readStageThread(tenantId, [agentAddress]));
+  const inReplyTo = threadRoot(await readStageThread(tenantId, [agentAddress]));
   await createHubTransport().fetch("POST", `${mailboxPath(tenantId)}/send`, {
     to: [agentAddress],
     subject: input.subject ?? input.body.slice(0, 60),
