@@ -62,17 +62,17 @@ describe("cardDescription", () => {
 
 describe("stageTrackSegClass", () => {
   test("nine segments: prior done, current now, rest empty", () => {
-    const segs = Array.from({ length: 9 }, (_, i) => stageTrackSegClass(i + 1, 3, false));
+    const segs = Array.from({ length: 9 }, (_, i) => stageTrackSegClass(i + 1, 3, false, []));
     expect(segs).toEqual(["seg done", "seg done", "seg now", "seg", "seg", "seg", "seg", "seg", "seg"]);
   });
 
   test("a delivered project fills through the current stage", () => {
-    const segs = Array.from({ length: 9 }, (_, i) => stageTrackSegClass(i + 1, 9, true));
+    const segs = Array.from({ length: 9 }, (_, i) => stageTrackSegClass(i + 1, 9, true, []));
     expect(segs.every((cls) => cls === "seg done")).toBe(true);
   });
 
   test("an unread workflow does not invent a current segment", () => {
-    expect(stageTrackSegClass(1, null, false)).toBe("seg");
+    expect(stageTrackSegClass(1, null, false, [])).toBe("seg");
   });
 });
 

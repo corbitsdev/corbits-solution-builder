@@ -280,6 +280,7 @@ function ProjectCard({
   });
   const stage = workflow.data && workflow.data.stage >= 1 ? workflow.data.stage : null;
   const done = workflow.data?.done ?? false;
+  const skipped = workflow.data?.skipped ?? [];
   const stageFailed = workflow.isError;
   // The summary turn is only "writing"|"idle", so the card reads whose turn it
   // is off the current stage's mail thread. Never for an archived project or
@@ -414,7 +415,7 @@ function ProjectCard({
 
       <p className="card-desc">{cardDescription(project)}</p>
 
-      <StageTrack stage={stage} done={done} />
+      <StageTrack stage={stage} done={done} skipped={skipped} />
 
       <div className="card-foot">
         <span>
@@ -442,11 +443,11 @@ function ProjectCard({
 }
 
 /** The same nine-segment language the topbar stepper speaks, one per card. */
-function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
+function StageTrack({ stage, done, skipped }: { stage: number | null; done: boolean; skipped: readonly number[] }) {
   return (
     <div className="card-track" role="img" aria-label={stage ? `Progress: ${stageName(stage)}` : "Progress unknown"}>
       {STAGES.map((at) => (
-        <span key={at} className={stageTrackSegClass(at, stage, done)} />
+        <span key={at} className={stageTrackSegClass(at, stage, done, skipped)} />
       ))}
     </div>
   );
