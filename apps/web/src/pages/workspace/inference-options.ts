@@ -1,12 +1,11 @@
 /**
  * The Inference picker on a stage: the same provider-and-model rows Settings
- * lists, in the same order. Choosing one is the same as dragging that row to
- * the top there -- it becomes the default -- and this stage switches onto it.
+ * lists, in the same order. Choosing one switches this stage onto it and
+ * nothing else: the primary in Settings is unchanged.
  */
 import type { Provider } from "../../client.ts";
 
 export type InferenceOption = {
-  /** The model-provider row id, what `reorderProviders` orders by. */
   readonly providerRowId: string;
   readonly providerLabel: string;
   readonly model: string;
@@ -41,7 +40,11 @@ export function currentInference(
   return options.find((option) => option.providerLabel === active.providerLabel && option.model === active.canonicalName) ?? null;
 }
 
-/** The settings order with `chosen` moved to the top. */
-export function orderLeadingWith(providers: readonly Provider[], chosen: string): string[] {
-  return [chosen, ...providers.map((provider) => provider.id).filter((id) => id !== chosen)];
+/** Whether no connected provider serves the model the stage runs: the one it was deployed on has been removed. */
+export function inferenceRemoved(
+  active: { readonly canonicalName: string } | null,
+  providers: readonly Provider[] | null,
+): boolean {
+  if (!active || !providers) return false;
+  return !providers.some((provider) => provider.models.includes(active.canonicalName));
 }
