@@ -34,6 +34,7 @@ import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, roleLabel, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
 import type { ProjectWorkflowView } from "../project-workflow.ts";
@@ -422,7 +423,7 @@ export function AudiencePackages({
   // The approved stage 4 design, read once per approved version: its
   // screens fill every deck's slides as decorative filler (#227), on screen
   // and in the file alike. Only an HTML mockup has screens to draw.
-  const designRef = workflowView?.reviews[4]?.status === "approved" ? workflowView.reviews[4].artifactId : null;
+  const designRef = workflowView?.reviews[4]?.status === "approved" ? versionIdFor(workflowView.reviews[4].artifactId, workflowView.reviews[4].version) : null;
   const [designHtml, setDesignHtml] = useState<string | null>(null);
   useEffect(() => {
     if (!designRef) {
@@ -472,7 +473,7 @@ export function AudiencePackages({
     const designReview = workflowView?.reviews[4];
     const design =
       designReview?.status === "approved"
-        ? await api.artifactContent(tenantId, designReview.artifactId).then((result) => result.content, () => null)
+        ? await api.artifactContent(tenantId, versionIdFor(designReview.artifactId, designReview.version)).then((result) => result.content, () => null)
         : null;
     // The deck's brief (#246): the design documents that apply to this
     // project and the theme render_deck should draw with. Best effort — a

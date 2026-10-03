@@ -627,7 +627,7 @@ export function StageWorkspace({
     projectId: detail.project.id,
     projectTitle: detail.project.title,
     audiences: ((detail.project.policy ?? {}) as { audiences?: { name: string; role: string }[] }).audiences ?? [],
-    designRef: designReview?.status === "approved" ? designReview.artifactId : null,
+    designRef: designReview?.status === "approved" ? versionIdFor(designReview.artifactId, designReview.version) : null,
     content: artifacts.activeContent,
   });
   // The reader's own send-back (#248): a confirm beside its button, naming
