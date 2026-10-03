@@ -196,7 +196,8 @@ export function StageWorkspace({
   // concurrently with `ensureProjectWorkflow`'s own ensure/poll cycle
   // instead of serially after it, without ever guessing a stage for a
   // project with history.
-  const confirmedStage = detail.stage > 1 || detail.nodes.length === 0 ? detail.stage : null;
+  // A workflow at stage 0 has not written its first state: nothing is confirmed yet.
+  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && detail.nodes.length === 0) ? detail.stage : null;
 
   const agent = useStageAgent(detail.project.id, stage, workflowResolved, confirmedStage);
   const agentAddress = agent.address;
@@ -265,10 +266,6 @@ export function StageWorkspace({
   // so a reply Stop hid can never surface as the latest turn, the draft, or
   // the open question (CL-8695).
   const latestSpecialistMessage = [...foldedMessages].reverse().find((message) => message.author === "agent") ?? null;
-  // Mail has no separate draft record before approval. Keep a substantial
-  // draft separate from the latest conversational turn so an acknowledgement
-  // or a follow-up question never replaces the document being reviewed.
-  const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
   // A drafting stage with artifact tools keeps its document in an artifact
   // the specialist writes; the host reads the newest one of the stage's kind
   // rather than trusting what the reply says it wrote. It is read again when
@@ -296,6 +293,11 @@ export function StageWorkspace({
     if (workQuery.data === undefined) return null;
     return workQuery.data ? { state: "ready", artifact: workQuery.data } : { state: "none" };
   }, [workQuery.error, workQuery.data]);
+  const documented = work?.state === "ready";
+  // Mail has no separate draft record before approval. Keep a substantial
+  // draft separate from the latest conversational turn so an acknowledgement
+  // or a follow-up question never replaces the document being reviewed.
+  const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages, documented), [stage, foldedMessages, documented]);
   // The stage 3 choice (#430) and the stage 6 Stack block (#437) are
   // repaired in the document itself, as its next version, so the pane, the
   // review and the approval all name a version that holds the repair.
@@ -785,7 +787,7 @@ export function StageWorkspace({
     openingDraftNode && openingDraftContent !== null
       ? { title: openingDraftNode.title, version: openingDraftNode.version, content: openingDraftContent }
       : null;
-  const openingWho = agentFor(openingStage as Stage).title.toLowerCase();
+  const openingWho = openingStage >= 1 ? agentFor(openingStage as Stage).title.toLowerCase() : "specialist";
 
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
@@ -970,7 +972,9 @@ export function StageWorkspace({
               }}
               onSubmit={() => void approve()}
               soloApproval={detail.soloApproval}
-              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+              // A settled version with no reply in flight can be approved while
+              // its review is still opening: approving opens one itself.
+              canSubmit={(approveAllowed || reviewMessage !== null) && artifacts.isStageDraft && !superseded}
               targetPending={stage === 3 && chosenTarget === null}
               busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
               draftOpen={draftOpen}

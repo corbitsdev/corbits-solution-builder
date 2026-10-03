@@ -162,10 +162,11 @@ export function evaluatorVerdict(messages: readonly ChatMessage[]): EvaluatorVer
 }
 
 /**
- * A read-only projection from the mail thread. It intentionally never infers
- * whether a stage is approved, progressing, or complete.
+ * A read-only projection from the mail thread and whether the stage holds a
+ * document version. It intentionally never infers whether a stage is
+ * approved, progressing, or complete.
  */
-export function workspaceGuidance(stage: number, messages: readonly ChatMessage[]): WorkspaceGuidance {
+export function workspaceGuidance(stage: number, messages: readonly ChatMessage[], documented = false): WorkspaceGuidance {
   const purpose = PURPOSE[stage] ?? "Review the available evidence and identify the next human decision.";
   const latest = latestAgent(messages);
   const draft = latestSubstantialDraft(messages);
@@ -180,7 +181,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
       readyNote: null,
     };
   }
-  if (draft) {
+  if (draft || documented) {
     return {
       title: "Review the current draft",
       detail: [purpose, "The latest draft is beside the conversation. If something is wrong, say so in the conversation and a new version comes back."].join(" "),
@@ -191,8 +192,8 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   }
   if (latest) {
     return {
-      title: "A reply needs clarification",
-      detail: [purpose, "A specialist reply is recorded, but it does not read as a complete draft yet. Ask for the complete stage draft, or add the missing detail."].join(" "),
+      title: "The specialist replied",
+      detail: [purpose, "Read the reply in the conversation and answer it there."].join(" "),
       question: null,
       draft: null,
       readyNote: null,
