@@ -154,8 +154,7 @@ export function ZenGarden() {
   const seconds = useSecondsSince(visible ? since : null);
   const still = useReducedMotion();
   const size = useStripHeight();
-  const shown = useZenGarden();
-  if (!shown) return null;
+  if (useZenGarden() === "off") return null;
   return (
     <div
       className="zen-garden"
@@ -211,8 +210,7 @@ export function ZenGarden() {
 export function BusyLine() {
   const { visible, since, label } = useBusyIndicator();
   const seconds = useSecondsSince(visible ? since : null);
-  const garden = useZenGarden();
-  if (garden || !visible) return null;
+  if (useZenGarden() === "on" || !visible) return null;
   return (
     <p className="busy-line" role="status" aria-live="polite">
       <span className="thinking">{label ?? "Working…"}</span>{" "}

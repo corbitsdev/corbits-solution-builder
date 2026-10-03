@@ -1,52 +1,20 @@
 /**
  * Whether the zen garden shows while the interface works. On unless the
  * person turns it off in Settings; when off, the same live activity shows
- * as one line in the workspace's composer instead. Kept in this browser's
- * storage, like the strip's height: a preference for this window.
+ * as one line in the workspace's composer instead.
  */
-import { useSyncExternalStore } from "react";
+import { useStoredPreference, writeStoredPreference } from "./stored-preference.ts";
 
-export const ZEN_GARDEN_KEY = "solutions-builder-zen-garden";
+const ZEN_GARDEN_KEY = "solutions-builder-zen-garden";
 
-const listeners = new Set<() => void>();
-let current: boolean | null = null;
+export type ZenGardenChoice = "on" | "off";
 
-export function readZenGarden(): boolean {
-  if (current === null) {
-    try {
-      current = localStorage.getItem(ZEN_GARDEN_KEY) !== "off";
-    } catch {
-      current = true;
-    }
-  }
-  return current;
+const parseZenGarden = (raw: string): ZenGardenChoice | null => (raw === "on" || raw === "off" ? raw : null);
+
+export function useZenGarden(): ZenGardenChoice {
+  return useStoredPreference(ZEN_GARDEN_KEY, parseZenGarden, "on");
 }
 
-export function writeZenGarden(on: boolean): void {
-  current = on;
-  try {
-    if (on) localStorage.removeItem(ZEN_GARDEN_KEY);
-    else localStorage.setItem(ZEN_GARDEN_KEY, "off");
-  } catch {
-    // Blocked storage: the choice still holds until the window closes.
-  }
-  for (const listener of listeners) listener();
-}
-
-function subscribe(listener: () => void): () => void {
-  // Another window changed it: read it again.
-  const onStorage = () => {
-    current = null;
-    listener();
-  };
-  listeners.add(listener);
-  window.addEventListener("storage", onStorage);
-  return () => {
-    listeners.delete(listener);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-export function useZenGarden(): boolean {
-  return useSyncExternalStore(subscribe, readZenGarden, () => true);
+export function writeZenGarden(choice: ZenGardenChoice): void {
+  writeStoredPreference(ZEN_GARDEN_KEY, choice);
 }

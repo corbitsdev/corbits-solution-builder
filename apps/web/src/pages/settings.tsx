@@ -33,7 +33,7 @@ import {
 import { Banner, StateLabel } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
-import { useZenGarden, writeZenGarden } from "../zen-garden-setting.ts";
+import { useZenGarden, writeZenGarden, type ZenGardenChoice } from "../zen-garden-setting.ts";
 import { DesignDocumentsList } from "./design-documents.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 import "./settings-layout.css";
@@ -283,10 +283,10 @@ function Appearance() {
           />
         </Row>
         <Row label="Show the zen garden while waiting" hint="Off, what is happening shows as one line above the message box.">
-          <SegCtl<"on" | "off">
+          <SegCtl<ZenGardenChoice>
             label="Show the zen garden while waiting"
-            value={zenGarden ? "on" : "off"}
-            onChange={(value) => writeZenGarden(value === "on")}
+            value={zenGarden}
+            onChange={writeZenGarden}
             options={[
               { id: "on", label: "On" },
               { id: "off", label: "Off" },
