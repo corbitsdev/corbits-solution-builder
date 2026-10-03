@@ -10,7 +10,7 @@ function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     kind: "problem_brief",
     variant: null,
     stage: 1,
-    title: "Stage 1 draft",
+    title: "Problem discovery draft",
     version: 1,
     artifactId: "art_1",
     contentHash: "node_1@1",
@@ -61,7 +61,7 @@ describe("importPlan", () => {
     const plan = importPlan(bundle(), "proj_new");
     expect(plan.artifacts).toHaveLength(1);
     const write = plan.artifacts[0]!;
-    expect(write.title).toBe("Stage 1 draft");
+    expect(write.title).toBe("Problem discovery draft");
     expect(write.content).toBe("the brief");
     expect(write.sb).toEqual({
       projectId: "proj_new",
@@ -84,7 +84,7 @@ describe("importPlan", () => {
     const plan = importPlan(bundle(), "proj_new");
     expect(plan.conversations).toHaveLength(1);
     const write = plan.conversations[0]!;
-    expect(write.title).toBe("Stage 1 conversation (imported)");
+    expect(write.title).toBe("Problem discovery conversation (imported)");
     expect(write.sb).toMatchObject({ projectId: "proj_new", kind: IMPORTED_CONVERSATION_KIND, stage: 1 });
     expect(write.content).toContain("What's the deadline?");
     expect(write.content).toContain("End of quarter.");
@@ -126,7 +126,7 @@ describe("importProject", () => {
         onProgress: (done, total) => progress.push([done, total]),
       }),
     );
-    expect(writes).toEqual(["Stage 1 draft", "Stage 1 conversation (imported)"]);
+    expect(writes).toEqual(["Problem discovery draft", "Problem discovery conversation (imported)"]);
     expect(progress).toEqual([[1, 2], [2, 2]]);
   });
 });

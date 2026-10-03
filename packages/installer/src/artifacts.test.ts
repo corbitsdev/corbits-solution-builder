@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 import { createArtifact, getArtifact, listArtifacts, reviseArtifact, type Artifact } from "./artifacts.js";
 
 const TENANT_ID = "t_test";
@@ -40,13 +40,13 @@ function fakeTransport(): Transport {
       const detailMatch = pathname?.match(/\/artifacts\/([^/]+)$/);
       if (method === "GET" && detailMatch) {
         const row = rows.get(detailMatch[1]!);
-        if (!row) throw new Error("not found");
+        if (!row) throw new ApiError(404, "not_found", "Artifact not found");
         return { artifact: row } as T;
       }
       const versionMatch = pathname?.match(/\/artifacts\/([^/]+)\/versions$/);
       if (method === "POST" && versionMatch) {
         const row = rows.get(versionMatch[1]!);
-        if (!row) throw new Error("not found");
+        if (!row) throw new ApiError(404, "not_found", "Artifact not found");
         const input = body as { title?: string; content?: string };
         const revised: Artifact = {
           ...row,

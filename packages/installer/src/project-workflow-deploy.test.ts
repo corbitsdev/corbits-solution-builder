@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, namerPin, projectWorkflowAssetName, type EnsureProgress, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
+import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, namerPin, projectWorkflowAssetName, topLevelRunIds, type EnsureProgress, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
 
 const TENANT_ID = "proj_1";
 const PROJECT_ID = "proj_1";
@@ -1108,5 +1108,11 @@ describe("ensureProjectWorkflow's name step", () => {
     expect(pushed["packages/project/namer-source.js"]).toBe(`export const NAMER_SOURCE = {"provider":"openai","model":"gpt-5.5"};\n`);
     const mail = hub.posts.find((post) => /\/mail$/.test(post.path));
     expect(JSON.parse((mail!.body as { content: string }).content).problemStatement).toBe("Reconcile invoices");
+  });
+});
+
+describe("topLevelRunIds", () => {
+  test("drops loop-iteration children", () => {
+    expect(topLevelRunIds(["run_a", "run_a__step__1", "run_b"])).toEqual(["run_a", "run_b"]);
   });
 });

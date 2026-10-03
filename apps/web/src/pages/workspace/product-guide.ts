@@ -14,6 +14,7 @@
  * and the person is always told which of the two they are reading.
  */
 import { nextStep, type NextStep } from "@solutions-builder/app/next-step";
+import { stageName } from "../../components.jsx";
 import type { RunState } from "@solutions-builder/app/ledger";
 import { quorumState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "../../client.js";
@@ -77,7 +78,7 @@ export function deterministicGuidance(context: GuideContext): GuideGuidance {
     missing.push("No decision has been recorded for this stage yet.");
   }
   return {
-    summary: `${context.projectTitle} is at stage ${context.stage}. ${step.detail}`,
+    summary: `${context.projectTitle} is at ${stageName(context.stage)}. ${step.detail}`,
     readiness: missing.length === 0 ? "ready" : "not_ready",
     missing,
     options: [{ label: step.title, detail: step.detail }],
@@ -169,7 +170,7 @@ function decisionLines(view: ProjectWorkflowView | null): string {
     .map((decision) => {
       const who = decision.audience ? ` by ${decision.audience}` : "";
       const outcome = decision.outcome ? ` → ${decision.outcome}` : "";
-      return `stage ${decision.stage} ${decision.kind}${who}${outcome}`;
+      return `${stageName(decision.stage)} ${decision.kind}${who}${outcome}`;
     })
     .join("; ")}`;
 }
@@ -186,7 +187,7 @@ export function guidancePrompt(context: GuideContext, versions: readonly GuideVe
     versions.length === 0
       ? "No versions have been produced yet."
       : versions
-          .map((version) => `--- VERSION ${version.id} — ${version.title} (stage ${version.stage}) ---\n${version.content}`)
+          .map((version) => `--- VERSION ${version.id} — ${version.title} (${stageName(version.stage)}) ---\n${version.content}`)
           .join("\n\n"),
     "",
     decisionLines(context.view),

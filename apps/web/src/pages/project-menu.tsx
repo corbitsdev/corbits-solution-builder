@@ -49,7 +49,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
   const bundle = await assembleBundle(project.id, {
     projectView: api.projectView,
     artifactContent: api.artifactContent,
-    stageAgentStatus: api.stageAgentStatus,
+    stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
   });
   downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
@@ -396,7 +396,7 @@ export function ProjectInfoDialog({
               <div>
                 <dt>Where it stands</dt>
                 <dd>
-                  {info.stage ? `Stage ${info.stage} of 9 · ${stageName(info.stage)}` : "No run"}
+                  {info.stage ? `${stageName(info.stage)} · ${info.stage} of 9` : "No run"}
                   {info.project.archivedAt ? " · archived" : ""}
                 </dd>
               </div>

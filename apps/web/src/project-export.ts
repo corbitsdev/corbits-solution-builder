@@ -31,7 +31,9 @@ export type BundleDeps = {
     nodes: ArtifactNode[];
   }>;
   artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
-  stageAgentStatus: (projectId: string, stage: number) => Promise<{ address: string } | null>;
+  /** Every address the stage's specialist has run at: a redeploy (send-back,
+   *  restart, model switch) leaves earlier mail under earlier addresses. */
+  stageAgentAddresses: (projectId: string, stage: number) => Promise<string[]>;
   readStageThread: (tenantId: string, addresses: string[]) => Promise<ChatMessage[]>;
 };
 
@@ -85,9 +87,9 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
 
   const conversations: ExportedConversation[] = [];
   for (const stage of STAGES) {
-    const status = await deps.stageAgentStatus(projectId, stage);
-    if (!status) continue;
-    const messages = await deps.readStageThread(detail.tenantId, [status.address]);
+    const addresses = await deps.stageAgentAddresses(projectId, stage);
+    if (addresses.length === 0) continue;
+    const messages = await deps.readStageThread(detail.tenantId, addresses);
     if (messages.length === 0) continue;
     conversations.push({ stage, messages: messages.map(pickMessage) });
   }
