@@ -347,10 +347,6 @@ export function StageWorkspace({
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
     return { ...latestSpecialistMessage, body: work.artifact.content };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
-  const workUnreadable = work?.state === "unreadable" ? work.message : null;
-  useEffect(() => {
-    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
-  }, [workUnreadable]);
   // A draft that lives in the mail is repaired here, before the pane or the
   // gate reads it, and that repaired text is what approval records: a stage
   // 3 choice absorbed anywhere but under "## Chosen approach" is written in
