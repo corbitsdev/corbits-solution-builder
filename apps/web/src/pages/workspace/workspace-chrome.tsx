@@ -6,62 +6,14 @@
  */
 import { useEffect, useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
-import { Dictated } from "../../dictation.jsx";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
-import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
-import { STAGE_GOAL } from "./gate.jsx";
-import { Elapsed } from "./elapsed.jsx";
+import { RETURN_TO } from "../send-back.jsx";
 import type { StageEvaluator } from "./use-advisory.ts";
 import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { usePanesWidth } from "./use-panes-width.ts";
 import { WaitingTips } from "./waiting-tips.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
-
-type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
-
-/** Model, usage, guidance, verdict, send-back, and the product guide — one
- *  collapsed summary so they never stack as bands above the panes. */
-export function GuidanceFold({ children }: { children: ReactNode }) {
-  return (
-    <details className="stage-chrome">
-      <summary>Stage extras</summary>
-      <div className="stage-chrome-body">{children}</div>
-    </details>
-  );
-}
-
-/** The stage's current guidance — what the specialist is doing, and the
- *  recorded answer choices when the guidance carries a question. */
-export function GuidanceCard({
-  guidance,
-  showChoices,
-  sending,
-  onChoice,
-}: {
-  guidance: { title: string; detail: string; readyNote?: string | null; question?: Choices };
-  showChoices: boolean;
-  sending: boolean;
-  onChoice: (choice: string) => void;
-}) {
-  return (
-    <div className="stage-guidance" aria-label={guidance.title}>
-      <p className="stage-guidance-title">{guidance.title}</p>
-      <p className="stage-guidance-detail">{guidance.detail}</p>
-      {guidance.readyNote ? <p className="stage-guidance-ready">{guidance.readyNote}</p> : null}
-      {guidance.question && guidance.question.choices.length > 0 && showChoices ? (
-        <div className="button-row" aria-label="Recorded answer choices">
-          {guidance.question.choices.map((choice) => (
-            <Button key={choice} variant="ghost" disabled={sending} onClick={() => onChoice(choice)}>
-              {choice}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 /**
  * Stage 1's advisory brief-evaluator verdict, as one line in the approval
@@ -111,52 +63,6 @@ export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
         </div>
       ) : null}
     </span>
-  );
-}
-
-/** Sending the stage back is offered on hold-to-send, and again inside
- *  Guidance so a keyboard user still has a path — never as its own band. */
-export function SendBackDock({
-  stage,
-  target,
-  reason,
-  sendingBack,
-  onTargetChange,
-  onReasonChange,
-  onSendBack,
-}: {
-  stage: number;
-  target: number | null;
-  reason: string;
-  sendingBack: boolean;
-  onTargetChange: (target: number | null) => void;
-  onReasonChange: (reason: string) => void;
-  onSendBack: (target: number) => void;
-}) {
-  const chosen = target ?? defaultTarget(stage);
-  return (
-    <details className="approvals-record send-back">
-      <summary>Missed something earlier? Send this stage back…</summary>
-      <div className="send-back-body">
-        <SendBackPicker id="workspace-send-back-target" stage={stage} target={chosen} onChange={onTargetChange} />
-        <div className="field">
-          <label htmlFor="workspace-send-back-reason">What was missed, or what has to change</label>
-          <Dictated value={reason} onValueChange={onReasonChange} align="start">
-            <Textarea
-              id="workspace-send-back-reason"
-              value={reason}
-              onChange={(event) => onReasonChange(event.target.value)}
-              placeholder="Recorded with the send-back, and put in the box at the stage you return to, for the specialist."
-            />
-          </Dictated>
-        </div>
-        <div className="action-row">
-          <Button loading={sendingBack} onClick={() => onSendBack(chosen)}>
-            Send back to {stageName(chosen)}
-          </Button>
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -319,109 +225,6 @@ export function OpeningScreen({
         ) : null}
       </StagePanes>
     </div>
-  );
-}
-
-/** A document stage with no draft yet: the interview-progress bar, the
- *  waiting line, tips, and the waiting actions (send again / stop / change
- *  model). The conversation itself renders beside it. */
-export function WaitingSection({
-  stage,
-  progress,
-  hasMessages,
-  lastPersonAt,
-  tip,
-  choices,
-  sending,
-  awaitingActions,
-  onChoice,
-  onSendAgain,
-  onStop,
-  onOpenSettings,
-  children,
-}: {
-  stage: number;
-  progress: { ordinal: number; total: number | null } | null;
-  hasMessages: boolean;
-  lastPersonAt: string | null;
-  tip: string;
-  choices: Choices;
-  sending: boolean;
-  awaitingActions: { canSendAgain: boolean; hasPending: boolean };
-  onChoice: (choice: string) => void;
-  onSendAgain: () => void;
-  onStop: () => void;
-  onOpenSettings: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section aria-label="What is happening now" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div
-        role="progressbar"
-        aria-label={`Progress: ${stageName(stage)}`}
-        aria-valuetext={
-          progress && progress.total !== null
-            ? `Question ${progress.ordinal} of ${progress.total}`
-            : progress
-              ? `Question ${progress.ordinal} so far`
-              : "Waiting for the specialist's reply"
-        }
-        style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "0 0 12px" }}
-      >
-        <div
-          style={{
-            height: "100%",
-            borderRadius: 4,
-            background: "var(--wb-primary)",
-            width:
-              progress && progress.total !== null
-                ? `${Math.min(100, Math.round((progress.ordinal / progress.total) * 100))}%`
-                : "38%",
-          }}
-        />
-      </div>
-      <p className="inline-note">
-        {stageName(stage)} — {STAGE_GOAL[stage]}
-      </p>
-      <div className="inline-note" role="status">
-        {hasMessages ? (
-          <span className="thinking">Your message is recorded; no specialist reply is visible yet.</span>
-        ) : (
-          "No message from you is recorded yet."
-        )}{" "}
-        {hasMessages ? <Elapsed since={lastPersonAt} /> : null}
-      </div>
-      <p className="inline-note">{tip}</p>
-      {choices && choices.choices.length > 0 ? (
-        <div className="button-row" aria-label="Recorded answer choices">
-          {choices.choices.map((choice) => (
-            <Button key={choice} variant="ghost" disabled={sending} onClick={() => onChoice(choice)}>
-              {choice}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-      {(awaitingActions.canSendAgain || awaitingActions.hasPending) && hasMessages ? (
-        <div className="button-row" aria-label="Waiting actions">
-          {awaitingActions.canSendAgain ? (
-            <Button variant="outline" onClick={onSendAgain}>
-              Send again
-            </Button>
-          ) : null}
-          {awaitingActions.hasPending ? (
-            <Button variant="ghost" onClick={onStop}>
-              Stop
-            </Button>
-          ) : null}
-          {awaitingActions.canSendAgain ? (
-            <Button variant="ghost" onClick={onOpenSettings}>
-              Open Settings to pick a different model
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {children}
-    </section>
   );
 }
 

@@ -9,6 +9,7 @@
  * spreadsheet or a PowerPoint never pays to bundle that reader.
  */
 import type ExcelJSNamespace from "exceljs";
+import { decodeEntities } from "./html-entities.ts";
 
 export type MaterialInput = { name: string; mediaType: string; bytes: Uint8Array };
 
@@ -186,24 +187,13 @@ async function pdfText(bytes: Uint8Array): Promise<string> {
   return `${blocks.join("\n\n")}${silent > 0 ? `\n\n(${silent} page${silent === 1 ? "" : "s"} with no text, not shown)` : ""}`;
 }
 
-const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-
-/** The text of one XML text run, its entities decoded. */
-function decodeXml(text: string): string {
-  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (whole, entity: string) => {
-    if (entity.startsWith("#x")) return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
-    if (entity.startsWith("#")) return String.fromCodePoint(Number(entity.slice(1)));
-    return XML_ENTITIES[entity] ?? whole;
-  });
-}
-
 /** A slide part's text as a person reads it: one line per paragraph, runs joined, empty paragraphs dropped. */
 export function slideXmlText(xml: string): string {
   const paragraphs = xml.match(/<a:p\b[\s\S]*?<\/a:p>/g) ?? [];
   return paragraphs
     .map((paragraph) =>
       [...paragraph.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
-        .map((run) => decodeXml(run[1] ?? ""))
+        .map((run) => decodeEntities(run[1] ?? ""))
         .join("")
         .trim(),
     )

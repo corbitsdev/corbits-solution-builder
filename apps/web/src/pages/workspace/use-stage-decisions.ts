@@ -110,7 +110,6 @@ export function useStageDecisions({
   workflowView,
   reviewMessage,
   draftKind,
-  foldedMessages,
   refreshWorkflow,
   markStage,
   queueOpening,
@@ -127,7 +126,6 @@ export function useStageDecisions({
   workflowView: ProjectWorkflowView | null;
   reviewMessage: ChatMessage | null;
   draftKind: string | null;
-  foldedMessages: ChatMessage[];
   refreshWorkflow: () => Promise<void>;
   markStage: (stage: number) => void;
   queueOpening: (stage: number, body: string) => void;

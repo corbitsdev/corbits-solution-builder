@@ -550,19 +550,3 @@ export const LEDGER: readonly Transition[] = [
     note: "Delivered-only. Anything that stopped earlier stays visible in its own state.",
   },
 ];
-
-/**
- * `project.delete` is deliberately outside `LEDGER`: it acts on a project, not
- * on a run, and project status is a projection of stage runs rather than a
- * transition authority of its own.
- */
-export const PROJECT_DELETE = {
-  command: "project.delete" as const,
-  authority: ["project_owner"] as const,
-  preconditions: [
-    "authorized retention and legal eligibility",
-    "sink eligibility for every referenced artifact",
-  ],
-  effects: ["tombstone", "sink receipts", "deletion audit"],
-};
-

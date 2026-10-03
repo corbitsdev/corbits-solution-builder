@@ -8,46 +8,6 @@
  */
 
 /**
- * The digest a specialist opens its draft with.
- *
- * The conversation speaks this rather than announcing that a version exists.
- * A stage that opens on "Nothing said yet" leaves a person looking at an empty
- * screen beside a document nobody has told them anything about.
- */
-export function summaryIn(document: string): string | null {
-  const lines = document.replace(/\r\n/g, "\n").split("\n");
-  const start = lines.findIndex((line) => /^#{1,4}\s+in short\b/i.test(line.trim()));
-  if (start === -1) return null;
-
-  const body: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,4}\s/.test(line)) break;
-    body.push(line);
-  }
-  const text = body.join("\n").trim();
-  return text.length > 0 ? text : null;
-}
-
-/** What a specialist filled in for itself, lifted from its own heading. */
-export function assumptionsIn(document: string): string[] {
-  const lines = document.replace(/\r\n/g, "\n").split("\n");
-  const start = lines.findIndex((line) =>
-    /^#{1,4}\s+(what i assumed|assumptions)\b/i.test(line.trim()),
-  );
-  if (start === -1) return [];
-
-  const found: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,4}\s/.test(line)) break;
-    const item = line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim();
-    if (item.length === 0) continue;
-    if (/^_?(none|nothing|n\/a)\b/i.test(item)) return [];
-    found.push(item.length > 400 ? `${item.slice(0, 400)}…` : item);
-  }
-  return found.slice(0, 12);
-}
-
-/**
  * Every question a specialist ended its draft with, in the order asked.
  *
  * A question carries the likely answers offered under it: each `- Option: …`
@@ -132,33 +92,4 @@ export function approachName(heading: string): string | null {
 /** The first of them, for a caller that only wants the opening turn. */
 export function questionIn(document: string): string | null {
   return questionsIn(document)[0] ?? null;
-}
-
-/**
- * The brief evaluator's fixed-shape verdict, parsed leniently: the verdict
- * line may sit anywhere in the first three lines, and its bullets use the
- * `- ` prefix. Anything else — no verdict line at all — is not a verdict.
- */
-export function briefVerdictIn(text: string): { ready: boolean; notes: string[] } | null {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  let ready: boolean | null = null;
-  let verdictAt = -1;
-  for (let i = 0; i < Math.min(3, lines.length); i++) {
-    const match = /^verdict:\s*(ready|not yet)\s*$/i.exec(lines[i]!.trim());
-    if (match) {
-      ready = match[1]!.toLowerCase() === "ready";
-      verdictAt = i;
-      break;
-    }
-  }
-  if (ready === null) return null;
-
-  const notes = lines
-    .slice(verdictAt + 1)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .map((line) => line.slice(2).trim())
-    .filter((line) => line.length > 0);
-
-  return { ready, notes };
 }

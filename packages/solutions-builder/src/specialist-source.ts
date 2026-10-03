@@ -60,20 +60,6 @@ export type InferenceSourcePin = { readonly provider: string; readonly model: st
  *  in this specialist's sidecar: it carries no shell and no delivery tool. */
 export const BUILD_STAGE = 8;
 
-/** The stage whose rounds write one package per stakeholder, each behind its own gate. */
-export const PACKAGE_STAGE = 5;
-
-/** Mirrors `installer/src/specialist-deploy.ts`'s `DEFAULT_ROLE_KEY` (kept as
- *  its own literal here rather than imported, since `packages/installer`
- *  depends on this package and not the other way around). Stage 5 has one
- *  deployment per project under this key (#41 step 3): it receives the
- *  stage's opening (the approved design) and, one request at a time, the
- *  package asks that name a stakeholder (`AudiencePackages`'s "Write it").
- *  Its prompt writes one package per request, for the audience the request
- *  names, and renders that one deck -- never every stakeholder's in the
- *  one turn (CL-8873). */
-const PRIMARY_ROLE_KEY = "primary";
-
 /** The stage whose specialist checks a delivery manifest. */
 export const DELIVERY_STAGE = 9;
 
@@ -266,10 +252,9 @@ const POSIX_IMPORT: SpecialistToolImport = {
  */
 export function specialistRoleSpec(options: {
   readonly stage: Stage;
-  readonly roleKey?: string | undefined;
   readonly artifactTools?: boolean | undefined;
 }): SpecialistRoleSpec {
-  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
+  const { stage, artifactTools = false } = options;
   const tooling = specialistTooling({ stage, artifactTools });
   return {
     tooling,
@@ -312,10 +297,6 @@ export type SpecialistSourceOptions = {
    *  render as their own deployment; `specialist-deploy.ts` still resolves
    *  the primary per-stage role via `agentFor(stage)` today. */
   readonly role: AgentRole;
-  /** A short, filesystem/asset-name-safe key identifying `role` within its
-   *  stage — folded into the deployed asset's name by `specialist-deploy.ts`
-   *  (`specialistAssetName`) so each role gets its own asset. */
-  readonly roleKey: string;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
    *  `credentialBindings` entry and the matching grant requirement, and tell
    *  the model to write its document with `artifact_write`. Default false;
@@ -336,18 +317,6 @@ function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
 }
 
 /**
- * The primary per-stage specialist's system prompt: its own kit role, and
- * nothing else. The brief evaluator (stage 1) and the requirements author
- * plus the four panel principals (stage 6) no longer fold in here as
- * reference sections — each becomes its own deployment, rendered against its
- * own `role`/`roleKey`, so folding their prompts in here too would run them
- * twice.
- */
-function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
-  return renderedPrompt(role, artifactTools);
-}
-
-/**
  * The entry module a stage specialist's workflow asset ships, as source: a
  * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
  * "wait"` and no `timeout` — the same shape `buildAgentDefinitionJson` in
@@ -357,14 +326,14 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
  * this only renders it.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, role, roleKey, artifactTools = false } = options;
+  const { stage, source, role, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
 
   // Everything this role carries is its spec's (#41 step 1): the imports and
   // the tools handed to the agent come from it in order, so an entry never
   // imports a tool its closure lacks (`specialistTooling` decides both).
-  const spec = specialistRoleSpec({ stage, roleKey, artifactTools });
+  const spec = specialistRoleSpec({ stage, artifactTools });
   const toolImports = spec.toolImports.map((entry) => `${entry.lines.join("\n")}\n`).join("");
   const tools = spec.toolImports.map((entry) => entry.tool).join(", ");
 
@@ -383,7 +352,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   const genericArtifactTools = spec.tooling.artifacts;
   const credentialName = workflowArtifactsCredentialName(role.id);
 
-  let systemPrompt = systemPromptForRole(role, genericArtifactTools);
+  let systemPrompt = renderedPrompt(role, genericArtifactTools);
   for (const note of spec.promptNotes) {
     systemPrompt = `${systemPrompt}\n\n${note}`;
   }

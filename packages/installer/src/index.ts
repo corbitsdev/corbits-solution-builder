@@ -17,7 +17,6 @@ export * from "./git-push.js";
 export * from "./grant-holders.js";
 export * from "./hub.js";
 export * from "./tenants.js";
-export * from "./assets.js";
 export * from "./install.js";
 export * from "./model-default.js";
 export * from "./project-home.js";

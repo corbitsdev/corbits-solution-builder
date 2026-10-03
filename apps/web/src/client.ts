@@ -6,12 +6,12 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
-import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
+import { AUTHORITIES, STAGES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
-import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
+import { newestRun, runStateOf, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
   archiveArtifact as installerArchiveArtifact,
@@ -51,7 +51,6 @@ import {
   type EnsuredProjectWorkflow,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
-  type ProjectWorkflowDeployment,
   type ProjectWorkflowStageInput,
   type SidecarCapability,
   type SpecialistDeployment,
@@ -59,6 +58,7 @@ import {
   type WorkflowGitPush,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
+  topLevelRunIds,
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
@@ -138,7 +138,7 @@ import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries, OPENING_VARIANT } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
-import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
+import { projectUsage, type ProjectUsage } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import { deckDesigns as loadDeckDesigns, guidanceFor, saveDeckDesignPreference } from "./deck-design-settings.ts";
 import {
@@ -397,7 +397,7 @@ export type Wait = {
    * Set only for stage 9's delivery gate: a stock hub approval on the
    * specialist's own `deliver` tool call, not a workflow signal (CL-8566).
    * Its presence is what tells `decide()` to resolve it through the
-   * approval routes instead of `deliverGate`.
+   * approval routes.
    */
   approvalId?: string;
   /** The tool name `approvalId` was raised for, e.g. "run_shell" or "deliver" — lets the queue offer "Allow for this build" only where a standing grant makes sense. */
@@ -520,24 +520,6 @@ export type ProjectDetail = {
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
-  /**
-   * Always empty now: recorded approvals rode the lifecycle run's own event
-   * fold (`./run-fold.ts`'s `projectApprovals`, deleted with the run —
-   * CL-8612 contract v6). `ApprovalsRecord` (`pages/workspace/gate.tsx`)
-   * renders nothing on an empty list, so the historical-record surface just
-   * has nothing to show until a mail-agent-shaped decision log replaces it.
-   */
-  approvals: {
-    id: string;
-    runId: string;
-    stage: number;
-    command: string;
-    decision: string;
-    audienceName: string | null;
-    rationale: string | null;
-    createdAt: string;
-    versions: { versionId: string; contentHash: string }[];
-  }[];
 };
 
 export type { Quote, StageTurn };
@@ -1080,10 +1062,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
     // (#165).
     const ownerInProject = await myPrincipalIn(transport, projectId);
     const authorizedPrincipalIds = [...new Set([...(ownerInProject ? [ownerInProject] : []), workspace.principalId])];
-    const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
-      stage: index + 1,
-      authorizedPrincipalIds,
-    }));
+    const stages: ProjectWorkflowStageInput[] = STAGES.map((stage) => ({ stage, authorizedPrincipalIds }));
     const status = await readyToDeploy(transport, workspaceTenantId, projectId);
     // What the ensure step is doing, under the busy strip's clock: a click
     // that waits on it (a decision, a vote) otherwise showed only its own
@@ -1430,29 +1409,6 @@ export const api = {
       installerFailure(cause);
     }
   },
-  /**
-   * What the workspace has spent on inference since the hub process last
-   * started -- `packages/embed-hub/src/spend.ts`'s `GET /spend`, mounted on
-   * the hub itself. Workspace-wide only: this revision has no mapping from a
-   * workflow run to the project id the browser knows, so there is no honest
-   * per-project breakdown to ask for yet (`../project-usage.js` says so in
-   * the UI rather than omitting the fact). Nice-to-have, not core: a failure
-   * here returns null rather than surfacing an error banner.
-   */
-  spend: async (): Promise<WorkspaceSpend | null> => {
-    try {
-      const transport = createHubTransport();
-      const workspace = await resolveWorkspace(transport);
-      if (!workspace) return null;
-      const response = await transport.fetch<{ data: WorkspaceSpend }>(
-        "GET",
-        `/api/tenants/${workspace.tenantId}/spend`,
-      );
-      return response.data;
-    } catch {
-      return null;
-    }
-  },
   /** Project tenants under the workspace, read straight off the hub -- see `./project-list.ts`. */
   projects: async () => {
     try {
@@ -1549,7 +1505,7 @@ export const api = {
   projectView: (projectId: string) => loadProjectView(projectId, createHubTransport()).catch((cause: unknown) => { installerFailure(cause); }),
   /** One project, described — folded from the same tenant record and run/artifact folds as `projectView`. */
   projectInfo: (projectId: string): Promise<ProjectInfo> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const [project, detail, deployments, ref] = await Promise.all([
         installerRequireProject(transport, projectId),
         loadProjectView(projectId, transport),
@@ -1677,7 +1633,7 @@ export const api = {
    * those are what get attached, each under its path in the archive.
    */
   attachMaterial: (projectId: string, files: File[]) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const attached = await Promise.all(
         (await expandArchives(files)).map(async (file) => {
           const mediaType = file.type || "application/octet-stream";
@@ -2173,7 +2129,7 @@ export const api = {
       return { archived, kept: plan.keep.length, lineages: plan.lineages };
     }),
   artifactGraph: (projectId: string) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const graph = await artifactGraphFor(transport, projectId);
       return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
     }),
@@ -2554,7 +2510,7 @@ export const api = {
    * -- not only after this session's own `ensureProjectWorkflow` call.
    */
   projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
       return loadProjectWorkflowView(transport, ref);

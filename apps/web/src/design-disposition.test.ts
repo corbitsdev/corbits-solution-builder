@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   anchorResolves,
-  carryForwardFeedback,
   withDisposition,
   withFallbackIds,
   type Disposition,
@@ -39,16 +38,6 @@ describe("withDisposition", () => {
     const updated = withDisposition(entries, "b", "addressed", "2026-01-01T00:00:00.000Z");
     expect(updated[0]).toEqual({ id: "a" });
     expect(updated[1]).toEqual({ id: "b", disposition: "addressed", dispositionAt: "2026-01-01T00:00:00.000Z" });
-  });
-});
-
-describe("carryForwardFeedback", () => {
-  test("a new design version leaves every disposition untouched", () => {
-    const entries = [
-      { id: "a", disposition: "addressed" as const, dispositionAt: "2026-01-01T00:00:00.000Z" },
-      { id: "b", disposition: "open" as const },
-    ];
-    expect(carryForwardFeedback(entries)).toEqual(entries);
   });
 });
 

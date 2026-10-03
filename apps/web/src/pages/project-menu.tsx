@@ -41,7 +41,7 @@ export type MenuProject = { id: string; title: string; archivedAt: string | null
 export type InfoRequest = { withName: boolean; at: number };
 
 /**
- * Exports one project the way this lane can: the bundle is assembled in the
+ * Exports one project: the bundle is assembled in the
  * browser (`assembleBundle`) and saved as a download. Returns the notice
  * line; shared by the options menu and the Project info dialog.
  */
@@ -298,8 +298,7 @@ export function ProjectInfoDialog({
 }) {
   const [info, setInfo] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // INTEGRATE (CL-8756): lane-only wiring — what the usage line names as the
-  // current model. Behavioral-only; main has no equivalent.
+  // What the usage line names as the current model.
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   const [title, setTitle] = useState(project.title);
   const [saving, setSaving] = useState(false);
@@ -345,9 +344,7 @@ export function ProjectInfoDialog({
     if (ok) onClose();
   };
 
-  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
-  // is assembled in the browser and saved as a download, reported in main's
-  // diction through main's notice line; failures ride main's error Banner.
+  // The bundle is assembled in the browser and saved as a download.
   const exportProject = async () => {
     if (exporting) return;
     setExporting(true);

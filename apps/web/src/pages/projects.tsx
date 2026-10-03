@@ -2,20 +2,13 @@
  * Projects: the home list. A composer to start something, then the work as
  * cards — the mockup's layout, live data.
  */
-// INTEGRATE (CL-8756): origin/main's SortableTable line is dropped here —
-// this lane's client no longer exports SpendRow/SpendTotals (spend now lives
-// in project-usage.ts), so the per-project spend table it backed is adapted
-// below. Import order otherwise verbatim from main.
 import { ChatInput } from "@corbits/react-ui";
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
-import { Banner, Button } from "../components.jsx";
-// INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
-// assembled in the browser (assembleBundle) and saved via downloadArtifact;
-// stage/turn/done come from project-list.ts helpers and spend copy from
-// project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
+import { Banner } from "../components.jsx";
 import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
@@ -93,9 +86,6 @@ export function Projects({
     setError(null);
     try {
       const bundle: unknown = await readImportPayload(file);
-      // INTEGRATE (CL-8756): this lane's importProject validates the bundle
-      // itself and reports artifacts/conversations, not nodes/commands — main's
-      // diction kept, fields mapped to what the client returns.
       const brought = await api.importProject(bundle);
       setNotice(importNotice(file.name, brought));
       onChanged();
@@ -118,10 +108,8 @@ export function Projects({
   // fold away.
   const live = projects.filter((project) => !project.archivedAt);
   const archived = projects.filter((project) => project.archivedAt);
-  // INTEGRATE (CL-8756): main's turn === "question"/"approve" arms are dropped
-  // here — this lane's summary turn is only "writing"|"idle" (question and
-  // approval waits fold into needsDecision) — so needsDecision alone is the
-  // person's-move signal. The furthest-along tiebreak below is verbatim main.
+  // The summary turn is only "writing"|"idle" (question and approval waits
+  // fold into needsDecision), so needsDecision alone is the person's-move signal.
   const yourMove = (project: ProjectSummary) => project.needsDecision;
   const ordered = [...live].sort((left, right) => {
     if (yourMove(left) !== yourMove(right)) return yourMove(left) ? -1 : 1;
@@ -284,8 +272,8 @@ function ProjectCard({
   onError: (cause: unknown) => void;
   onNotice: (message: string) => void;
 }) {
-  // INTEGRATE (CL-8756): the list no longer carries a stage — the project
-  // workflow is the only authority, so each card resolves its own stage
+  // The list carries no stage — the project workflow is the only authority,
+  // so each card resolves its own stage
   // read-only (displayStage) plus done (displayDone) and whose turn it is off
   // the stage mail thread (displayTurn). `null` while unresolved or when the
   // workflow could not be read at all; `stageFailed` tells those apart so the
@@ -312,9 +300,8 @@ function ProjectCard({
       cancelled = true;
     };
   }, [project.id, stageAttempt]);
-  // INTEGRATE (CL-8756): main's turn arms are dropped here too — the summary
-  // turn is only "writing"|"idle" — so the card reads whose turn it is off the
-  // current stage's mail thread instead. Never for an archived project or
+  // The summary turn is only "writing"|"idle", so the card reads whose turn it
+  // is off the current stage's mail thread. Never for an archived project or
   // before the stage resolves.
   const [turn, setTurn] = useState<string | null>(null);
   useEffect(() => {
@@ -477,18 +464,9 @@ function ProjectCard({
 function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   return (
     <div className="card-track" role="img" aria-label={stage ? `Progress: ${stageName(stage)}` : "Progress unknown"}>
-      {Array.from({ length: 9 }, (_, index) => {
-        const at = index + 1;
-        return <span key={at} className={stageTrackSegClass(at, stage, done)} />;
-      })}
+      {STAGES.map((at) => (
+        <span key={at} className={stageTrackSegClass(at, stage, done)} />
+      ))}
     </div>
   );
 }
-
-
-/** One project, described: when it began, where it stands, and what it holds. */
-// INTEGRATE (CL-8756): main's info shape is gone on this lane — stage is a
-// bare number, approvals and the per-project spend table (SortableTable,
-// SpendRow) no longer exist — so the dialog keeps main's shell and row order
-// while usage rides formatUsage and decisions get their own row. Every
-// adapted hunk below carries its own note.

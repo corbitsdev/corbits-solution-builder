@@ -26,7 +26,7 @@ import { buildPackageDeck, deckFileName } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
-import { packageNudge, packageReplyProblem, packageRequest } from "../package-request.ts";
+import { packageNudge, packageReplyProblem, packageRequest, roleLabel } from "../package-request.ts";
 import { mockupShots, placeMockups, type MockupShot } from "../mockup-shots.ts";
 import { isHtmlDocument } from "./workspace/guidance.ts";
 import { useBusyWhile } from "../use-busy.ts";
@@ -100,10 +100,6 @@ type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: n
 function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
   const isYou = (entry: T) => entry.name.trim().toLowerCase() === "you";
   return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
-}
-
-function roleLabel(role: string): string {
-  return role.replace(/_/g, " ");
 }
 
 const DECISION_LABEL: Record<AudienceVote["decision"], string> = {
@@ -635,7 +631,7 @@ export function AudiencePackages({
   }, [selected?.id, tenantId]);
 
   // The slides on screen, drawn from the same outline, design and style
-  // guide theme `saveSlides` builds the file from, so what is shown is what
+  // guide theme `exportSlides` builds the file from, so what is shown is what
   // would be saved (#95). The designs are read once, a role's theme once per
   // role; a theme that cannot be read falls back to the default look and
   // says so, the way the download does.

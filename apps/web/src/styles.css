@@ -472,23 +472,6 @@ h2 { font-size: 1.375rem; font-weight: 400; margin: 0; }
    measuring them, which is what a flat hierarchy fails at. */
 h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
-.screen-body { padding: var(--space-5); display: grid; gap: var(--space-4); min-width: 0; }
-.screen-body > * { min-width: 0; }
-.screen-body > * + h3 { margin-top: var(--space-3); }
-
-.screen-body.is-tight { padding: 0; }
-
-.bento {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.span-4 { grid-column: span 4; }
-.span-6 { grid-column: span 6; }
-.span-8 { grid-column: span 8; }
-.span-12 { grid-column: span 12; }
-
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -540,16 +523,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-5) 0 0;
   max-height: 60vh;
   overflow: auto;
-}
-
-/* A worker's live output is read from the bottom, and there is more of it
-   than a document: shorter than the pane above allows, so the controls
-   above it stay in reach. */
-.live-output {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  max-height: 40vh;
-  min-height: 6rem;
 }
 
 .artifact pre {
@@ -627,19 +600,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
-/* KEEP: delivery per-file verification warning (conv) */
 /* Delivery's per-file verification: a failed check gets a plain warning line, not a colored table row. */
 .warning-note { font-size: 0.8125rem; font-weight: 500; color: var(--wb-destructive); margin: 0 0 0.5rem; }
 
 /* ---- Responsive: desktop multi-panel -> tablet master-detail -> phone queue ---- */
-
-/* The rail narrows to icons rather than stacking on top of the work. Stacking
-   left a dead band beside a 240px aside and pushed the conversation below the
-   fold; the library collapses to a 56px icon rail and keeps its labels for
-   screen readers. */
-@media (max-width: 1080px) {
-  .span-4, .span-6, .span-8 { grid-column: span 12; }
-}
 
 @media (max-width: 640px) {
   .canvas { padding: var(--space-4) var(--space-4) var(--space-8); }
@@ -648,45 +612,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .artifact pre { font-size: 0.75rem; }
   .queue-item,
   .version-list { grid-template-columns: 1fr; }
-}
-
-
-
-.action-row {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  padding-top: var(--space-1);
-}
-
-/* The rest of the queue, beside the current decision. */
-.queue-list {
-  display: grid;
-  gap: 0;
-  border: 1px solid var(--wb-border);
-  align-content: start;
-  /* Does not stretch to the hero's height: an empty list should read as
-     empty, not as a large blank panel. */
-  align-self: start;
-  padding: 0;
-  background: var(--wb-background);
-}
-
-.queue-list .queue-item {
-  border-bottom: 1px solid var(--wb-border);
-  padding: var(--space-3) var(--space-4);
-  gap: var(--space-1);
-}
-
-.queue-list .queue-item strong {
-  font-weight: 500;
-  font-size: 0.9375rem;
-}
-
-.queue-list .queue-item p {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
 }
 
 .queue-list-head {
@@ -786,7 +711,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 0;
 }
 
-/* KEEP: stage-thread flex fix, thread-head/composer flex:none rows (conv CL-8721) */
 /* The conversation: transcript that grows upward, composer pinned beneath.
    A flex column, not a grid: `.thread-head` and `.composer` already declare
    `flex: none` (their fixed rows), and `.thread-turns` — the actual
@@ -959,43 +883,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-primary);
 }
 
-/* Rows dealt out rather than dropped in: each one 50ms after the one above. */
-.stagger {
-  animation: turn-in var(--duration-large, 300ms) var(--ease-out, ease) both;
-  animation-delay: calc(var(--i, 0) * 50ms);
-}
-
-/* The odometer: old digit up and out, new digit up and in. */
-.roll {
-  display: inline-grid;
-  height: 1.3em;
-  line-height: 1.3em;
-  overflow: hidden;
-  vertical-align: bottom;
-}
-
-.roll > span {
-  grid-area: 1 / 1;
-}
-
-.roll-out {
-  animation: roll-out 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-.roll-in {
-  animation: roll-in 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-@keyframes roll-out {
-  from { transform: translateY(0); }
-  to { transform: translateY(-100%); }
-}
-
-@keyframes roll-in {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
 @keyframes label-shine {
   0%, 18% { background-position: 100% 0; }
   82%, 100% { background-position: 0% 0; }
@@ -1005,11 +892,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .thread-turns { scroll-behavior: auto; }
   .thread-turns > *:last-child,
   .stage-view,
-  .stage-gate-dot,
   .guide-live,
-  .stagger,
-  .roll-out,
-  .roll-in,
   .composer[data-working] > form::after,
   .newer-version,
   .turn-note,
@@ -1640,7 +1523,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 2px;
 }
 
-
 /* The document itself. Measure and rhythm are the whole job here: this is the
    one surface in the app a person reads rather than scans. */
 .prose {
@@ -1777,9 +1659,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .document-body {
     padding: var(--space-6) var(--space-4) var(--space-8);
   }
-  .decision-current h3 {
-    font-size: 1.125rem;
-  }
+
   .version-list > div {
     grid-template-columns: 1fr;
     gap: var(--space-1);
@@ -1828,32 +1708,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-}
-
-/* Fixed head height: the step below never shifts when the title swaps. */
-.onboarding-head {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  min-height: 118px;
-  animation: fadeup 0.38s cubic-bezier(0.2, 0.7, 0.3, 1) both;
-}
-
-.onboarding-head h1 {
-  font-size: 1.875rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  margin: 0;
-}
-
-.onboarding-head .lede {
-  margin: 0;
-  color: var(--wb-muted-foreground);
-  font-size: 0.84375rem;
-  line-height: 1.55;
-  max-width: 44ch;
 }
 
 @keyframes fadeup {
@@ -1995,17 +1849,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-weight: 600;
 }
 
-.ob-list .orow-pick {
-  font-family: var(--wb-font-mono);
-  font-size: 0.72rem;
-  color: var(--wb-muted-foreground);
-}
-
-.ob-list .orow.pick.on .orow-pick {
-  color: var(--wb-foreground);
-  font-weight: 700;
-}
-
 .ob-list .tag {
   font-family: var(--wb-font-mono);
   font-size: 0.6rem;
@@ -2056,87 +1899,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: var(--radius-control);
 }
 
-.provider-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--wb-border);
-  min-height: 56px;
-}
-
-.provider-row:last-child {
-  border-bottom: 0;
-}
-
-.provider-row.is-active {
-  border-left: 2px solid var(--wb-primary);
-  background: var(--wb-card);
-}
-
-/* Asking on the row itself. The field takes the space the identity and the
-   button were using, because while a key is being typed that is the only
-   thing on this row that matters. */
-.provider-row:has(.provider-ask) {
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-}
-
-.provider-ask {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  min-width: 0;
-}
-
-.provider-ask input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* KEEP: provider identity min-width (conv) */
-.provider-identity {
-  min-width: 0;
-}
-
-.provider-identity strong {
-  display: block;
-  font-weight: 500;
-}
-
-.provider-identity small {
-  display: block;
-  margin-top: var(--space-1);
-  color: var(--wb-muted-foreground);
-  font-size: 0.75rem;
-}
-
-.provider-state {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.provider-model select {
-  height: 32px;
-  max-width: 200px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius-control);
-  background: var(--wb-background);
-  font-size: 0.8125rem;
-}
-
-@media (max-width: 720px) {
-  .provider-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .provider-state,
-  .provider-model {
-    display: none;
-  }
-}
-
 /* The one place the company's name appears in the product. The credit pins
    bottom-left in the label register — the two identity typefaces (Belwe for
    the wordmark, Tratex for display) are deliberately not carried by this
@@ -2158,7 +1920,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   opacity: 0.7;
 }
 
-/* KEEP: auth form/switch (conv) */
 .auth-form {
   display: grid;
   gap: var(--space-4);
@@ -2264,7 +2025,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
-/* Whose move it is, when the specialist has stopped asking. */
 /* A message the person stopped before it was answered: still what they said,
    dimmed, with the reason no reply follows it. */
 .turn-withdrawn {
@@ -2385,43 +2145,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: transparent;
 }
 
-/* A pending capability grant — the request the specialist is parked on.
-   Same quiet row as the gate, but it stays up while the specialist works:
-   the work IS waiting on this answer. */
-.composer-request {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  color: var(--wb-primary);
-}
-
-.composer-request .sa-txt {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-request .sa-txt code {
-  font-size: 0.6875rem;
-}
-
-.composer-request .sa-actions {
-  display: flex;
-  gap: var(--space-1);
-  flex-shrink: 0;
-}
-
-.composer-request textarea {
-  min-height: 3rem;
-  font-size: 0.8125rem;
-}
-
-
 /* DesignPanel's wrapper in the stage pane. The pane scrolls; this is
    just the document, not a second chrome region. */
 .design-review {
@@ -2503,38 +2226,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   letter-spacing: -0.01em;
 }
 
-.start-lead {
-  margin: 0;
-  max-width: 60ch;
-  color: var(--wb-muted-foreground);
-}
-
-/* The home composer is the mock's composer-box: the input IS the page's one
-   control, so it carries the strong border and the primary focus ring the
-   stage composer's quieter version does not. */
-.start-input {
-  margin-top: var(--space-2);
-  border-color: var(--wb-border-strong);
-  padding: var(--space-3) var(--space-4) var(--space-2);
-  box-shadow: var(--wb-shadow);
-  transition: border-color 150ms;
-}
-
-.start-input:focus-within {
-  border-color: var(--wb-primary);
-}
-
-.start-input textarea {
-  min-height: 64px;
-  font-size: 1rem;
-}
-
-.start-hint {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
 /* --- Dictation --------------------------------------------------------------
    The microphone stands to the left of the composer, level with its send
    button, rather than inside the input, whose layout belongs to the component
@@ -2574,7 +2265,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* In a row that lays its field out beside a button, the wrapper takes the field's place. */
-.provider-ask > .dictated,
 .stakeholder-row > .dictated {
   flex: 1;
   min-width: 0;
@@ -2656,22 +2346,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-3);
 }
 
-.project-grid-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.project-grid-title {
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--wb-muted-foreground);
-}
-
 .import-link {
   padding: 0;
   border: 0;
@@ -2699,112 +2373,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-3);
 }
 
-.project-card {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-  padding: var(--space-4);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
-  background: var(--wb-background);
-  box-shadow: var(--wb-shadow);
-  text-align: left;
-  color: inherit;
-  transition:
-    transform var(--duration-micro, 150ms) var(--ease-out, ease),
-    border-color var(--duration-micro, 150ms) var(--ease-out, ease),
-    box-shadow var(--duration-micro, 150ms) var(--ease-out, ease);
-}
-
-.project-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--wb-border-strong);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--wb-foreground) 8%, transparent);
-}
-
-.needs-decision {
-  border-color: color-mix(in srgb, var(--wb-primary) 45%, var(--wb-border));
-}
-
-.project-card h4 {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.project-card-stage {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-/* The nine-segment track the topbar speaks, one per card: done stages fill
-   in, the live one stretches and takes the accent. */
-.stage-track {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-top: auto;
-}
-
-.stage-track .seg {
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--wb-border);
-}
-
-.stage-track .seg.done {
-  background: var(--wb-foreground);
-}
-
-.stage-track .seg.now {
-  background: var(--wb-primary);
-  width: 20px;
-}
-
-.project-card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-}
-
-.project-card-open {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity var(--duration-micro, 150ms), transform var(--duration-micro, 150ms);
-}
-
-/* The title is the click target; the card around it is the hover target. */
-.project-card-open-area {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-}
-
-.project-card-rename {
-  font-size: 1.0625rem;
-}
-
 /* The ellipsis: there on hover and focus, so a row of cards is not a row of
    dots. Always present for the keyboard. */
 .project-card-menu {
@@ -2821,7 +2389,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   transition: opacity var(--duration-micro, 150ms), background-color var(--duration-micro, 150ms);
 }
 
-.project-card:hover .project-card-menu,
 .project-card-menu:focus-visible,
 .project-card-menu[data-state="open"] {
   opacity: 1;
@@ -2856,10 +2423,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-bottom: var(--space-3);
 }
 
-.project-archive .project-card {
-  opacity: 0.7;
-}
-
 /* ---- Settings: three sections, one column ---- */
 .settings {
   display: grid;
@@ -2868,94 +2431,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 100%;
   margin: 0 auto;
   padding: var(--space-6) 0;
-}
-
-.settings-section {
-  display: grid;
-  gap: var(--space-4);
-  padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
-  background: var(--wb-background);
-  box-shadow: var(--wb-shadow);
-}
-
-.settings-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.settings-head h2 {
-  font-size: 1.125rem;
-  font-weight: 500;
-}
-
-.settings-head p {
-  margin: var(--space-1) 0 0;
-  max-width: 64ch;
-  font-size: 0.875rem;
-  color: var(--wb-muted-foreground);
-}
-
-.settings-note {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--wb-muted-foreground);
-}
-
-/* Providers as an ordered list: the order is the fallback chain. */
-.provider-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.icon-button {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--wb-muted-foreground);
-}
-
-.icon-button:hover:not(:disabled) {
-  background: var(--wb-muted);
-  color: var(--wb-foreground);
-}
-
-.icon-button:disabled {
-  opacity: 0.3;
-}
-
-.icon-button svg {
-  width: 16px;
-  height: 16px;
-}
-
-/* One setting, one row: the words on the left, the control on the right. */
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-6);
-  padding: var(--space-3) 0;
-}
-
-/* A setting whose control is typed rather than picked: the field goes under
-   its explanation, full width, rather than beside it. */
-.setting-field {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
-}
-
-.setting-field textarea {
-  min-height: 6rem;
 }
 
 /* The row's controls take the app's control shape, and no more width than a
@@ -2977,177 +2452,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .setting-number {
   width: 8rem;
   text-align: right;
-}
-
-/* A path is long and read left to right: wider than a number, monospaced. */
-.setting-path {
-  flex: none;
-  width: 20rem;
-  max-width: 100%;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.8125rem;
-}
-
-/* The host's own word on the section, under the controls it describes. */
-.setting-note {
-  margin: var(--space-2) 0 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.setting-row + .setting-row {
-  border-top: 1px solid var(--wb-border);
-}
-
-.setting-row p {
-  margin: var(--space-1) 0 0;
-  max-width: 56ch;
-  font-size: 0.875rem;
-  color: var(--wb-muted-foreground);
-}
-
-.settings-diagnostics summary {
-  font-size: 0.875rem;
-  color: var(--wb-muted-foreground);
-  padding: var(--space-2) 0;
-}
-
-.diagnostic-list {
-  margin: var(--space-2) 0 0;
-  display: grid;
-  gap: var(--space-2);
-  font-size: 0.875rem;
-}
-
-.diagnostic-list > div {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: var(--space-3);
-}
-
-.diagnostic-list dt {
-  color: var(--wb-muted-foreground);
-}
-
-.diagnostic-list dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-/* KEEP: deck-role disclosure + template library (conv) */
-/* A stakeholder role's deck design, disclosed on open. */
-.deck-role {
-  border-top: 1px solid var(--wb-border);
-}
-
-.deck-role-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2) var(--space-3);
-  padding-block: var(--space-3);
-  list-style: none;
-  cursor: pointer;
-}
-
-.deck-role-summary::-webkit-details-marker {
-  display: none;
-}
-
-.deck-role-summary::before {
-  content: "›";
-  display: inline-block;
-  width: 1em;
-  color: var(--wb-muted-foreground);
-  transition: transform 120ms ease;
-}
-
-.deck-role[open] > .deck-role-summary::before {
-  transform: rotate(90deg);
-}
-
-.deck-role-summary:hover .deck-role-digest {
-  color: var(--wb-foreground);
-}
-
-.deck-role-title {
-  margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  text-transform: capitalize;
-}
-
-.deck-role-digest {
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.deck-role-body {
-  display: grid;
-  gap: var(--space-3);
-  padding-block: 0 var(--space-4);
-}
-
-.deck-role-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-}
-
-.deck-role-control {
-  display: grid;
-  gap: var(--space-1);
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-/* The uploaded style-guide library: one row per template, a picker to add one. */
-.deck-template-library {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) 0;
-}
-
-.deck-template-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.deck-template-name {
-  font-size: 0.875rem;
-  overflow-wrap: anywhere;
-}
-
-.deck-template-pick {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.deck-template-pick input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.project-card:hover .project-card-open,
-.project-card:focus-visible .project-card-open {
-  opacity: 1;
-  transform: none;
-}
-
-.project-card-open svg {
-  width: 14px;
-  height: 14px;
 }
 
 /* How long the wait has been, and how long is normal. */
@@ -3173,7 +2477,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .stage-view > .banner,
-.stage-view > .stage-gate,
 .stage-view > .stage-model-row,
 .stage-view > .model-nudge,
 .stage-view > .model-nudge-pending {
@@ -3360,37 +2663,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* Waiting on a decision: one line across the top, not a wall in front of the
-   document — the document is still there to be read. */
-.stage-guidance {
-  flex: none;
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--wb-border);
-  background: var(--wb-card);
-}
-
-.stage-guidance-title {
-  margin: 0;
-  font-weight: 500;
-}
-
-.stage-guidance-detail {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.stage-guidance .button-row {
-  margin-top: var(--space-1);
-}
-
-@keyframes gate-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--wb-primary) 45%, transparent); }
-  50% { box-shadow: 0 0 0 6px transparent; }
-}
-
 /* The guide's ring gives a small beat when the next step changes, so the
    corner is seen to be keeping up without saying anything. */
 .guide-live {
@@ -3403,33 +2675,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   40% { transform: scale(1.3); }
   100% { transform: scale(1); }
 }
-
-.approvals-record {
-  margin-top: var(--space-2);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
-  background: var(--wb-background);
-}
-
-.approvals-record summary {
-  padding: var(--space-3) var(--space-5);
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.approvals-record summary:hover {
-  color: var(--wb-foreground);
-}
-
-.approvals-record[open] > :not(summary) {
-  max-height: 40vh;
-  overflow-y: auto;
-  padding: 0 var(--space-5) var(--space-4);
-}
-
-/* The stage's send-back, folded under the gate. */
-.send-back { margin: var(--space-2) var(--space-4) 0; }
-.send-back-body { display: grid; gap: var(--space-4); padding-top: var(--space-2); }
 
 /* Filling the window, a stage screen is the page, not a card on grey. */
 .canvas-body.is-fill > [data-slot="card"] {
@@ -3554,8 +2799,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   outline: 2px solid var(--wb-ring);
   outline-offset: 3px;
 }
-
-
 
 .guide-panel {
   position: absolute;
@@ -3709,7 +2952,6 @@ button[aria-disabled="true"] {
   }
 }
 
-
 /* --- Stage 3 side by side, and the likely answers under a question (CL-7599, CL-7600) --- */
 
 /* Two approaches at one glance. The document body is the container, so the
@@ -3784,7 +3026,6 @@ button[aria-disabled="true"] {
   background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card));
 }
 
-
 /* --- Pending turn (CL-7602) ------------------------------------------------
    The bubble stamps every message with a relative time. The one turn the host
    has not recorded is the specialist still working; a time under it is noise. */
@@ -3850,51 +3091,6 @@ button[aria-disabled="true"] {
   border-radius: var(--radius-control);
 }
 
-.start-material {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.material-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.material-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-  font-size: 0.8125rem;
-}
-
-.material-size {
-  color: var(--wb-muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.material-remove {
-  min-width: 28px;
-  min-height: 28px;
-  border: 0;
-  background: none;
-  color: var(--wb-muted-foreground);
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.material-remove:focus-visible {
-  outline: 2px solid var(--wb-ring);
-  outline-offset: 2px;
-}
-
-/* The stakeholder editor: one row per person, name then role then remove. */
 /* A stakeholder's slides in the artifacts view: a file, described and saved. */
 .deck-file {
   display: grid;
@@ -4078,19 +3274,6 @@ button[aria-disabled="true"] {
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
-/* The documents beside the plan at stage 6, the requirements and the
-   reviews: a region of their own above the plan that scrolls on its own
-   and never takes more than half the window, so the plan stays reachable
-   whatever is opened above it. */
-.stage-companions {
-  flex: none;
-  max-height: 50vh;
-  overflow-y: auto;
-  display: grid;
-  gap: var(--space-2);
-  align-content: start;
-}
-
 /* A folded document's body is read within the fold; the pane's own
    scrolling belongs to the region around it. */
 .document-fold-body.document-body,
@@ -4115,11 +3298,6 @@ button[aria-disabled="true"] {
   align-items: center;
 }
 
-.stakeholder-list {
-  margin: 0;
-  padding-left: var(--space-5);
-}
-
 @media (max-width: 640px) {
   .stakeholder-row {
     grid-template-columns: 1fr;
@@ -4131,28 +3309,6 @@ button[aria-disabled="true"] {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--wb-border);
   font-size: 0.875rem;
-}
-
-/* The same picker inside a sentence: beside the composer and on the opening
-   screen, it reads as one of the ways in, not a control of its own. */
-.material-add-inline {
-  display: inline;
-}
-
-.material-add-inline button {
-  padding: 0;
-  height: auto;
-  min-height: 0;
-  font-size: inherit;
-  vertical-align: baseline;
-}
-
-.material-add-inline .inline-note {
-  display: block;
-}
-
-.material-cue {
-  margin-top: var(--space-2);
 }
 
 /* The reading sits under the file, in the file's own column. */
@@ -4265,8 +3421,6 @@ button[aria-disabled="true"] {
   font-size: 0.875rem;
 }
 
-
-/* KEEP: feedback disposition (conv) */
 /* One feedback comment's disposition select, plus a stale-anchor note. */
 .feedback-disposition {
   display: flex;
@@ -4306,58 +3460,6 @@ button[aria-disabled="true"] {
   }
 }
 
-/* ---- Inference spend ---- */
-
-/* The workspace's spend at the head of the projects page: one figure, then
-   how it splits by provider. Quiet, since it is a fact and not a call to act. */
-/* KEEP: stage guidance readiness note (conv) */
-/* The readiness note in the stage guidance banner: advisory, not another
-   title — it sits under the detail line at the same weight as a caption. */
-.stage-guidance-ready {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--wb-okay, var(--wb-muted-foreground));
-}
-
-.spend-box {
-  margin: 0 var(--space-5) var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-  background: var(--wb-card);
-  display: grid;
-  gap: var(--space-2);
-}
-
-.spend-headline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.spend-figure {
-  font-size: 1.25rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.spend-caption,
-.spend-providers {
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.spend-providers {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-}
-
-/* Wide enough for the spend table's six columns without clipping the cost. */
 .project-info {
   width: min(52rem, calc(100vw - 2rem));
   max-width: none;
@@ -4435,20 +3537,6 @@ button[aria-disabled="true"] {
 
 .project-settings .check input {
   margin-top: 3px;
-}
-
-.project-info-heading {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: 0.9375rem;
-}
-
-.project-info-spend {
-  font-variant-numeric: tabular-nums;
-}
-
-.project-info-total {
-  margin: var(--space-3) 0 0;
-  font-size: 0.875rem;
 }
 
 /* A past stage's document opened from the stepper: its head names the

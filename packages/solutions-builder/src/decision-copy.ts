@@ -17,12 +17,6 @@ export const CONSEQUENCE: Record<number, string> = {
   9: "Accepting this manifest completes delivery of the exact versions listed.",
 };
 
-/** What a run state freezes, when the consequence turns on the state rather than the stage. */
-export const STATE_CONSEQUENCE: Record<string, string> = {
-  cost_approved: "Freezing locks this exact plan and cost and queues the build. Nothing is spent until then.",
-  waiting_human: "Answering resumes the same build attempt with exactly what you grant, and nothing more.",
-};
-
 /**
  * The stage-to-authority mapping: pure and stage-only, so every reader
  * (the decision-queue fold, the project view) applies the identical rule.
