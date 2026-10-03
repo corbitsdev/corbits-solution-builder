@@ -966,7 +966,9 @@ export function StageWorkspace({
               }}
               onSubmit={() => void approve()}
               soloApproval={detail.soloApproval}
-              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+              // A settled version with no reply in flight can be approved while
+              // its review is still opening: approving opens one itself.
+              canSubmit={(approveAllowed || reviewMessage !== null) && artifacts.isStageDraft && !superseded}
               targetPending={stage === 3 && chosenTarget === null}
               busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
               draftOpen={draftOpen}
