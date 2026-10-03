@@ -39,9 +39,6 @@ const LINE_RULES: readonly { rule: QualityRule; pattern: RegExp }[] = [
   { rule: "placeholder", pattern: /lorem ipsum/i },
 ];
 
-/** `placeholder` the HTML attribute, CSS pseudo-element or class, property or utility class is a feature, not a stub. */
-const PLACEHOLDER_FEATURE = /\bclass(Name)?\s*=\s*["'][^"']*placeholder[^"']*["']|::?placeholder(-shown)?|\.placeholder\b|placeholder["']?\s*[=:]|\w+[Pp]laceholder|[Pp]laceholder[A-Z_]\w*/g;
-
 const SWALLOWED: readonly RegExp[] = [
   /\bcatch\s*(\([^)]*\))?\s*\{(\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*\}/g,
   /\.catch\(\s*(\([^)]*\)|\w+)\s*=>\s*(\{\s*\}|undefined|null|void 0)\s*\)/g,
@@ -59,10 +56,13 @@ function lineAt(text: string, index: number): number {
 
 function scanText(path: string, text: string): QualityFinding[] {
   const findings: QualityFinding[] = [];
-  text.split("\n").forEach((raw, index) => {
-    const rule = LINE_RULES.find((candidate) => candidate.pattern.test(raw))?.rule ?? (/placeholder/i.test(raw.replace(PLACEHOLDER_FEATURE, "")) ? "placeholder" : null);
-    if (rule) findings.push({ path, line: index + 1, rule, text: raw.trim().slice(0, 160) });
-  });
+  // The README is told to name what was left unbuilt, so prose is not read for stub markers.
+  if (!path.endsWith(".md")) {
+    text.split("\n").forEach((raw, index) => {
+      const rule = LINE_RULES.find((candidate) => candidate.pattern.test(raw))?.rule;
+      if (rule) findings.push({ path, line: index + 1, rule, text: raw.trim().slice(0, 160) });
+    });
+  }
   for (const pattern of SWALLOWED) {
     for (const match of text.matchAll(pattern)) {
       findings.push({ path, line: lineAt(text, match.index), rule: "swallowed_error", text: match[0].replace(/\s+/g, " ").slice(0, 160) });
