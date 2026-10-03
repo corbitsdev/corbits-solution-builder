@@ -6,7 +6,7 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
-import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
+import { AUTHORITIES, STAGE_TITLES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, evaluatorFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
@@ -2345,7 +2345,7 @@ export const api = {
         await localizedRole(transport, workspaceTenantId, role),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} evaluator`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${STAGE_TITLES[stage]} evaluator`, placement);
       return deployment;
     });
     ensureEvaluatorCalls.set(key, call);
