@@ -5,6 +5,8 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
+import { keys } from "./queries/keys.ts";
+import { useQuery } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
@@ -259,6 +261,13 @@ export function AppBar({
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
+  // The same read the home card makes, so a finished project's track says so.
+  const workflow = useQuery({
+    queryKey: keys.workflowView.card(detail?.project.id ?? ""),
+    queryFn: () => api.projectWorkflowView(detail!.project.id),
+    enabled: inProject,
+    retry: false,
+  });
   const inSettings = view === "settings";
   return (
     <header className={inProject ? "topbar topbar-project" : "topbar"}>
@@ -327,7 +336,9 @@ export function AppBar({
             <span className="step-name">
               {viewedStage !== null && viewedStage !== detail.stage
                 ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
-                : stageName(detail.stage)}
+                : workflow.data?.done
+                  ? "Delivered"
+                  : stageName(detail.stage)}
             </span>
           </>
         ) : null}
