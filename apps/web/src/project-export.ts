@@ -11,7 +11,9 @@ export const BUNDLE_FORMAT = "solutions-builder.project" as const;
 export const BUNDLE_VERSION = 2 as const;
 const STAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
-export type ExportedArtifact = { node: ArtifactNode; content: string };
+/** A node as recorded; its lineage position is derived when a project is read. */
+export type ExportedNode = Omit<ArtifactNode, "position">;
+export type ExportedArtifact = { node: ExportedNode; content: string };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 
 export type ProjectBundle = {
@@ -31,14 +33,16 @@ export type BundleDeps = {
     nodes: ArtifactNode[];
   }>;
   artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
-  stageAgentStatus: (projectId: string, stage: number) => Promise<{ address: string } | null>;
+  /** Every address the stage's specialist has run at: a redeploy (send-back,
+   *  restart, model switch) leaves earlier mail under earlier addresses. */
+  stageAgentAddresses: (projectId: string, stage: number) => Promise<string[]>;
   readStageThread: (tenantId: string, addresses: string[]) => Promise<ChatMessage[]>;
 };
 
 /** Only the fields a document node is documented to carry -- an explicit
  *  whitelist, not a spread, so an unexpected field on the read (a stray
  *  credential, say) can never ride along into the bundle. */
-function pickNode(node: ArtifactNode): ArtifactNode {
+function pickNode(node: ArtifactNode): ExportedNode {
   return {
     id: node.id,
     kind: node.kind,
@@ -85,9 +89,9 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
 
   const conversations: ExportedConversation[] = [];
   for (const stage of STAGES) {
-    const status = await deps.stageAgentStatus(projectId, stage);
-    if (!status) continue;
-    const messages = await deps.readStageThread(detail.tenantId, [status.address]);
+    const addresses = await deps.stageAgentAddresses(projectId, stage);
+    if (addresses.length === 0) continue;
+    const messages = await deps.readStageThread(detail.tenantId, addresses);
     if (messages.length === 0) continue;
     conversations.push({ stage, messages: messages.map(pickMessage) });
   }

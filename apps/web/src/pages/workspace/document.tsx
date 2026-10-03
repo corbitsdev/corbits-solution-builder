@@ -23,12 +23,14 @@ import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { ComposedMail, MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
+import { BusyLine } from "../../zen-garden.tsx";
 
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 
@@ -59,6 +61,7 @@ export function StageDocument({
   onSelectVersion,
   onRevise,
   onAddMaterial,
+  attachNote = null,
   onSubmit,
   soloApproval,
   canSubmit,
@@ -75,6 +78,9 @@ export function StageDocument({
   onSendHold,
   composerPopover = null,
   events = EMPTY_EVENTS,
+  documentLead = null,
+  composerLead = null,
+  tools = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -99,6 +105,7 @@ export function StageDocument({
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
+  attachNote?: string | null;
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
@@ -117,9 +124,8 @@ export function StageDocument({
   pending?: boolean;
   /** Restores that turn to the composer and records the withdrawal. */
   onStop?: () => void;
-  /** The artifact strip, rendered at the head of the document pane. Its
-   *  presence also hands version paging to the strip, so the header's own
-   *  picker hides rather than duplicating it. */
+  /** The artifact strip, rendered at the head of the document pane; its
+   *  version select is the one place a version is picked and named. */
   strip?: ReactNode;
   /** Set when the person is reading a superseded version of the stage's
    *  draft: the composer's gate offers "make this the active version"
@@ -134,6 +140,15 @@ export function StageDocument({
   /** The stage's event record — decisions, versions, aborted turns — folded
    *  into the transcript as quiet lines. */
   events?: readonly StageEvent[];
+  /** A read of the document that heads the document pane, above the text:
+   *  Cost approval's estimate summary (#619). Never part of the document,
+   *  so a passage cannot be quoted from it. */
+  documentLead?: ReactNode;
+  /** A question the stage itself asks the person, in the chat column above
+   *  the box: Cost approval's "How will this be used?" (#619). */
+  composerLead?: ReactNode;
+  /** The stage's own actions on this document, in its toolbar. */
+  tools?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
@@ -170,7 +185,7 @@ export function StageDocument({
   // Against the version before this one, like tracked changes: what a revision
   // did is otherwise something the reader has to find by rereading the whole
   // document.
-  const previous = versions.find((entry) => entry.version === node.version - 1) ?? null;
+  const previous = versions.find((entry) => entry.position === node.position - 1) ?? null;
   const [showChanges, setShowChanges] = useState(true);
   const [previousContent, setPreviousContent] = useState<string | null>(null);
   useEffect(() => {
@@ -435,7 +450,7 @@ export function StageDocument({
                   // options is asking for a choice, whether or not a question
                   // is queued.
                   onAnswer={
-                    busy === null && message.id === lastTurnId
+                    message.id === lastTurnId
                       ? (answer) => {
                           // The last tap sends what the box was gathering
                           // (#186): the box empties, as after any send, so
@@ -445,6 +460,7 @@ export function StageDocument({
                         }
                       : undefined
                   }
+                  busy={busy !== null}
                   // With several questions asked, the answers gather in the
                   // box until the last is tapped (#142), where the person
                   // can read them together and add to them.
@@ -457,7 +473,7 @@ export function StageDocument({
             ) : (
               <>
                 {who}
-                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <PersonTurn text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
               </>
             );
           }}
@@ -486,6 +502,9 @@ export function StageDocument({
         </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
+          <BusyLine />
+          {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {composerLead}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
           {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
@@ -579,7 +598,7 @@ export function StageDocument({
                   : attached.length > 0
                   ? "What should change about this?"
                   : openQuestion
-                    ? "Message the specialist…"
+                    ? `Message the ${agentFor(node.stage as Stage).title.toLowerCase()}…`
                     : "What should change? Add as much as you like."
             }
             attachments={attached.map((entry, index) => ({
@@ -613,44 +632,32 @@ export function StageDocument({
       }
     >
         <div className="stage-inner">
+          {documentLead}
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
-                v{node.version} · {documentName(node.kind)}
+                {documentName(node.kind)}
                 {node.supersededByNodeId ? " · superseded" : ""}
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
               {live !== null ? (
-                <span className="thinking">Writing version {node.version + 1}</span>
+                <span className="thinking">Writing version {node.position + 1}</span>
               ) : newer ? (
                 <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
                   <ArrowUp aria-hidden="true" />
-                  Version {newer.version} is ready
+                  Version {newer.position} is ready
                 </button>
               ) : null}
               <div className="document-tools">
                 {!binary ? <CopyButton text={content} /> : null}
-                {versions.length > 1 && strip === null ? (
-                  <select
-                    aria-label="Version"
-                    value={node.id}
-                    onChange={(event) => onSelectVersion(event.target.value)}
-                  >
-                    {versions.map((version) => (
-                      <option key={version.id} value={version.id}>
-                        Version {version.version}
-                        {version.supersededByNodeId ? " (superseded)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
                 {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-                    <span>Changes since v{previous.version}</span>
+                    <span>Changes since v{previous.position}</span>
                   </label>
                 ) : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}
+                {tools}
               </div>
             </div>
             {live !== null ? (
@@ -752,3 +759,14 @@ const EMPTY_EVENTS: readonly StageEvent[] = [];
  *  per-passage note the selection popover collects. The note folds into the
  *  quote's own line on send — `Quote` on the wire stays what it is. */
 type AttachedQuote = { quote: string; note?: string };
+
+/**
+ * A person's turn in the transcript. Material attached after the stage
+ * opened travels as a mail in the person's name (#607): the files' names
+ * show, and what they say opens on demand. Anything else shows as
+ * `MessageBody` does: the person's words, what the app added folded.
+ */
+function PersonTurn({ text }: { text: string }) {
+  const material = materialMailFold(text);
+  return material ? <ComposedMail fold={material} /> : <MessageBody text={text} />;
+}

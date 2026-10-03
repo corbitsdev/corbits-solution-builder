@@ -18,6 +18,7 @@ import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from 
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
 import { openInGoogleSlides } from "../google-slides.ts";
@@ -32,6 +33,7 @@ import { isHtmlDocument } from "./workspace/guidance.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
+import { unrecordedPackageRevisions } from "../package-revisions.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
@@ -360,8 +362,11 @@ export function AudiencePackages({
   lastRefusal,
   workflowView,
   onStakeholdersSaved,
+  messages = [],
 }: {
   detail: ProjectDetail;
+  /** The stage's thread (#597): a package rewritten on request in the chat is recorded from it. */
+  messages?: readonly ChatMessage[];
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
@@ -502,6 +507,25 @@ export function AudiencePackages({
   // the tabs and the decisions table read the same way, the person's own
   // first (#122).
   const packages = packagesByStakeholder(detail.nodes, audiences);
+
+  // A package the presentation creator rewrote on request in the chat is
+  // recorded as the stakeholder's next version (#597); until now only
+  // the "Write package" flow's own reply was, and the slides kept the first
+  // version however many times the person asked. Each reply is recorded
+  // once; a stakeholder whose package is being written is left to that flow.
+  const recordedReplies = useRef(new Set<string>());
+  useEffect(() => {
+    for (const revision of unrecordedPackageRevisions(messages, detail.nodes, audiences)) {
+      if (writing.has(revision.name) || recordedReplies.current.has(revision.message.id)) continue;
+      recordedReplies.current.add(revision.message.id);
+      void api
+        .persistAudiencePackage(detail.project.id, revision.name, revision.message.body)
+        .then(() => onChanged())
+        .catch(() => recordedReplies.current.delete(revision.message.id));
+    }
+    // `audiences` is derived from `detail`; `onChanged` is the page's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, detail.nodes, writing]);
   // The open tab is a stakeholder, not a version: writing a package again
   // gives it a new version id, and a tab keyed on the id fell back to the
   // first stakeholder the moment the rewrite landed.
@@ -534,7 +558,6 @@ export function AudiencePackages({
     const tab = how === "google" ? window.open("about:blank", "_blank") : null;
     if (tab) tab.opener = null;
     setSaving((before) => new Set(before).add(packageNodeId));
-    setError(null);
     try {
       if (!pkg) throw new Error("That stakeholder's package could not be found.");
       const recorded = detail.nodes
@@ -589,7 +612,7 @@ export function AudiencePackages({
         }
         if (how === "google") {
           const opened = await openInGoogleSlides(pptx, fileBase, tab);
-          if (opened.notice) setError(`Slides for ${name}: ${opened.notice}`);
+          if (opened.notice) toast(`Slides for ${name}: ${opened.notice}`);
         } else {
           downloadArtifact(pptx.dataUrl, pptx.filename);
         }
@@ -597,12 +620,12 @@ export function AudiencePackages({
       if (how === "google") {
         // Said above, when there was something to say.
       } else if (themeNotice) {
-        setError(`Slides for ${name}: ${themeNotice}.`);
+        toast(`Slides for ${name}: ${themeNotice}.`);
       }
       setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
       tab?.close();
-      setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+      toast.error(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
     } finally {
       setSaving((before) => {
         const next = new Set(before);
@@ -725,16 +748,9 @@ export function AudiencePackages({
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
-  // `allowed.approve` only gates on a review being open, not on quorum --
-  // the stage rule that actually enforces quorum only fires once an approve
-  // is attempted (CL-8687's `approveReason` doc comment). Left alone, that
-  // makes "Approve and continue" clickable before anyone has voted: the
-  // click round-trips to a refusal instead of ever doing what it looks like
-  // it does. This mirrors `quorumState`'s own `met` test (`blocked.length
-  // === 0 && proceeded >= required`) using the fields the workflow view
-  // already exposes, purely to hold the button until quorum is actually
-  // met -- it never changes what gets recorded (CL-8866).
-  const quorumMet = blockedBy.length === 0 && proceeded >= requiredQuorum;
+  // `allowed.approve` only gates on a review being open; the reducer's own
+  // quorum verdict holds the button until an approve could be committed.
+  const quorumMet = workflowView?.stage5Quorum?.met === true;
   const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
   const quorumReason = quorumMet
     ? null

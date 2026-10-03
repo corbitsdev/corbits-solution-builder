@@ -20,6 +20,7 @@
  * models, and catalog actions are quiet links in `.v`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
 import { moveTo, PRIMARY, rankLabel, sameOrder } from "./provider-order.ts";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
@@ -93,7 +94,6 @@ export function ProviderList({
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const cancelledRef = useRef<Set<string>>(new Set());
 
@@ -151,12 +151,11 @@ export function ProviderList({
   const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
     setBusy(id);
     setError(null);
-    setNotice(null);
     cancelledRef.current.delete(id);
     try {
       await work();
       if (cancelledRef.current.has(id)) return;
-      if (done) setNotice(done);
+      if (done) toast.success(done);
       await onChanged();
     } catch (cause) {
       if (cancelledRef.current.has(id)) return;
@@ -211,7 +210,6 @@ export function ProviderList({
     setBusy(null);
     setAuthorizeUrl(null);
     setError(null);
-    setNotice(null);
     // Stop the host's callback server too: it holds a fixed loopback port, so
     // leaving it running makes the next attempt fail as "already in use".
     void api.cancelProviderSignIn(id).catch(() => undefined);
@@ -431,7 +429,6 @@ export function ProviderList({
       {/* Below the list, always. An error above it would move the thing the
           person was about to click. */}
       {error ? <Banner tone="error" title={error} /> : null}
-      {notice ? <Banner tone="okay" title={notice} /> : null}
 
       {rows.find((row) => row.id === chosen)?.kind === "local_endpoint" ? (
         <p className="inline-note">
@@ -481,7 +478,6 @@ export function ResolvedCatalogList({
   const [rows, setRows] = useState<ResolvedCatalogRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -498,10 +494,9 @@ export function ResolvedCatalogList({
   const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
     setBusy(id);
     setError(null);
-    setNotice(null);
     try {
       await work();
-      if (done) setNotice(done);
+      if (done) toast.success(done);
       await reload();
       await onChanged();
     } catch (cause) {
@@ -604,7 +599,6 @@ export function ResolvedCatalogList({
         })
       )}
       {error ? <Banner tone="error" title={error} /> : null}
-      {notice ? <Banner tone="okay" title={notice} /> : null}
     </>
   );
 }

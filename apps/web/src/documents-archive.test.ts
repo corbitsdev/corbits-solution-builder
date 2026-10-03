@@ -19,6 +19,7 @@ function node(over: Partial<ArtifactNode> & { kind: string; stage: number }): Ar
     variant: null,
     title: over.kind,
     version: 1,
+    position: 1,
     artifactId: `art-${over.kind}`,
     contentHash: "",
     createdAt: at,
@@ -123,7 +124,7 @@ describe("downloadProjectDocuments", () => {
       },
     });
     expect(saved).toEqual(["inteva-complete-documents.zip"]);
-    expect(notice).toBe("Saved 2 documents of Inteva Complete to inteva-complete-documents.zip.");
+    expect(notice).toEqual({ message: "Saved 2 documents of Inteva Complete to inteva-complete-documents.zip.", complete: true });
   });
 
   test("a project with nothing finished saves nothing and says so", async () => {
@@ -134,7 +135,7 @@ describe("downloadProjectDocuments", () => {
         throw new Error("must not save");
       },
     });
-    expect(notice).toBe("Fresh has no finished documents yet.");
+    expect(notice).toEqual({ message: "Fresh has no finished documents yet.", complete: false });
   });
 });
 
@@ -201,7 +202,7 @@ describe("mockups in the archive", () => {
       save: () => undefined,
       shoot: async () => shots,
     });
-    expect(notice).toBe("Saved 1 document and 2 mockup pictures of P to p-documents.zip.");
+    expect(notice).toEqual({ message: "Saved 1 document and 2 mockup pictures of P to p-documents.zip.", complete: true });
   });
 });
 

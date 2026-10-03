@@ -10,6 +10,7 @@ function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     stage: 1,
     title: "Stage 1 draft",
     version: 1,
+    position: 1,
     artifactId: "art_1",
     contentHash: "node_1@1",
     sizeBytes: 42,
@@ -28,7 +29,7 @@ function deps(overrides: Partial<BundleDeps> = {}): BundleDeps {
       nodes: [node()],
     }),
     artifactContent: async () => ({ content: "the brief" }),
-    stageAgentStatus: async (_projectId, stage) => (stage === 1 ? { address: "dep_1@example" } : null),
+    stageAgentAddresses: async (_projectId, stage) => (stage === 1 ? ["dep_1@example"] : []),
     readStageThread: async () => [
       { id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" },
     ],
@@ -55,7 +56,7 @@ describe("assembleBundle", () => {
     const bundle = await assembleBundle(
       "proj_1",
       deps({
-        stageAgentStatus: async (_projectId, stage) => (stage === 1 || stage === 2 ? { address: `dep_${stage}@example` } : null),
+        stageAgentAddresses: async (_projectId, stage) => (stage === 1 || stage === 2 ? [`dep_${stage}@example`] : []),
         readStageThread: async (_tenantId, addresses) => (addresses[0] === "dep_1@example" ? [{ id: "1", author: "me", body: "hi", at: "2026-01-01T00:00:00.000Z" }] : []),
       }),
     );

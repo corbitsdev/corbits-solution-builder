@@ -10,6 +10,7 @@ function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     stage: 8,
     title: "build.tar.gz",
     version: 1,
+    position: 1,
     artifactId: "art_1",
     contentHash: "art_1@1",
     mediaType: "application/gzip",
@@ -117,7 +118,7 @@ describe("composeSupervisorBrief", () => {
     endedAt: "2026-01-01T01:00:00.000Z",
     checkpointRef: null,
   };
-  const archive = { fileName: "build.tar.gz", sha256: "abc", sizeBytes: 1234 };
+  const archive = { fileName: "build.tar.gz", sha256: "abc", sizeBytes: 1234, fileCount: 1 };
 
   test("says the worker, how it ended, its final text, the archive and the checks, and claims no control it lacks", () => {
     const brief = composeSupervisorBrief({
@@ -134,12 +135,12 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("- web: responded");
     expect(brief).toContain("no session, steering or checkpoint exists");
     // Without a forecast the brief says there is none, so the heading is answered honestly.
-    expect(brief).toContain("No forecast could be read from stage 7's estimate");
+    expect(brief).toContain("No forecast could be read from the Cost approval estimate");
   });
 
   test("stage 7's forecast is carried for the cost heading when it can be read", () => {
     const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, failed: [], targets: [] } });
-    expect(brief).toContain("## Stage 7 forecast\n- **Build:** $1,200");
+    expect(brief).toContain("## Cost approval forecast\n- **Build:** $1,200");
   });
 
   test("a cancelled worker is said by its signal, a failed check by name, and silence as silence", () => {

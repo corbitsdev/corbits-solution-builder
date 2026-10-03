@@ -30,6 +30,7 @@ export function draftNode(kind: string, stage: number, title: string): ArtifactN
     stage,
     title,
     version: 1,
+    position: 1,
     artifactId: `draft:${kind}`,
     contentHash: "",
     mediaType: "text/markdown",

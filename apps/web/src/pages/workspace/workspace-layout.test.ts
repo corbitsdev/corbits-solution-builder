@@ -72,15 +72,23 @@ describe("project chrome classes", () => {
 
 describe("stage 7 lead cards", () => {
   const global = read("../../styles.css");
+  const page = read("./index.tsx");
 
-  test("the target question and estimate summary are cards on the conversation's gutter, not bare text", () => {
+  test("the target question and estimate summary are cards, not bare text", () => {
     expect(read("./freeze.tsx")).toContain('className="stage-lead target-picker"');
     expect(read("./estimate.tsx")).toContain('className="stage-lead estimate-view"');
     expect(global).toMatch(
-      /\.stage-view > \.stage-lead \{[^}]*margin: var\(--space-4\) var\(--space-5\) 0;[^}]*border: 1px solid var\(--wb-border\);[^}]*border-radius: var\(--radius-lg\);[^}]*background: var\(--wb-card\);/,
+      /\.stage-lead \{[^}]*padding: var\(--space-4\) var\(--space-5\);[^}]*border: 1px solid var\(--wb-border\);[^}]*border-radius: var\(--radius-lg\);[^}]*background: var\(--wb-card\);/,
     );
-    // The gutter is the one `.conv-scroll` gives the turns beneath the card.
-    expect(read("../workspace-layout.css")).toMatch(/\.conv-scroll \{[^}]*padding: var\(--space-5\);/);
+  });
+
+  // #619: above the panes, the two cards took the window from both.
+  test("each card is handed to the pane it is about, and nothing sits above the panes", () => {
+    expect(page).toMatch(/documentLead=\{\s*stage === 7 && artifacts\.isStageDraft \? \(\s*<EstimateView body=\{artifacts\.activeContent\}/);
+    expect(page).toMatch(/composerLead=\{stage === 7 \? <TargetPicker /);
+    expect(page.match(/<EstimateView /g)).toHaveLength(1);
+    expect(page.match(/<TargetPicker /g)).toHaveLength(1);
+    expect(global).not.toContain(".stage-view > .stage-lead");
   });
 });
 
@@ -234,8 +242,8 @@ describe("project chrome paint", () => {
     expect(chrome).toContain("Reconnecting to the");
     expect(chrome).toContain("is getting ready…");
     expect(chrome).toContain("<StagePanes");
-    expect(chrome).toContain("opening-stage-name");
-    expect(chrome).toContain("<ChatInput");
+    expect(chrome).not.toContain("opening-stage-name");
+    expect(chrome).not.toContain("<ChatInput");
     const index = read("./index.tsx");
     expect(index).not.toContain("Starting the");
     expect(index).toContain("<OpeningScreen");

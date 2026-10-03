@@ -250,6 +250,8 @@ form:has(> div > textarea) textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
   padding: 2px 4px 2px 6px;
   margin: -2px 0 -2px -6px;
   border: 0;
@@ -264,6 +266,14 @@ form:has(> div > textarea) textarea:focus-visible {
 .wordmark-menu:hover,
 .wordmark-menu[data-state="open"] {
   background: var(--wb-muted);
+}
+
+/* A flex container never draws an ellipsis itself; the title's own box does. */
+.wordmark-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wordmark-menu svg {
@@ -604,12 +614,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    fold; the library collapses to a 56px icon rail and keeps its labels for
    screen readers. */
 @media (max-width: 1080px) {
-  .app { grid-template-columns: auto minmax(0, 1fr); }
   .span-4, .span-6, .span-8 { grid-column: span 12; }
 }
 
 @media (max-width: 640px) {
   .canvas { padding: var(--space-4) var(--space-4) var(--space-8); }
+  /* A filling surface (the workspace) is the page itself, edge to edge. */
+  .canvas:has(> .canvas-body.is-fill) { padding: 0; }
   .artifact pre { font-size: 0.75rem; }
   .queue-item,
   .version-list { grid-template-columns: 1fr; }
@@ -786,9 +797,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 /* The record between turns — boundaries, versions, decisions, aborts — as
    quiet mono lines; the stage's boundary is the only one with a rule. */
+/* The line itself carries its inset and, at a boundary, its rule (see
+   workspace-layout.css), so both transcripts space it alike; the library's
+   bubble around it adds neither. */
 [data-slot="message-bubble"]:has(.conv-event) {
   text-align: left;
-  padding: var(--space-1) 0;
+  padding: 0;
 }
 
 .conv-event {
@@ -796,12 +810,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.65625rem;
   letter-spacing: 0.02em;
   color: var(--wb-muted-foreground);
-}
-
-[data-slot="message-bubble"]:has(.conv-boundary) {
-  border-top: 1px solid var(--wb-border);
-  padding-top: var(--space-3);
-  margin-top: var(--space-2);
 }
 
 .conv-boundary {
@@ -983,12 +991,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .turn-note,
   .thinking { animation: none; }
   .thinking { color: var(--wb-muted-foreground); -webkit-text-fill-color: currentColor; }
-  .stage-model-row[data-inference-pending] .inference-flame,
-  .conv[data-inference-pending] { animation: none; }
-  .conv[data-inference-pending] { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inference-flame, #e8590c) 60%, transparent); }
+  .stage-model-row[data-inference-pending] .inference-flame { animation: none; }
 }
 
 .thread-empty {
+  max-width: 44ch;
+  margin: 0 auto;
   text-align: center;
   color: var(--wb-muted-foreground);
   font-size: 0.875rem;
@@ -1046,7 +1054,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* The send-back picker a hold on send raises: floats above the composer,
-   anchored to it rather than the viewport. */
+   anchored to it rather than the viewport. The composer scrolls its own
+   overflow (#160), which would clip the picker above it, so it stops while
+   the picker is open. */
+.composer:has(> .sbpick) {
+  overflow: visible;
+}
+
 .sbpick-backdrop {
   position: fixed;
   inset: 0;
@@ -1254,58 +1268,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-.ver {
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  color: var(--wb-muted-foreground);
-  padding: 2px var(--space-2);
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-}
-
-.ver:hover {
-  color: var(--wb-foreground);
-}
-
-.ver.on {
-  border-color: var(--wb-border-strong);
-  background: var(--wb-background);
-  color: var(--wb-foreground);
-  font-weight: 700;
-}
-
-.ver-nav {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--wb-muted-foreground);
-  cursor: pointer;
-}
-
-.ver-nav:hover:not(:disabled) {
-  background: var(--wb-muted);
-  color: var(--wb-foreground);
-}
-
-.ver-nav:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.version-note {
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  color: var(--wb-muted-foreground);
-  margin-left: var(--space-2);
-}
-
 .document {
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
@@ -1351,8 +1313,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .docmeta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+  min-height: 32px;
   font-family: var(--wb-font-mono);
   font-size: 0.6875rem;
   color: var(--wb-muted-foreground);
@@ -1460,29 +1424,79 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* In the docmeta row the tools sit inline at the right end. */
+/* In the docmeta row the tools sit inline at the right end, and wrap under
+   one another rather than pushing the pane wider. */
 .docmeta .document-tools {
+  flex: 0 1 auto;
   flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
   font-family: var(--wb-font-ui);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+/* Every control in a document's header is one size: 32px tall, the same
+   inset, the same 14px glyph before its label. Buttons, selects and the
+   changes toggle came in at three heights and two type sizes. */
+.docmeta [data-slot="button"],
+.document-tools [data-slot="button"] {
+  height: 32px;
+  padding: 0 var(--space-3);
+  gap: 6px;
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
+  transition:
+    background-color 150ms var(--ease-out, ease),
+    color 150ms var(--ease-out, ease);
+}
+
+.docmeta [data-slot="button"] svg,
+.document-tools [data-slot="button"] svg {
+  width: 14px;
+  height: 14px;
+}
+
+.docmeta select,
+.document-tools select,
+.version-strip select {
+  height: 32px;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
+  transition: border-color 150ms var(--ease-out, ease);
+}
+
+.docmeta select:hover:not(:disabled),
+.document-tools select:hover:not(:disabled),
+.version-strip select:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
 }
 
 .changes-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--wb-muted-foreground);
-  cursor: pointer;
-}
-
-.document-tools select {
   height: 32px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--wb-border-strong);
   border-radius: var(--radius-control);
-  background: var(--wb-background);
-  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-out, ease),
+    color 150ms var(--ease-out, ease);
+}
+
+.changes-toggle:hover {
+  background: var(--wb-muted);
+  color: var(--wb-foreground);
 }
 
 /* Tracked changes: added in green, removed in red and struck through. */
@@ -1578,6 +1592,30 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: 0;
 }
 
+/* A wide table scrolls inside its own box rather than widening the page. */
+.prose-table {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.prose table {
+  border-collapse: collapse;
+  font-size: 0.9375em;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--wb-border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  background: var(--wb-muted);
+  font-weight: 600;
+}
+
 .prose hr {
   border: 0;
   border-top: 1px solid var(--wb-border);
@@ -1589,19 +1627,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 @media (max-width: 1080px) {
-  .document-layout {
-    grid-template-columns: 1fr;
-  }
-  /* Stacked, the conversation goes under the document: you read, then react. */
-  .stage-thread {
-    position: static;
-    height: auto;
-    order: 2;
-  }
-  .thread-turns {
-    max-height: 320px;
-  }
-  .document {
+  /* Stacked, the artifact library's document goes above its list. The
+     workspace's panes stack on their own terms in workspace-layout.css. */
+  .library-layout .document {
     order: 1;
   }
   .library-layout {
@@ -1616,11 +1644,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
      measure so it still reads as a question. */
   .turn-question {
     max-width: 60ch;
-  }
-  /* Stacked, the composer runs to the window edge where the guide dock is
-     fixed. Reserve the dock (44px button plus its offset) on the right. */
-  .composer {
-    padding-right: calc(var(--space-4) + 44px + var(--space-6));
   }
 }
 
@@ -2100,9 +2123,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .turn-question {
   margin: var(--space-3) 0 0;
   padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--wb-primary);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-radius: var(--radius-control);
   font-weight: 500;
   color: var(--wb-foreground);
 }
@@ -2130,6 +2152,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .composer-cue {
   margin: 0;
+  padding: 0 var(--space-4);
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
   animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -3029,22 +3052,27 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* Stage 7's lead cards -- the estimate summary and the target question --
-   sit above the panes as paper on the ground, not as bare text. They keep
-   the gutter the conversation gives its turns (`.conv-scroll`), so a card's
-   left edge lines up with the box beneath it and its right edge sits the
-   same distance from the window. */
-.stage-view > .stage-lead {
-  flex: none;
-  margin: var(--space-4) var(--space-5) 0;
+/* Cost approval's lead cards (#619), each in the pane it is about: the
+   estimate summary heads the document pane above the text, and the target
+   question sits in the chat column above the box. Paper on the ground, not
+   bare text; the pane's own grid (`.stage-inner`, `.composer`) spaces them,
+   so nothing sits above the panes and takes the window from both. */
+.stage-lead {
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-lg);
   background: var(--wb-card);
 }
 
-.stage-view > .stage-lead + .stage-lead {
-  margin-top: var(--space-2);
+/* A wide summary scrolls inside its card, never the pane sideways. */
+.stage-inner > .estimate-view {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* The question is short; in the chat column it gives the turns the room. */
+.composer > .target-picker {
+  padding: var(--space-3) var(--space-4);
 }
 
 .target-picker {
@@ -3071,7 +3099,39 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-height: 40px;
+  min-width: 0;
+  /* The bar's own gutter, so the flame sits under the back arrow. */
   padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-background);
+}
+
+.stage-model-label {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+}
+
+.stage-model-row select {
+  height: 28px;
+  min-width: 0;
+  max-width: min(360px, 100%);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  transition: border-color 150ms var(--ease-out, ease);
+}
+
+.stage-model-row select:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
 }
 
 /* Inference activity (#87): the flame in the inference row burns while a
@@ -3101,13 +3161,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   35% { transform: scale(1.12) rotate(2deg); opacity: 1; }
   70% { transform: scale(0.94) rotate(-1deg); opacity: 0.9; }
 }
-.conv[data-inference-pending] {
-  animation: inference-breathe 2.6s ease-in-out infinite;
-}
-@keyframes inference-breathe {
-  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inference-flame, #e8590c) 30%, transparent); }
-  50% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inference-flame, #e8590c) 75%, transparent), inset 0 0 18px 0 color-mix(in srgb, var(--inference-flame, #e8590c) 18%, transparent); }
-}
 
 .model-nudge {
   display: flex;
@@ -3116,7 +3169,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  margin: 0 var(--space-4);
+  margin: var(--space-2) var(--space-4) 0;
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: var(--wb-card);
@@ -3328,9 +3381,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: inline-flex;
   box-shadow: var(--shadow-panel, 0 8px 24px rgb(0 0 0 / 0.14));
   align-items: center;
-  gap: var(--space-2);
   max-width: 100%;
-  padding: var(--space-2) var(--space-4);
   border: 0;
   /* A pill: fully rounded, not a step on the scale. */
   border-radius: 999px;
@@ -3359,24 +3410,47 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
+/* The stage number sits inside the ring, so the ring reads as progress
+   through the nine rather than as something loading. */
+.guide-fab .guide-live {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+}
 
+.guide-fab .stage-ring {
+  width: 28px;
+  height: 28px;
+}
 
+.guide-fab:focus-visible {
+  outline: 2px solid var(--wb-ring);
+  outline-offset: 3px;
+}
+
+/* A popover sits in the top layer, so it is placed against the window,
+   opening upward from the dock's ring. */
 .guide-panel {
-  position: absolute;
-  /* Opens upward: it lives at the bottom of the window now. */
-  bottom: calc(100% + var(--space-2));
-  right: 0;
-  z-index: 30;
+  inset: auto;
+  right: var(--space-6);
+  bottom: calc(var(--space-6) + 44px + var(--space-2));
+  margin: 0;
+  border: 0;
   width: 380px;
   max-width: min(380px, calc(100vw - var(--space-8)));
+  max-height: calc(100vh - var(--space-6) - 44px - var(--space-8));
   border-radius: var(--radius-panel);
   padding: var(--space-4);
   background: var(--wb-background);
+  color: var(--wb-foreground);
   box-shadow:
     0 0 0 1px var(--wb-border),
     0 12px 32px rgb(0 0 0 / 28%);
-  display: grid;
   gap: var(--space-2);
+}
+
+.guide-panel:popover-open {
+  display: grid;
 }
 
 .guide-panel-head {
@@ -3389,6 +3463,30 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .guide-title {
   margin: 0;
   font-weight: 500;
+}
+
+.guide-where,
+.guide-label {
+  margin: 0;
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--wb-muted-foreground);
+}
+
+.guide-where {
+  align-self: center;
+}
+
+.guide-now,
+.guide-next {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.guide-next {
+  border-top: 1px solid var(--wb-border);
+  padding-top: var(--space-2);
 }
 
 .guide-detail {

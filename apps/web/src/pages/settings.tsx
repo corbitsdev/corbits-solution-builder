@@ -1,9 +1,9 @@
 /**
  * Settings: the mockup's five sections, and nothing else on this page.
  *
- *   1. Appearance — the theme, until the system's own is enough.
+ *   1. Appearance — the theme, and whether the zen garden shows.
  *   2. Inference — live providers: Connect, or Connected plus Refresh models.
- *   3. Designer — surface, design language, output limit.
+ *   3. Designer — surface, design language.
  *   4. Stakeholder decks — one row per live role; Edit is Theme only.
  *   5. Design documents — the guidelines and presentations every deck is
  *      built against (#246); a project can add its own or turn these off.
@@ -33,6 +33,7 @@ import {
 import { Banner, StateLabel } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
+import { useZenGarden, writeZenGarden, type ZenGardenChoice } from "../zen-garden-setting.ts";
 import { DesignDocumentsList } from "./design-documents.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 import { useModelMismatch, writeModelMismatch, type ModelMismatch } from "./workspace/model-nudge-store.ts";
@@ -197,7 +198,7 @@ function BuildWorker() {
 
   const chosen = status?.workers.find((entry) => entry.id === status.settings.worker);
   return (
-    <Section title="Build worker" lead="The coding agent stage 8 hands the frozen plan to. It runs on this computer, with your own configuration of that tool, and the build shows its final output and exit status and nothing more.">
+    <Section title="Build worker" lead="The coding agent Build and test hands the frozen plan to. It runs on this computer, with your own configuration of that tool, and the build shows its final output and exit status and nothing more.">
       <div className="section-body">
         {error ? <Banner tone="error" title={error} /> : null}
         <Row label="Tool" hint="Corbits Code is the default">
@@ -263,9 +264,10 @@ function BuildWorker() {
 /* --------------------------------------------------------------- appearance */
 
 /** The theme, as a segmented choice — the same control onboarding's Look step
-    uses. Persists through ThemeProvider; nothing else is asked yet. */
+    uses. Persists through ThemeProvider; the zen garden choice is kept in this browser. */
 function Appearance() {
   const { mode, setMode } = useTheme();
+  const zenGarden = useZenGarden();
   return (
     <Section title="Appearance" lead="Follows the system until you say otherwise.">
       <div className="section-body">
@@ -278,6 +280,17 @@ function Appearance() {
               { id: "light", label: "Light" },
               { id: "system", label: "System" },
               { id: "dark", label: "Dark" },
+            ]}
+          />
+        </Row>
+        <Row label="Show the zen garden while waiting" hint="Off, what is happening shows as one line above the message box.">
+          <SegCtl<ZenGardenChoice>
+            label="Show the zen garden while waiting"
+            value={zenGarden}
+            onChange={writeZenGarden}
+            options={[
+              { id: "on", label: "On" },
+              { id: "off", label: "Off" },
             ]}
           />
         </Row>
@@ -431,7 +444,8 @@ function Inference({
 /**
  * What the stage-4 designer draws to. Each control saves on its own as it
  * changes; the design language saves when the field is left, since it is
- * typed. The output limit stays a host default — not a row here.
+ * typed. The stage-4 specialist is redeployed with them the next time it is
+ * opened, as it is after a language change.
  */
 function Designer() {
   const [settings, setSettings] = useState<DesignerSettings | null>(null);
@@ -469,7 +483,7 @@ function Designer() {
   };
 
   return (
-    <Section title="Designer" lead="What the stage-4 designer draws to, and how much it may write.">
+    <Section title="Designer" lead="What the stage-4 designer draws to.">
       <div className="section-body">
         {error ? <Banner tone="error" title={error} /> : null}
         <Row label="Surface" hint="Light, dark, or what the brief calls for">
@@ -580,7 +594,7 @@ function StakeholderDecks() {
   return (
     <Section title="Stakeholder decks" lead="How the deck each role receives is composed.">
       <div className="section-body">
-        <p className="inline-note">The theme you pick here only changes the slides you download at stage 5.</p>
+        <p className="inline-note">The theme you pick here only changes the slides you download at Concept approval.</p>
         {error ? <Banner tone="error" title={error} /> : null}
         {STAKEHOLDER_ROLES.map((role) => {
           const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;

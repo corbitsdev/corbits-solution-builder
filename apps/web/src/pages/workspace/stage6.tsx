@@ -5,12 +5,14 @@
  * `.stage-inner` / `.doc` paper as the other stages.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
+import { ChevronDown, Users } from "lucide-react";
 import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
-import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
+import { requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -76,13 +78,13 @@ export function Stage6Panel({
   reviewNodes = null,
   onDocumentsChanged,
   onDocuments,
-  onSendToArchitect,
   requirementsAsk = null,
   onRequirementsDrafted,
   strip,
   conversation,
   reader,
   pane,
+  planDocument = null,
 }: {
   tenantId: string;
   projectId: string;
@@ -108,8 +110,6 @@ export function Stage6Panel({
   onDocumentsChanged?: () => void;
   /** The stage's documents as they stand (#345): what a message to the architect may attach. */
   onDocuments?: (documents: StageDocument[]) => void;
-  /** "Send to the architect": the document as a message in the architect's thread (#345). */
-  onSendToArchitect?: (body: string) => void;
   /** A chat message the workspace routed to the requirements author (#407). */
   requirementsAsk?: { body: string; at: number } | null;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
@@ -123,6 +123,8 @@ export function Stage6Panel({
   reader: ReactNode;
   /** When false, the plan's StageDocument already fills the right pane. */
   pane: boolean;
+  /** The plan's document, given the panel's request control for its toolbar. */
+  planDocument?: ((reviewMenu: ReactNode) => ReactNode) | null;
 }) {
   const [requirements, setRequirements] = useState<Stage6RoleState>(STAGE6_IDLE_ROLE);
   const [reviews, setReviews] = useState<Record<string, Stage6RoleState>>({});
@@ -396,82 +398,52 @@ export function Stage6Panel({
               ? "not yet requested"
               : "waiting on a plan draft";
 
-  // Once a plan draft exists, `index.tsx` renders the plan itself as
-  // `StageDocument` and this panel no longer owns the right pane -- but the
-  // requirements author's document and the four panel reviews (and the
-  // "Request review" buttons that ask for them) must stay reachable, not
-  // disappear with it. A compact companion, not the full two-pane
-  // `StagePanes` layout `reader` already fills.
+  // Once a plan draft exists, the plan fills the right pane as the stage's
+  // one document and the architect's chat is the stage's one conversation.
+  // The requirements and the four reviews are tabs of their own in the
+  // strip, and a chat message asking for a requirements change reaches the
+  // author (#407), so nothing here takes a band of the window: only the
+  // panel's request control, in the plan's own toolbar, and any failure.
   if (!pane) {
+    const failures = [
+      requirements.status === "error" ? { key: "requirements", title: "The requirements could not be drafted", error: requirements.error } : null,
+      ...STAGE6_PANEL_ROLES.map((role) =>
+        reviews[role.key]?.status === "error"
+          ? { key: role.key, title: `The ${role.label.toLowerCase()} review could not be completed`, error: reviews[role.key]!.error }
+          : null,
+      ),
+    ].filter((failure) => failure !== null);
     return (
-      <div className="stage6-companion">
-        <div className="docmeta">
-          <select aria-label="Stage 6 document" value={page} onChange={(event) => setPage(event.target.value)}>
-            {PAGES.map((entry) => (
-              <option key={entry.key} value={entry.key}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
-          <span className="inline-note">{meta}</span>
-          {page !== "requirements" ? (
-            <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => requestReview(page)}>
-              {current.status === "done" ? "Request again" : "Request review"}
-            </Button>
-          ) : null}
-          {current.status === "done" && current.reply ? (
-            <>
-              <CopyButton text={current.reply} />
-              <DocumentExportMenu node={draftNode(draftKindOf(page), 6, currentPage.label)} tenantId={tenantId} content={current.reply} />
-              {onSendToArchitect ? (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    const doc = page === "requirements" ? requirementsDocument(current.reply!) : reviewDocument(currentPage.label.replace(/ review$/, ""), current.reply!);
-                    onSendToArchitect(documentAsMessage(doc));
-                  }}
-                >
-                  Send to the architect
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-        {current.status === "error" ? (
-          <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}>
-            {current.error}
+      <>
+        {failures.map((failure) => (
+          <Banner key={failure.key} tone="error" title={failure.title}>
+            {failure.error}
           </Banner>
-        ) : null}
-        <div className="companion-ask">
-          <input
-            className="field"
-            aria-label={`Ask the ${page === "requirements" ? "requirements author" : `${currentPage.label.replace(/ review$/, "")} reviewer`}`}
-            placeholder={page === "requirements" ? "Ask the requirements author… (name a review to attach it)" : "Ask this reviewer… (name the PRD or another review to attach it)"}
-            value={ask}
-            disabled={busy}
-            onChange={(event) => setAsk(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                askRole(page === "requirements" ? STAGE6_REQUIREMENTS_ROLE_KEY : page);
-              }
-            }}
-          />
-          <Button variant="ghost" loading={busy} disabled={busy || ask.trim().length === 0} onClick={() => askRole(page === "requirements" ? STAGE6_REQUIREMENTS_ROLE_KEY : page)}>
-            Ask
-          </Button>
-        </div>
-        {current.status === "done" && current.reply ? (
-          <details className="document-fold">
-            <summary className="document-fold-summary">
-              <span className="document-fold-title">{currentPage.label}</span>
-            </summary>
-            <div className="document-fold-body">
-              <Markdown source={current.reply} />
-            </div>
-          </details>
-        ) : null}
-      </div>
+        ))}
+        {planDocument?.(
+          <Menu>
+            <MenuTrigger asChild>
+              <Button variant="ghost" disabled={!reviewInput}>
+                <Users aria-hidden="true" />
+                Request review
+                <ChevronDown aria-hidden="true" />
+              </Button>
+            </MenuTrigger>
+            <MenuContent align="end">
+              {STAGE6_PANEL_ROLES.map((role) => {
+                const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
+                const working = state.status === "starting" || state.status === "waiting";
+                return (
+                  <MenuItem key={role.key} disabled={working} onSelect={() => requestReview(role.key)}>
+                    {role.label} review
+                    {working ? " · reviewing…" : state.status === "done" ? " · ask again" : ""}
+                  </MenuItem>
+                );
+              })}
+            </MenuContent>
+          </Menu>,
+        )}
+      </>
     );
   }
 
@@ -487,7 +459,7 @@ export function Stage6Panel({
                 {page === "requirements" ? " · Requirements Author" : ` · ${STAGE6_PANEL_ROLES.find((role) => role.key === page)?.label}`}
               </span>
               <div className="document-tools">
-                <select aria-label="Stage 6 document" value={page} onChange={(event) => setPage(event.target.value)}>
+                <select aria-label="Build plan document" value={page} onChange={(event) => setPage(event.target.value)}>
                   {PAGES.map((entry) => (
                     <option key={entry.key} value={entry.key}>
                       {entry.label}

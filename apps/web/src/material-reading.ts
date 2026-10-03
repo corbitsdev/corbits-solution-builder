@@ -6,7 +6,7 @@
  *
  * `unpdf`, `exceljs` and `jszip` are loaded with dynamic `import()` inside
  * the branches that need them, so a project that never attaches a PDF, a
- * spreadsheet or a PowerPoint never pays to bundle that reader.
+ * spreadsheet, a PowerPoint or a Word file never pays to bundle that reader.
  */
 import type ExcelJSNamespace from "exceljs";
 
@@ -25,6 +25,7 @@ const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const XLS_MIME = "application/vnd.ms-excel";
 const PDF_MIME = "application/pdf";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function isText(mediaType: string): boolean {
   return mediaType.startsWith("text/") || mediaType === "application/json";
@@ -57,6 +58,10 @@ function isPptx(name: string, mediaType: string): boolean {
   return mediaType === PPTX_MIME || name.toLowerCase().endsWith(".pptx");
 }
 
+function isDocx(name: string, mediaType: string): boolean {
+  return mediaType === DOCX_MIME || name.toLowerCase().endsWith(".docx");
+}
+
 /**
  * Whether a binary file's reading is text that was read, rather than the
  * note this module writes when nothing could be: every such note is one
@@ -69,7 +74,7 @@ export function readingHasText(reading: string): boolean {
 }
 
 /** Never a silent cut: what is left out past the cap is always announced. */
-function cap(text: string): string {
+export function capMaterialText(text: string): string {
   return text.length > MAX_FILE_CHARS
     ? `${text.slice(0, MAX_FILE_CHARS)}\n(${text.length - MAX_FILE_CHARS} more characters not shown)`
     : text;
@@ -260,30 +265,129 @@ async function presentationText(bytes: Uint8Array): Promise<string> {
   return `${slides.join("\n\n")}${silent > 0 ? `\n\n(${silent} slide${silent === 1 ? "" : "s"} with no text, not shown)` : ""}`;
 }
 
+/** A Word paragraph, empty or not; a table is matched before the paragraphs inside it. */
+const WORD_PARAGRAPH = /<w:p(?:\s[^>]*)?\/>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
+const WORD_BLOCK = new RegExp(`<w:tbl\\b[\\s\\S]*?<\\/w:tbl>|${WORD_PARAGRAPH.source}`, "g");
+/** What a run carries as text: its text, a tab, a line break, a hyphen that does not break. */
+const WORD_RUN_TEXT = /<w:t(?:\s[^>/]*)?>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/>|<w:(?:br|cr)\b[^>]*\/>|<w:noBreakHyphen\b[^>]*\/>/g;
+
+/**
+ * One Word paragraph as a person reads it: a heading marked as one, a list
+ * item as one, its runs joined. Its properties are taken out before the
+ * runs are read, since a tab stop is declared with the same element a tab
+ * is typed with. A tracked deletion (`w:delText`) and a field's code
+ * (`w:instrText`) are not `w:t`, and so are never text here.
+ */
+function wordParagraphText(xml: string): string {
+  const properties = /<w:pPr\b[^>]*>[\s\S]*?<\/w:pPr>/.exec(xml)?.[0] ?? "";
+  const runs = xml.replace(/<w:(pPr|rPr)\b[^>]*\/>/g, "").replace(/<w:(pPr|rPr)\b[^>]*>[\s\S]*?<\/w:\1>/g, "");
+  let text = "";
+  for (const token of runs.matchAll(WORD_RUN_TEXT)) {
+    if (token[1] !== undefined) text += decodeXml(token[1]);
+    else if (token[0].startsWith("<w:tab")) text += "\t";
+    else if (token[0].startsWith("<w:noBreakHyphen")) text += "-";
+    else text += "\n";
+  }
+  text = text.trim();
+  if (text.length === 0) return "";
+  const style = /<w:pStyle\b[^>]*\bw:val="([^"]+)"/.exec(properties)?.[1] ?? "";
+  const heading = /^heading\s?([1-6])$/i.exec(style);
+  if (heading) return `${"#".repeat(Number(heading[1]))} ${text}`;
+  if (/^title$/i.test(style)) return `# ${text}`;
+  if (/<w:numPr\b/.test(properties)) return `- ${text}`;
+  return text;
+}
+
+/** A Word table, row by row: each cell's paragraphs on one line, cells set apart by a bar. */
+function wordTableText(xml: string): string {
+  const rows = xml.match(/<w:tr\b[\s\S]*?<\/w:tr>/g) ?? [];
+  return rows
+    .map((row) =>
+      (row.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) ?? [])
+        .map((cell) =>
+          (cell.match(WORD_PARAGRAPH) ?? [])
+            .map(wordParagraphText)
+            .filter((line) => line.length > 0)
+            .join(" "),
+        )
+        .join(" | "),
+    )
+    .filter((row) => row.replace(/[|\s]/g, "").length > 0)
+    .join("\n");
+}
+
+/**
+ * A Word document part's text in document order: paragraphs a blank line
+ * apart, the items of one list on consecutive lines, a table as its rows.
+ * A text box is drawn twice in the file, once for older readers; the
+ * fallback copy is dropped so its text is read once. A text box sits
+ * inside the paragraph it is anchored to, and floats on the page anyway:
+ * its paragraphs are read after the body's, so neither cuts the other.
+ */
+export function wordXmlText(xml: string): string {
+  const boxes: string[] = [];
+  const main = xml
+    .replace(/<mc:Fallback\b[\s\S]*?<\/mc:Fallback>/g, "")
+    .replace(/<w:txbxContent\b[^>]*>([\s\S]*?)<\/w:txbxContent>/g, (_whole, inner: string) => {
+      boxes.push(inner);
+      return "";
+    });
+  const body = main + boxes.join("");
+  let text = "";
+  let lastWasItem = false;
+  for (const match of body.matchAll(WORD_BLOCK)) {
+    const block = match[0].startsWith("<w:tbl") ? wordTableText(match[0]) : wordParagraphText(match[0]);
+    if (block.length === 0) continue;
+    const item = block.startsWith("- ");
+    text += text.length === 0 ? block : `${item && lastWasItem ? "\n" : "\n\n"}${block}`;
+    lastWasItem = item;
+  }
+  return text;
+}
+
+/**
+ * A Word (.docx) file's text (#609). Only the document's own body: headers,
+ * footers, footnotes and review comments are other parts of the file and
+ * are not read, and neither is a picture.
+ */
+async function wordText(bytes: Uint8Array): Promise<string> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(bytes);
+  const document = await zip.file("word/document.xml")?.async("string");
+  if (document === undefined) throw new Error("it is not a Word document, or its text is missing");
+  const text = wordXmlText(document);
+  return text.length > 0
+    ? text
+    : "(A Word file carrying no text: empty, or pictures only. Nothing here reads images, so ask what it shows if that matters.)";
+}
+
 /**
  * What can be read of one attached file: text of any kind as it is; a
  * spreadsheet, modern or the older binary kind, as one block per sheet; a
- * PDF as its text, page by page; a PowerPoint file as its slides' text; an
- * image, a Word file, or anything else nothing here reads yet, by name,
- * type and size only — a prompt that claims to have read something it has
+ * PDF as its text, page by page; a PowerPoint file as its slides' text; a
+ * Word (.docx) file as its text; an image, the older binary Word file, or
+ * anything else nothing here reads yet, by name, type and size only — a prompt that claims to have read something it has
  * not is worse than one that says so.
  */
 export async function readMaterial(input: MaterialInput): Promise<{ text: string }> {
   const { name, mediaType, bytes } = input;
   if (isText(mediaType)) {
-    return { text: cap(new TextDecoder("utf-8").decode(bytes)) };
+    return { text: capMaterialText(new TextDecoder("utf-8").decode(bytes)) };
   }
   if (isXlsx(name, mediaType)) {
-    return { text: cap(await spreadsheetText(bytes)) };
+    return { text: capMaterialText(await spreadsheetText(bytes)) };
   }
   if (isLegacyXls(name, mediaType)) {
-    return { text: cap(await spreadsheetText(await legacyWorkbookToXlsx(bytes))) };
+    return { text: capMaterialText(await spreadsheetText(await legacyWorkbookToXlsx(bytes))) };
   }
   if (isPdf(name, mediaType)) {
-    return { text: cap(await pdfText(bytes)) };
+    return { text: capMaterialText(await pdfText(bytes)) };
   }
   if (isPptx(name, mediaType)) {
-    return { text: cap(await presentationText(bytes)) };
+    return { text: capMaterialText(await presentationText(bytes)) };
+  }
+  if (isDocx(name, mediaType)) {
+    return { text: capMaterialText(await wordText(bytes)) };
   }
   const what = mediaType.startsWith("image/") ? "An image" : "A file";
   return { text: describe(name, mediaType, bytes.byteLength, what) };
