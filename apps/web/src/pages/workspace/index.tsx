@@ -1155,7 +1155,8 @@ export function StageWorkspace({
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
-            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded && (stage !== 3 || chosenTarget !== null)}
+            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+            targetPending={stage === 3 && chosenTarget === null}
             busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
             newer={artifacts.newerVersion}
