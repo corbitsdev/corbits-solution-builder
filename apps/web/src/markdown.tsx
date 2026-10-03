@@ -19,11 +19,10 @@ import { DEL, END, INS } from "./revisions.js";
  * Formatting is matched first so a change that starts outside a bold run and
  * ends inside it still renders as bold; the change state carries across.
  */
-function inline(text: string, keyPrefix: string): ReactNode[] {
+function inline(text: string, keyPrefix: string, state = { open: null as string | null }): ReactNode[] {
   const out: ReactNode[] = [];
   // One pass, longest markers first, so `**` never matches as two `*`.
   const pattern = /(`[^`]+`)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
-  const state = { open: null as string | null };
   let last = 0;
   let match: RegExpExecArray | null;
   let index = 0;
@@ -36,7 +35,7 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
       out.push(<code key={key}>{token.slice(1, -1).replace(MARKS, "")}</code>);
     } else if (match[2] !== undefined && match[3] !== undefined) {
       // A model wrote this href: only http(s) may navigate; anything else shows as its words.
-      const label = inline(match[2], key);
+      const label = inline(match[2], key, state);
       const href = match[3].replace(MARKS, "");
       if (href.startsWith("https://") || href.startsWith("http://")) {
         out.push(
