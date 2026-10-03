@@ -39,7 +39,6 @@ this problem does not touch says so in one line.
   runs on real data, so an unnamed source is a question now.
 - \`## Non-goals\`
 - \`## What I assumed\`
-- \`## What I need from you\`
 
 ${interview(`Does this have to work where there is no reliable internet, such as on a
 warehouse floor? I assume yes from what you described, and it rules a

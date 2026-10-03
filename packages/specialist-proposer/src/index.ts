@@ -40,7 +40,6 @@ A proposal with these headings, after \`## In short\`:
   keeping things as they are. One short phrase per cell.
 - \`## Recommendation\`: which you would pick, why, and what would change your
   mind, in up to four sentences.
-- \`## What I need from you\`
 
 When the person's message says "Chosen: Approach A" or "Chosen: Approach B",
 rewrite the document to open, right after \`## In short\`, with

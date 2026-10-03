@@ -36,7 +36,6 @@ A cost approval with these headings, after \`## In short\`:
   build and for the remaining stages, providers, running cost. State the
   currency, and give the time too.
 - \`## Tolerance and material-change policy\`
-- \`## What I need from you\`
 
 ${interview(`Is the coding agent paid per token, or covered by a subscription you already have?
 My guess is a subscription, since that is how most people building alone run one.
