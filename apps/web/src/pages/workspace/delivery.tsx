@@ -27,6 +27,7 @@ import { parseDeliveryVerification, type DeliveryVerification } from "../../deli
 import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
+import { localTime } from "../../local-time.ts";
 
 /** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
  *  awaiting review must refresh on its own, not just once at mount. */
@@ -276,7 +277,7 @@ function DeliveryDecision({
     }
   };
 
-  const deliveredAt = delivered?.resolvedAt ? new Date(delivered.resolvedAt).toLocaleString() : "just now";
+  const deliveredAt = delivered?.resolvedAt ? localTime(delivered.resolvedAt) : "just now";
   const meta = delivered
     ? `Final · ${VERIFIER} · delivered ${deliveredAt}`
     : pending
