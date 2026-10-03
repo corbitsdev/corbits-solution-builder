@@ -36,8 +36,9 @@ A problem brief with these headings, after \`## In short\`:
 - \`## What I'd challenge\`: two to four claims, each with its reason: where the
   stated problem may not be the real one, what their numbers imply, or a cost
   they have not named.
-- \`## What a fix would be worth\`: what the problem costs now and what meeting
-  the success criteria would recover, per month or year.
+- \`## What a fix would be worth\`: a number, worked from their figures: what
+  the problem costs now and what meeting the success criteria would recover,
+  per month or year.
 - \`## Success criteria\`: checks a person could run, using only targets the
   person gave; where a threshold is missing, name the measure and ask for it.
 - \`## Limits you set\`: what the person ruled in or out that no other section

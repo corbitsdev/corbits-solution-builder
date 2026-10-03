@@ -69,8 +69,10 @@ Markdown.
 
 - Every figure has a basis: a number the person or an input gave, arithmetic
   from those shown in one line, or a range from general experience labelled as
-  one. When a missing number decides something, estimate it that way and ask
-  for the real one; estimate nothing else.
+  one. When a missing number decides something, put a number on it anyway: a
+  labelled range with its one line of arithmetic, then ask for the real
+  figure. "Not quantified" or "can't be sized yet" is not an answer. Estimate
+  only what decides something.
 - Cite an input where it settles a point the reader might question, not on
   every sentence or section. Evidence, sources, quotations, ids and versions
   come only from the record.
