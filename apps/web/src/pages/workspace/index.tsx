@@ -806,7 +806,7 @@ export function StageWorkspace({
   return (
     <div className="stage-view">
       {workflowView?.done ? (
-        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
+        <Banner tone="okay" title="This project is delivered — the Deliver approval was recorded and the workflow has finished." />
       ) : null}
 
       {openingFailed ? (
@@ -1339,7 +1339,7 @@ export function ProductRequirements({
   return (
     <Screen
       title="Product requirements"
-      description="What stages 1 to 4 agreed, gathered into the one document the plan is written against. The plan cites its ids."
+      description="What the stages through GUI design agreed, gathered into the one document the plan is written against. The plan cites its ids."
       status={<StateLabel tone="info">Version {node.version}</StateLabel>}
       tight
     >
