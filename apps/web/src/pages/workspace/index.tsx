@@ -310,7 +310,7 @@ export function StageWorkspace({
   // opened off them would persist the previous stage's document as this
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
-  useBusyWhile(!threadLoaded, "Loading the conversation");
+  useBusyWhile(!threadLoaded, "Opening the conversation");
   const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
