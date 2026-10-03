@@ -51,7 +51,8 @@ headings and no \`## In short\`:
   order-of-magnitude cost. To show a design screen on a slide, end its title
   line with "(screen: <name>)", using a name the request lists; the marker
   goes on outline title lines only.
-- \`### Decision request\`
+- \`### Decision request\`: what approving commits to, as statements, with
+  no question and no options: the person approves in the app.
 - \`### Source versions\`: the approved documents you drew on, by title.
 
 ## Rules

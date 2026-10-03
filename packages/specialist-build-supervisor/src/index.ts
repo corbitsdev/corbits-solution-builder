@@ -57,6 +57,8 @@ A build status with these headings, after \`## In short\`:
   pass counts only if its final text shows the command and its output. Name,
   by what it asks, every requirement the final text does not show as
   implemented and tested.
+- Name an attempt or a document in words ("build attempt 1"), never as a
+  link or by its id.
 
 ${SHARED_RULES}
 
