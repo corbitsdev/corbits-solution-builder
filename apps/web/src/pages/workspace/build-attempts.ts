@@ -162,10 +162,10 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     `- Deterministic checks: ${input.verification.complete ? "complete" : `incomplete — not verified: ${input.verification.failed.join(", ") || "(unnamed)"}`}.`,
     targets,
     ``,
-    `## Stage 7 forecast`,
+    `## Cost approval forecast`,
     input.forecast?.trim()
       ? input.forecast.trim()
-      : "No forecast could be read from stage 7's estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
+      : "No forecast could be read from the Cost approval estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
     `The worker's own cost is not reported by its interface; say so if you cannot read it from its final text.`,
   ].join("\n");
 }

@@ -17,6 +17,7 @@
  * `adoption-replay.ts` to land on the new project's workflow once it runs.
  */
 import { versionIdFor, type ArtifactGraphMetadata } from "@solutions-builder/app/artifact-graph";
+import { stageName } from "./components.jsx";
 import {
   adoptionPlan,
   legacyPosition,
@@ -299,7 +300,7 @@ export function legacyAdoptionPlan(bundle: LegacyBundle, newProjectId: string, i
   for (const step of plan.steps) {
     const artifactId = ids.get(step.ref.artifactId);
     if (!artifactId) {
-      notes.push(`Stage ${String(step.stage)}'s approval names an artifact the bundle does not carry; replay stops before it.`);
+      notes.push(`${stageName(step.stage)}'s approval names an artifact the bundle does not carry; replay stops before it.`);
       break;
     }
     steps.push({ ...step, ref: { ...step.ref, artifactId } });

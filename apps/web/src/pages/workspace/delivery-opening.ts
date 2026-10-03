@@ -109,10 +109,10 @@ export function deliveryOpeningLine(
 ): string {
   if (!manifest) {
     return [
-      "No delivery manifest artifact is available for this build — stage 8's archive was recorded without one, or no manifest could be read.",
+      "No delivery manifest artifact is available for this build — the Build and test archive was recorded without one, or no manifest could be read.",
       "No check was run by a tool, so nothing about this archive is verified; say so, never score a pass.",
       "",
-      "Checks stage 8 declared:",
+      "Checks Build and test declared:",
       buildStatusBody,
     ].join("\n");
   }
@@ -129,6 +129,6 @@ export function deliveryOpeningLine(
     lines.push(`- ${file.path} — ${String(file.sizeBytes)} bytes — sha256 ${file.sha256}`);
   }
   lines.push("", ...verificationLines(content.verification));
-  lines.push("", "Checks stage 8 declared:", buildStatusBody);
+  lines.push("", "Checks Build and test declared:", buildStatusBody);
   return lines.join("\n");
 }
