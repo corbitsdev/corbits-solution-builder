@@ -6,15 +6,14 @@
  * rather than an optimistic guess.
  */
 import { useCallback, useEffect, useState, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
   ApiFailure,
-  type HostStatus,
   type ProjectDetail,
-  type ProjectSummary,
-  type Provider,
   type Wait,
 } from "./client.js";
+import { keys } from "./queries/keys.ts";
 import {
   ArrowLeft,
   ChevronDown,
@@ -71,6 +70,34 @@ function emptyUntilInstalled<T>(empty: T): (cause: unknown) => T {
     throw cause;
   };
 }
+
+/**
+ * Status and providers answer before the workspace exists. Decisions and
+ * projects do not: until the client has installed the app the hub refuses
+ * them with a conflict marked `install`, and the install runs only once
+ * `status` is set. Fetching all four together meant a first run never set
+ * `status` and the boot screen never went away. Until the install, an
+ * uninstalled workspace is an empty one.
+ */
+async function loadHome() {
+  const [status, providers] = await Promise.all([api.status(), api.providers()]);
+  const [decisions, projects, tenantId] = await Promise.all([
+    api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
+    api.projects().catch(emptyUntilInstalled({ projects: [] })),
+    api.workspaceTenantId(),
+  ]);
+  return { status, providers, decisions: decisions.decisions, projects: projects.projects, tenantId };
+}
+
+/** A 401/403 means the session cookie no longer holds (e.g. the host restarted): "not signed in", not "not answering". */
+function signedOut(cause: unknown): boolean {
+  return cause instanceof ApiFailure && (cause.httpStatus === 401 || cause.httpStatus === 403);
+}
+
+/** The home read is a backstop: the inbox stream and every action refresh it on the spot. */
+const HOME_BACKSTOP_MS = 30_000;
+
+const NONE: never[] = [];
 
 function Booting({ offline }: { offline: boolean }) {
   const [slow, setSlow] = useState(false);
@@ -441,32 +468,51 @@ export function App() {
   // current stage's own: reported up so the stepper can mark it.
   const [viewedStage, setViewedStage] = useState<number | null>(null);
 
-  const [status, setStatus] = useState<HostStatus | null>(null);
-  const [decisions, setDecisions] = useState<Wait[]>([]);
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [apiKeyProviders, setApiKeyProviders] = useState<
-    { providerId: string; label: string; needsBaseUrl: boolean }[]
-  >([]);
-  const [oauthCandidates, setOauthCandidates] = useState<
-    { providerId: string; label: string; redirectUri: string }[]
-  >([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ProjectDetail | null>(null);
-  // A project failing to load is never the same as no project being open
-  // (CL-8874): swallowing the failure and leaving `detail` null made a
-  // transient read error look identical to nothing selected, and every
-  // reopen from the list hit the same silent failure with no way out.
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detailAttempt, setDetailAttempt] = useState(0);
+  const queryClient = useQueryClient();
+  const home = useQuery({ queryKey: keys.home, queryFn: loadHome, refetchInterval: HOME_BACKSTOP_MS, retry: false });
+  const status = home.data?.status ?? null;
+  const decisions = home.data?.decisions ?? NONE;
+  const projects = home.data?.projects ?? NONE;
+  const providers = home.data?.providers.providers ?? NONE;
+  const apiKeyProviders = home.data?.providers.apiKeyProviders ?? NONE;
+  const oauthCandidates = home.data?.providers.oauthCandidates ?? NONE;
   // Resolved once and threaded down as a prop: every artifact read goes
   // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  const tenantId = home.data?.tenantId ?? null;
+  // The host going away is a visible state, not a blank screen.
+  const offline = home.error !== null && !signedOut(home.error);
+  const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: keys.home }), [queryClient]);
+
+  const [selected, setSelected] = useState<string | null>(null);
+  // A switch to a different project never shows the one that was open: the
+  // read is keyed by project. A failed re-read of the SAME project keeps it
+  // on screen with the failure surfaced (CL-8874): swallowing the failure
+  // made a transient read error look identical to nothing selected.
+  const detailQuery = useQuery({
+    queryKey: keys.projectView.of(selected ?? ""),
+    queryFn: () => api.projectView(selected!),
+    enabled: selected !== null,
+    refetchInterval: HOME_BACKSTOP_MS,
+    retry: false,
+  });
+  const detail = selected ? (detailQuery.data ?? null) : null;
+  const detailError =
+    selected && detailQuery.error
+      ? detailQuery.error instanceof ApiFailure
+        ? detailQuery.error.detail.message
+        : String(detailQuery.error)
+      : null;
   const [error, setError] = useState<string | null>(null);
-  const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
   // Signup/login first: the workspace tenant is created as that session.
-  const [auth, setAuth] = useState<HubAuthState>("unknown");
+  const [sessionAuth, setAuth] = useState<HubAuthState>("unknown");
+  // A home read refused for the session outranks the session read: the cookie stopped holding.
+  const auth = signedOut(home.error) ? "signed-out" : sessionAuth;
+  // Signed in again, the refused home read is re-read so its error stops speaking for the session.
+  const onSignedIn = () => {
+    setAuth("signed-in");
+    void refresh();
+  };
   // Set only for an embedded (local desktop) hub whose owner could not be
   // minted automatically — a keychain the host cannot read, or a hub that
   // refused the minted account. `null` until a mint attempt fails.
@@ -476,42 +522,6 @@ export function App() {
   // missing, it is installed before any screen that depends on it renders;
   // existing, it gets only what is safe to repeat (`api.upgradeWorkspace`).
   const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
-
-  const refresh = useCallback(async () => {
-    try {
-      // Status and providers answer before the workspace exists. Decisions and
-      // projects do not: until the client has installed the app the hub
-      // refuses them with a conflict marked `install`, and the install runs
-      // only once `status` is set. Fetching all four together meant a first
-      // run never set `status` and the boot screen never went away. Until the
-      // install, an uninstalled workspace is an empty one.
-      const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
-      const [decisionsResult, projectsResult, tenantIdResult] = await Promise.all([
-        api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
-        api.projects().catch(emptyUntilInstalled({ projects: [] })),
-        api.workspaceTenantId().catch(() => null),
-      ]);
-      setStatus(statusResult);
-      setDecisions(decisionsResult.decisions);
-      setProjects(projectsResult.projects);
-      setProviders(providersResult.providers);
-      setApiKeyProviders(providersResult.apiKeyProviders);
-      setOauthCandidates(providersResult.oauthCandidates);
-      setTenantId(tenantIdResult);
-      setOffline(false);
-    } catch (cause) {
-      // A 401/403 means the session cookie no longer holds (e.g. the host
-      // restarted): that is "not signed in", not "not answering". Only a
-      // dropped connection or a real server error is offline.
-      if (cause instanceof ApiFailure && (cause.httpStatus === 401 || cause.httpStatus === 403)) {
-        setAuth("signed-out");
-        setOffline(false);
-        return;
-      }
-      // The host going away is a visible state, not a blank screen.
-      setOffline(true);
-    }
-  }, []);
 
   // Runs once the host has answered and a hub session exists. Deliberately
   // not keyed on `installed`: the effect sets that state itself, and
@@ -529,7 +539,7 @@ export function App() {
         if (!state.installed) {
           setInstalled("installing");
           await api.install();
-          await refresh();
+          void refresh();
         } else {
           await api.upgradeWorkspace();
         }
@@ -566,6 +576,7 @@ export function App() {
         const session = await getHubSession();
         if (session) {
           setAuth("signed-in");
+          void refresh();
           return;
         }
         setMintError("The hub accepted the workspace owner but did not sign them in.");
@@ -578,24 +589,25 @@ export function App() {
         setMintError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       }
     }
-  }, []);
+  }, [refresh]);
   useEffect(() => {
     if (status?.hub.mode !== "embedded" || auth !== "signed-out" || mintAttempted.current) return;
     mintAttempted.current = true;
     void mintOwner();
   }, [status?.hub.mode, auth, mintOwner]);
 
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5_000);
-    return () => clearInterval(timer);
-  }, [refresh]);
-
   // The bell owns its own unread state; a mailbox event also refreshes the
-  // decision queue immediately rather than waiting on the 5s poll above —
-  // an inbox item is often exactly the nudge that a decision landed.
+  // decision queue immediately rather than waiting on the backstop — an
+  // inbox item is often exactly the nudge that a decision landed.
   const [inbox, setInbox] = useState<InboxState>({ items: [], unreadCount: 0 });
-  useEffect(() => subscribeInbox(setInbox, () => void refresh()), [refresh]);
+  useEffect(
+    () =>
+      subscribeInbox(setInbox, () => {
+        void refresh();
+        void queryClient.invalidateQueries({ queryKey: keys.projectView.all });
+      }),
+    [refresh, queryClient],
+  );
 
   // The Decision Queue renders the exact versions a gate would freeze, and it
   // reads them from the open project. Without this the primary action on the
@@ -618,58 +630,14 @@ export function App() {
   useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");
   useBusyWhile(exporting, "Exporting the bundle");
 
-  useEffect(() => {
-    if (!selected) {
-      setDetail(null);
-      setDetailError(null);
-      return;
-    }
-    // A switch to a different project must never keep showing the one that
-    // was open -- reloadDetail's "keep the stale detail" behavior is only
-    // for a failed re-read of the SAME open project. Without this, a failed
-    // read of project B left project A on screen with no error rendered.
-    setDetail((current) => (current && current.project.id !== selected ? null : current));
-    let cancelled = false;
-    setDetailError(null);
-    void api
-      .projectView(selected)
-      .then((result) => {
-        if (!cancelled) setDetail(result);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setDetailError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selected, projects, detailAttempt]);
-
+  // Both at once: the stage view cannot start its draft until the detail
+  // lands, so a serial refresh here was dead time on every approval.
   const reloadDetail = useCallback(async () => {
-    // Both at once: the stage view cannot start its draft until the detail
-    // lands, so a serial refresh here was dead time on every approval.
-    const [, next] = await Promise.all([
-      refresh(),
-      selected
-        ? api.projectView(selected).catch((cause: unknown) => {
-            // A failed re-read is never a reason to blank an already-open
-            // project (CL-8874) — the stale detail stays on screen with the
-            // failure surfaced, rather than the workspace collapsing to
-            // "No project open" on every action that happens to race a
-            // backend hiccup.
-            setDetailError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-            return undefined;
-          })
-        : Promise.resolve(undefined),
-    ]);
-    if (selected && next) {
-      setDetail(next);
-      setDetailError(null);
-    }
-  }, [refresh, selected]);
+    await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: keys.projectView.all })]);
+  }, [refresh, queryClient]);
 
-  const retryDetail = useCallback(() => {
-    setDetailAttempt((value) => value + 1);
-  }, []);
+  const { refetch: refetchDetail } = detailQuery;
+  const retryDetail = useCallback(() => void refetchDetail(), [refetchDetail]);
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
@@ -719,7 +687,7 @@ export function App() {
       if (mintError) {
         return (
           <Auth
-            onSignedIn={() => setAuth("signed-in")}
+            onSignedIn={onSignedIn}
             mintFailure={{
               reason: mintError,
               onRetry: () => {
@@ -740,7 +708,7 @@ export function App() {
     }
     // Remote: a hosted hub is never a single-user desktop, so this is the
     // real account flow — sign up or sign in against it.
-    return <Auth onSignedIn={() => setAuth("signed-in")} />;
+    return <Auth onSignedIn={onSignedIn} />;
   }
   if (screen === "install") {
     return (

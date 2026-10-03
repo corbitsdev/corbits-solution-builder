@@ -6,7 +6,9 @@
  * never said.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import { describeFailure } from "./failure-message.ts";
 import { describeReplay } from "./replay-notice.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
@@ -39,30 +41,35 @@ export type WorkflowViewState = {
   readonly markStage: (stage: number) => void;
 };
 
-// Re-entering a project this session already has a workflow view for: a
-// thin snapshot so the pane renders that view immediately instead of a blank
-// "resolved: false" while the mount effect below re-confirms it off the hub.
-// Never the source of truth -- every mount still re-reads before trusting it,
-// and a stale or wrong snapshot only ever costs one extra render, never a
-// wrong decision (nothing here gates `decide`).
-const viewSnapshots = new Map<string, ProjectWorkflowView>();
+/** The workflow's decisions never reach the mailbox stream, so a change this client did not make (another
+ * person's vote, the run advancing itself) is seen only by polling; this client's own decisions refresh on the spot. */
+const POLL_MS = 5_000;
 
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
-  const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
+  const queryClient = useQueryClient();
   const [startError, setStartError] = useState<string | null>(null);
   const [replayNotice, setReplayNotice] = useState<{ title: string; detail: string } | null>(null);
   const [viewFailed, setViewFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
-  const reload = useCallback(async () => {
-    const next = await api.projectWorkflowView(projectId).catch(() => null);
-    if (next && next.stage >= 1) {
-      setView(next);
-      viewSnapshots.set(projectId, next);
-    }
-    return next;
-  }, [projectId]);
+  // A run that has not written its first state (stage 0) never replaces a
+  // view already held; a failed read is the query's error and keeps it too. The cache outlives the mount, so
+  // re-entering a project paints its last view at once while this re-reads.
+  const key = keys.workflowView.of(projectId);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      const next = await api.projectWorkflowView(projectId);
+      return next && next.stage >= 1 ? next : (queryClient.getQueryData<ProjectWorkflowView | null>(key) ?? null);
+    },
+    refetchInterval: POLL_MS,
+    gcTime: Infinity,
+  });
+  const view = query.data ?? null;
+
+  const { refetch } = query;
+  const reload = useCallback(async () => (await refetch()).data ?? null, [refetch]);
 
   const refresh = useCallback(async () => {
     setRefreshingAfterAction(true);
@@ -80,39 +87,28 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setAttempt((value) => value + 1);
   }, []);
 
-  const markStage = useCallback((stage: number) => {
-    setView((current) => (current ? { ...current, stage } : current));
-  }, []);
+  const markStage = useCallback(
+    (stage: number) =>
+      queryClient.setQueryData<ProjectWorkflowView | null>(keys.workflowView.of(projectId), (current) =>
+        current ? { ...current, stage } : current,
+      ),
+    [queryClient, projectId],
+  );
 
-  // Re-entering a project whose workflow is already live: paint it
-  // immediately with the same non-deploying read `reload` uses
-  // (`projectWorkflowView`, backed by `findProjectWorkflow`/
-  // `resolveProjectWorkflowRef`) instead of blocking on
-  // `ensureProjectWorkflow`'s deploy-and-wait path.
-  //
-  // This attach is display-only, never a substitute for ensure:
+  // The query above is display-only, never a substitute for ensure:
   // `findProjectWorkflow`'s own `projectRunState` deliberately returns the
   // OLDEST DEAD deployment's ref (`live: false`) rather than flash the view
   // back to stage 1, so a plain read can never tell "live" from "needs
   // reviving onto a fresh deployment" on its own -- only `ensureProjectWorkflow`
-  // does that (its replacement-wait + `catchUp` replay). So `ensureProjectWorkflow`
-  // still runs every mount, in the background, after the instant paint above
-  // -- never awaited before rendering, but never skipped either. A newer
-  // view it turns up lands the same way it always has; a failure surfaces
-  // through `startError` exactly as before attach existed. `attempt` (Retry)
-  // skips the instant paint and goes straight to ensure: a failed open is
-  // exactly the case that needs it to run again, not another stale read.
+  // does that (its replacement-wait + `catchUp` replay). So it still runs
+  // every mount, in the background -- never awaited before rendering, but
+  // never skipped either. A failure surfaces through `startError`.
   useEffect(() => {
     let cancelled = false;
+    setStartError(null);
+    setReplayNotice(null);
+    setViewFailed(false);
     (async () => {
-      if (attempt === 0) {
-        const attached = await api.projectWorkflowView(projectId).catch(() => null);
-        if (cancelled) return;
-        if (attached && attached.stage >= 1) {
-          setView(attached);
-          viewSnapshots.set(projectId, attached);
-        }
-      }
       try {
         const ensured = await api.ensureProjectWorkflow(projectId);
         // A replay's refusals are the reducer's own ledger rows; this only
@@ -135,37 +131,12 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
         if (!cancelled) setViewFailed(true);
         return;
       }
-      if (!cancelled) {
-        setView(next);
-        if (next) viewSnapshots.set(projectId, next);
-      }
+      if (!cancelled && next) queryClient.setQueryData(keys.workflowView.of(projectId), next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [projectId, attempt]);
-
-  // Backstop poll — the workflow's own decisions do not land on the tenant
-  // mailbox stream, so they cannot rely on `subscribeMailbox`'s nudge alone.
-  // 5s, the same cadence `app.tsx` polls the decision fold at: a missed
-  // nudge costs one poll tick, not a stage sitting stale.
-  useEffect(() => {
-    const timer = setInterval(() => void reload(), 5_000);
-    return () => clearInterval(timer);
-  }, [reload]);
-
-  // Belt-and-braces against a missed remount: `key={detail.project.id}` on
-  // the component already resets all of this per project; this clears the
-  // previous project's view even if that remount ever regresses. Seeds from
-  // this project's own snapshot (if any) rather than null, so it cannot
-  // undo the instant-render attach the effect above just did in the same
-  // commit.
-  useEffect(() => {
-    setView(viewSnapshots.get(projectId) ?? null);
-    setStartError(null);
-    setReplayNotice(null);
-    setViewFailed(false);
-  }, [projectId]);
+  }, [projectId, attempt, queryClient]);
 
   return {
     view,

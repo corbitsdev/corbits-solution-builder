@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
-import { subscribeMailbox } from "../../mailbox-events.ts";
+import { useWaitingReplies } from "./use-waiting-replies.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
@@ -263,61 +263,20 @@ export function Stage6Panel({
   // Reads each waiting role's thread back -- a mailbox nudge wakes this
   // immediately, same as the stage's own chat thread; a bounded interval
   // backstops a missed nudge. Never resends a request: this only reads.
-  const waitingAddresses = [
-    ...(requirements.status === "waiting" && requirements.address ? [["requirements", requirements] as const] : []),
-    ...Object.entries(reviews).filter(([, state]) => state.status === "waiting" && state.address),
+  const waiting = [
+    ...(requirements.status === "waiting" && requirements.address
+      ? [{ key: STAGE6_REQUIREMENTS_ROLE_KEY, address: requirements.address, requestedAt: requirements.requestedAt }]
+      : []),
+    ...Object.entries(reviews).flatMap(([key, state]) =>
+      state.status === "waiting" && state.address ? [{ key, address: state.address, requestedAt: state.requestedAt }] : [],
+    ),
   ];
-  const anyWaiting = waitingAddresses.length > 0;
-  useEffect(() => {
-    if (!anyWaiting) return;
-    const checkOne = async (
-      address: string,
-      requestedAt: number,
-      apply: (reply: string) => void,
-      onFail: (message: string) => void,
-    ) => {
-      const thread = await api.readStageThread(tenantId, [address]).catch((cause: unknown) => {
-        onFail(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-        return null;
-      });
-      if (!thread) return;
-      const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
-      if (reply) apply(reply.body);
-    };
-    const checkAll = () => {
-      if (requirements.status === "waiting" && requirements.address) {
-        void checkOne(
-          requirements.address,
-          requirements.requestedAt,
-          (reply) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
-          (message) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "error", error: message } : prev)),
-        );
-      }
-      for (const [roleKey, state] of Object.entries(reviews)) {
-        if (state.status !== "waiting" || !state.address) continue;
-        void checkOne(
-          state.address,
-          state.requestedAt,
-          (reply) =>
-            setReviews((prev) =>
-              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "done", reply } } : prev,
-            ),
-          (message) =>
-            setReviews((prev) =>
-              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "error", error: message } } : prev,
-            ),
-        );
-      }
-    };
-    checkAll();
-    const subscription = subscribeMailbox(tenantId, checkAll);
-    const timer = setInterval(checkAll, 8_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyWaiting, tenantId]);
+  // A settled reply is applied as this renders; it then leaves `waiting`, so this runs once per reply.
+  const settled = useWaitingReplies(tenantId, waiting);
+  for (const [key, outcome] of settled) {
+    if (key === STAGE6_REQUIREMENTS_ROLE_KEY) setRequirements((prev) => ({ ...prev, ...outcome }));
+    else setReviews((prev) => ({ ...prev, [key]: { ...(prev[key] ?? STAGE6_IDLE_ROLE), ...outcome } }));
+  }
 
   // What the stage has written so far, as documents a message may name (#345).
   const documents: StageDocument[] = [

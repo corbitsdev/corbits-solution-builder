@@ -42,19 +42,9 @@ export function nextBackoffMs(attempt: number): number {
 }
 
 /** The stream is id-only and drops events past a 100-deep queue, so an open
- * stream can still miss a nudge — the fallback poll must fire regardless of
- * `open` once this long has passed since the last successful load. */
+ * stream can still miss a nudge — the fallback poll fires this often even
+ * while it is open. */
 export const FALLBACK_REFETCH_MS = 60_000;
-
-export function shouldFallbackRefetch({
-  open,
-  msSinceLastLoad,
-}: {
-  open: boolean;
-  msSinceLastLoad: number;
-}): boolean {
-  return !open || msSinceLastLoad >= FALLBACK_REFETCH_MS;
-}
 
 export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data: string }) => void): void;
