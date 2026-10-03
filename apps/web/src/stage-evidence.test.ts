@@ -167,4 +167,12 @@ describe("stage6StackRemediation", () => {
     expect(STACK_RESEND_ASK).toContain("```json stack");
     expect(STACK_RESEND_ASK).toContain("even though nothing in it changed");
   });
+
+  // #617: an architect that never wrote a valid block is told its shape.
+  test("the ask carries the record's shape, field by field", () => {
+    for (const field of ["mode", "hubPlacement", "runtime", "ui", "storage", "auth", "packaging", "kind", "packages", "name", "deferred", "choice", "reason", "cites"]) {
+      expect(STACK_RESEND_ASK).toContain(`"${field}"`);
+    }
+    expect(STACK_RESEND_ASK).toContain("Do not add, rename or leave out a field");
+  });
 });
