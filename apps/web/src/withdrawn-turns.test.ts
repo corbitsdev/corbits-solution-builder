@@ -30,7 +30,7 @@ const reply = (id: string, offset: number, inReplyTo: string): ChatMessage => ({
 
 describe("pairReplies", () => {
   // #62: the hub's trigger Message-ID on the Sent row, named by the reply's
-  // In-Reply-To, is what pairs them; order is only the fallback.
+  // In-Reply-To, is the only thing that pairs them.
   test("pairs a reply with the turn its In-Reply-To names, not the oldest queued one", () => {
     const messages = [
       trigger("m1", 0, "<t1@hub>"),
@@ -52,28 +52,16 @@ describe("pairReplies", () => {
     expect(queue).toEqual([]);
   });
 
-  test("turns sent before the trigger id was recorded still pair by order, around the id-paired ones", () => {
-    const messages = [
-      person("old1", 0),
-      trigger("m2", 1, "<t2@hub>"),
-      agent("legacy1", 2),
-      reply("a2", 3, "<t2@hub>"),
-      person("old3", 4),
-      agent("legacy3", 5),
-    ];
+  test("a reply whose In-Reply-To names nothing in the thread answers nothing", () => {
+    // A thread sent before sends were threaded: the run's second reply names
+    // its first reply, not the turn it answers.
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), trigger("m2", 2, "<t2@hub>"), reply("a2", 3, "<a1@run>")];
     const { answeredBy, queue } = pairReplies(messages);
-    expect(answeredBy.get("legacy1")).toBe("old1");
-    expect(answeredBy.get("a2")).toBe("m2");
-    expect(answeredBy.get("legacy3")).toBe("old3");
-    expect(queue).toEqual([]);
+    expect(answeredBy.has("a2")).toBe(false);
+    expect(queue.map((message) => message.id)).toEqual(["m2"]);
   });
 
-  test("a reply whose In-Reply-To names nothing in the thread falls back on order", () => {
-    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<elsewhere@hub>")];
-    expect(pairReplies(messages).answeredBy.get("a1")).toBe("m1");
-  });
-
-  test("a second reply to the same trigger answers nothing by id and falls back on order", () => {
+  test("a second reply to the same trigger answers nothing", () => {
     const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), reply("a1b", 2, "<t1@hub>")];
     const { answeredBy } = pairReplies(messages);
     expect(answeredBy.get("a1")).toBe("m1");
@@ -91,7 +79,7 @@ describe("applyWithdrawn", () => {
   test("hides the late answer to a withdrawn turn but shows the reply to the next one", () => {
     // m1 withdrawn, m2 sent before the specialist ever answers m1; its late
     // answer to m1 arrives first (FIFO), then it answers m2.
-    const messages = [person("m1", 0), person("m2", 1), agent("a1", 2), agent("a2", 3)];
+    const messages = [trigger("m1", 0, "<t1@hub>"), trigger("m2", 1, "<t2@hub>"), reply("a1", 2, "<t1@hub>"), reply("a2", 3, "<t2@hub>")];
     const folded = applyWithdrawn(messages, new Set(["m1"]));
     expect(folded.map((message) => message.id)).toEqual(["m1", "m2", "a2"]);
   });
@@ -105,7 +93,7 @@ describe("applyWithdrawn", () => {
   });
 
   test("hides both replies when two turns in a row are withdrawn", () => {
-    const messages = [person("m1", 0), person("m2", 1), agent("a1", 2), agent("a2", 3)];
+    const messages = [trigger("m1", 0, "<t1@hub>"), trigger("m2", 1, "<t2@hub>"), reply("a1", 2, "<t1@hub>"), reply("a2", 3, "<t2@hub>")];
     const folded = applyWithdrawn(messages, new Set(["m1", "m2"]));
     expect(folded.map((message) => message.id)).toEqual(["m1", "m2"]);
   });
@@ -124,13 +112,13 @@ describe("applyWithdrawn", () => {
       "A teammate can find the current context in one place, understand what is missing, and verify the response path with a representative case. The initial release should make the workflow observable without assuming a particular technical solution.",
     ].join("\n");
     const messages: ChatMessage[] = [
-      { id: "m1", author: "me", body: "Build a CRM", at: at(0) },
-      { id: "a1", author: "agent", body: completeDraft, at: at(1) },
-      { id: "m2", author: "me", body: "Actually, hold on", at: at(2) },
+      { id: "m1", author: "me", body: "Build a CRM", at: at(0), triggerMessageId: "<t1@hub>" },
+      { id: "a1", author: "agent", body: completeDraft, at: at(1), inReplyTo: "<t1@hub>" },
+      { id: "m2", author: "me", body: "Actually, hold on", at: at(2), triggerMessageId: "<t2@hub>" },
     ];
     // The specialist answers m2 with a substantial draft the person stopped
     // before reading; it must never surface as the draft or its question.
-    const lateAnswer = agent("a2", 3);
+    const lateAnswer = reply("a2", 3, "<t2@hub>");
     const withdrawn = new Set(["m2"]);
     const folded = applyWithdrawn([...messages, lateAnswer], withdrawn);
     const guidance = workspaceGuidance(1, folded);
@@ -141,7 +129,7 @@ describe("applyWithdrawn", () => {
 
 describe("pendingTurn", () => {
   test("is the last message when it is an unanswered person turn", () => {
-    const messages = [person("m1", 0), agent("a1", 1), person("m2", 2)];
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), trigger("m2", 2, "<t2@hub>")];
     expect(pendingTurn(messages, new Set())?.id).toBe("m2");
   });
 
@@ -151,7 +139,7 @@ describe("pendingTurn", () => {
   });
 
   test("is null once the specialist has answered", () => {
-    const messages = [person("m1", 0), agent("a1", 1)];
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>")];
     expect(pendingTurn(messages, new Set())).toBeNull();
   });
 

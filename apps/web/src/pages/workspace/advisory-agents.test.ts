@@ -24,11 +24,19 @@ function fakeMail() {
   let failSends: { count: number; leaveSentRow: boolean } = { count: 0, leaveSentRow: false };
   let onWait: (() => void) | null = null;
 
-  const post = (address: string, author: ChatMessage["author"], body: string): ChatMessage => {
+  // Each address is a run answering its accepted triggers in arrival order,
+  // its reply naming the trigger it answers (#62).
+  const unanswered = new Map<string, string[]>();
+  const post = (address: string, message: Omit<ChatMessage, "id" | "at">): ChatMessage => {
     seq += 1;
-    const message = { id: `${author}:${seq}`, author, body, at: new Date(clock).toISOString() };
-    threads.set(address, [...(threads.get(address) ?? []), message]);
-    return message;
+    const posted = { ...message, id: `${message.author}:${seq}`, at: new Date(clock).toISOString() };
+    threads.set(address, [...(threads.get(address) ?? []), posted]);
+    return posted;
+  };
+  const trigger = (address: string, body: string) => {
+    const triggerMessageId = `<t${seq + 1}@hub>`;
+    unanswered.set(address, [...(unanswered.get(address) ?? []), triggerMessageId]);
+    post(address, { author: "me", body, triggerMessageId });
   };
 
   const deps: AdvisoryDeps = {
@@ -47,10 +55,10 @@ function fakeMail() {
       if (failSends.count > 0) {
         failSends = { ...failSends, count: failSends.count - 1 };
         // The mailbox can write the Sent copy and still fail the delivery (#61).
-        if (failSends.leaveSentRow) post(address, "me", body);
+        if (failSends.leaveSentRow) post(address, { author: "me", body });
         throw new Error("409 run released");
       }
-      post(address, "me", body);
+      trigger(address, body);
     },
     artifactContent: async (_tenant, id) => ({ content: contents[id] ?? "" }),
     subscribe: (_tenant, onNudge) => {
@@ -83,7 +91,11 @@ function fakeMail() {
     deps,
     contents,
     sends,
-    reply: (address: string, body: string) => post(address, "agent", body),
+    reply: (address: string, body: string) => {
+      const [inReplyTo, ...rest] = unanswered.get(address) ?? [];
+      unanswered.set(address, rest);
+      return post(address, { author: "agent", body, ...(inReplyTo !== undefined ? { inReplyTo } : {}) });
+    },
     /** One mailbox event, reaching every watch still subscribed, then lets
      *  the async work settle. */
     wake: async () => {
@@ -229,10 +241,6 @@ describe("watchEvaluator", () => {
     await mail.wake();
     expect(mail.sends).toHaveLength(1);
     expect(run.last()).toEqual({ status: "unavailable", reason: "The brief evaluator could not be reached: 409 run released" });
-    // A reply that does pair still replaces it.
-    mail.reply("evaluator", "Verdict: ready");
-    await mail.wake();
-    expect(run.last()).toMatchObject({ status: "verdict" });
   });
 
   test("a failed send that left no Sent copy is sent again", async () => {
