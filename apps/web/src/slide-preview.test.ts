@@ -24,7 +24,7 @@ const deck: Deck = {
 describe("the slides preview", () => {
   test("opens on the cover, then one slide per item, then the decision request", () => {
     const slides = previewSlides(deck);
-    expect(slides.map((slide) => slide.title)).toEqual(["Workout Log", "The problem", "The approach", "Your decision"]);
+    expect(slides.map((slide) => slide.title)).toEqual(["Workout Log", "The problem", "The approach", "Decisions to Make"]);
     expect(slides[0]).toEqual({
       kind: "cover",
       title: "Workout Log",
@@ -32,7 +32,7 @@ describe("the slides preview", () => {
       note: COVER_NOTE,
     });
     expect(slides[1]).toEqual({ kind: "item", title: "The problem", lines: ["Sets are lost between the rack and the phone"], page: 2 });
-    expect(slides[3]).toEqual({ kind: "item", title: "Your decision", lines: ["Fund a two-week build"], page: 4 });
+    expect(slides[3]).toEqual({ kind: "item", title: "Decisions to Make", lines: ["Fund a two-week build"], page: 4 });
   });
 
   test("a package that asks for no decision has no decision slide", () => {

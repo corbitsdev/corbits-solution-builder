@@ -178,7 +178,7 @@ export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DE
 }
 
 /** The closing slide's title (#599): the deck is on its reader's screen, so the slide names their decision, not a request about them. */
-export const DECISION_SLIDE_TITLE = "Your decision";
+export const DECISION_SLIDE_TITLE = "Decisions to Make";
 
 /** The decision request's lines, bullets and paragraphs alike, as plain text. */
 export function decisionLinesIn(markdown: string): string[] {
