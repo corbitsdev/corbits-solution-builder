@@ -19,6 +19,8 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
@@ -296,33 +298,37 @@ export function StageWorkspace({
   const usesArtifact = stageUsesArtifactTools(stage as Stage);
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
-  // Keyed by what was read, so the previous stage's or project's document
-  // never stands in for this one's while it loads.
-  const workKey = `${tenantId}:${workKind ?? ""}`;
-  // `settled`: read once the reply had landed and any repair below was
-  // written, so it is a version a review may name.
-  const [workRead, setWorkRead] = useState<{ readonly key: string; readonly work: WorkArtifact; readonly settled: boolean } | null>(null);
-  const work = usesArtifact && workRead?.key === workKey ? workRead.work : null;
-  const workSettled = work !== null && workRead!.settled;
-  const [workTick, setWorkTick] = useState(0);
-  // Each version is checked for a repair once, so a repair is written once.
-  const repairChecked = useRef(new Set<string>());
-  useEffect(() => {
-    if (!usesArtifact || !awaitingReply) return;
-    const timer = setInterval(() => setWorkTick((tick) => tick + 1), 5000);
-    return () => clearInterval(timer);
-  }, [usesArtifact, awaitingReply]);
+  // Keyed on the thread's newest message as well, so a reply that just
+  // landed is read again, and the previous read stands in until it is --
+  // never another stage's or project's document.
+  const workQuery = useQuery({
+    queryKey: [...keys.stageWork.of(tenantId, workKind ?? ""), foldedMessages.at(-1)?.id ?? null],
+    queryFn: usesArtifact && workKind !== null ? () => api.stageWorkArtifact(tenantId, workKind) : skipToken,
+    refetchInterval: awaitingReply ? 5_000 : false,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === tenantId && previousQuery.queryKey[2] === (workKind ?? "") ? previous : undefined,
+  });
+  const work = useMemo((): WorkArtifact | null => {
+    if (workQuery.error) return { state: "unreadable", message: workQuery.error.message };
+    if (workQuery.data === undefined) return null;
+    return workQuery.data ? { state: "ready", artifact: workQuery.data } : { state: "none" };
+  }, [workQuery.error, workQuery.data]);
   // The stage 3 choice (#430) and the stage 6 Stack block (#437) are
   // repaired in the document itself, as its next version, so the pane, the
   // review and the approval all name a version that holds the repair.
-  // Never while a reply is pending: the specialist is still writing.
+  // Never while a reply is pending, or before the read is the current thread's.
+  const settledArtifact = work?.state === "ready" && !workQuery.isPlaceholderData && !awaitingReply ? work.artifact : null;
+  // Each version is checked for a repair once, so a repair is written once.
+  const repairChecked = useRef(new Set<string>());
+  // The version checked and left as it is: one a review may name.
+  const [checkedVersion, setCheckedVersion] = useState<string | null>(null);
+  const refetchWork = workQuery.refetch;
   useEffect(() => {
-    if (!usesArtifact || !workKind) return;
-    let cancelled = false;
+    if (!settledArtifact) return;
+    const key = versionIdFor(settledArtifact.id, settledArtifact.version);
+    if (repairChecked.current.has(key)) return;
+    repairChecked.current.add(key);
     const repairOf = async (artifact: StageWorkArtifact): Promise<string | null> => {
-      const key = versionIdFor(artifact.id, artifact.version);
-      if (awaitingReply || repairChecked.current.has(key)) return null;
-      repairChecked.current.add(key);
       if (stage === 3 && latestSpecialistMessage) {
         const repaired = repairedChoiceDraft(3, foldedMessages, { ...latestSpecialistMessage, body: artifact.content });
         return repaired && repaired.body !== artifact.content ? repaired.body : null;
@@ -336,42 +342,26 @@ export function StageWorkspace({
       }
       return null;
     };
-    const load = async () => {
-      let artifact: StageWorkArtifact | null;
+    void (async () => {
       try {
-        artifact = await api.stageWorkArtifact(tenantId, workKind);
-      } catch (cause) {
-        if (!cancelled) setWorkRead({ key: workKey, settled: false, work: { state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) } });
-        return;
-      }
-      if (artifact) {
-        try {
-          const repaired = await repairOf(artifact);
-          if (repaired !== null) {
-            await api.restoreStageDocument(tenantId, artifact.id, repaired, artifact.version);
-            if (!cancelled) setWorkTick((tick) => tick + 1);
-            return;
-          }
-        } catch (cause) {
-          if (!cancelled) setError(`The document's repair could not be saved: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+        const repaired = await repairOf(settledArtifact);
+        if (repaired !== null) {
+          await api.restoreStageDocument(tenantId, settledArtifact.id, repaired, settledArtifact.version);
+          await refetchWork();
+          return;
         }
+      } catch (cause) {
+        setError(`The document's repair could not be saved: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
       }
-      if (!cancelled) setWorkRead({ key: workKey, settled: !awaitingReply, work: artifact ? { state: "ready", artifact } : { state: "none" } });
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [usesArtifact, workKind, workKey, tenantId, stage, foldedMessages, latestSpecialistMessage, awaitingReply, workTick]);
+      setCheckedVersion(key);
+    })();
+  }, [settledArtifact, stage, tenantId, foldedMessages, latestSpecialistMessage, refetchWork]);
+  const workSettled = settledArtifact !== null && checkedVersion === versionIdFor(settledArtifact.id, settledArtifact.version);
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
     return { ...latestSpecialistMessage, body: work.artifact.content };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
-  const workUnreadable = work?.state === "unreadable" ? work.message : null;
-  useEffect(() => {
-    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
-  }, [workUnreadable]);
   // A draft that lives in the mail is repaired here, before the pane or the
   // gate reads it, and that repaired text is what approval records: a stage
   // 3 choice absorbed anywhere but under "## Chosen approach" is written in
@@ -709,7 +699,7 @@ export function StageWorkspace({
     try {
       if (work?.state === "ready") {
         await api.restoreStageDocument(tenantId, work.artifact.id, artifacts.activeContent, work.artifact.version);
-        setWorkTick((tick) => tick + 1);
+        void refetchWork();
       } else {
         const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
         await api.persistStageDraft(detail.project.id, stage, artifacts.activeContent, materials);
@@ -975,6 +965,11 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
+      {work?.state === "unreadable" ? (
+        <Banner tone="error" title="The stage document could not be read">
+          {work.message} Approval waits until it can be read.
+        </Banner>
+      ) : null}
       {error ? (
         <Banner
           tone="error"
