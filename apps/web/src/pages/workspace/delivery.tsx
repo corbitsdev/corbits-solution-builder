@@ -8,8 +8,8 @@
  * `approveTool`/`rejectTool` helpers — but inline, on the project's own
  * stage, instead of making the person leave for the queue.
  */
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Textarea } from "@corbits/react-ui";
 import { keys } from "../../queries/keys.ts";
 import { listSpecialistDeployments } from "@solutions-builder/installer";
@@ -205,34 +205,17 @@ function DeliveryDecision({
   const loaded = !query.isPending;
   const loadError = query.error ? (query.error instanceof ApiFailure ? query.error.detail.message : String(query.error)) : null;
   const load = query.refetch;
-  const shownError = error ?? loadError;
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
-  const [verification, setVerification] = useState<DeliveryVerification | null>(null);
-
-  useEffect(() => {
-    if (!verificationNode) {
-      setVerification(parseDeliveryVerification(null));
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, verificationNode.id)
-      .then((result) => {
-        if (cancelled) return;
-        try {
-          setVerification(parseDeliveryVerification(JSON.parse(result.content)));
-        } catch {
-          setVerification(parseDeliveryVerification(undefined));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setVerification(parseDeliveryVerification(undefined));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, verificationNode?.id]);
+  const verificationRead = useQuery({
+    queryKey: keys.artifact.of(tenantId, verificationNode?.id ?? ""),
+    queryFn: verificationNode ? async () => (await api.artifactContent(tenantId, verificationNode.id)).content : skipToken,
+    select: (content) => parseDeliveryVerification(JSON.parse(content)),
+    staleTime: Infinity,
+  });
+  const verification = verificationNode ? (verificationRead.data ?? null) : parseDeliveryVerification(null);
+  const verificationError = verificationRead.error ? `The verification record could not be read: ${verificationRead.error.message}` : null;
+  const shownError = error ?? loadError ?? verificationError;
 
   if (!loaded) return null;
 
