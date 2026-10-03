@@ -4,7 +4,7 @@ import { FileText, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { appEventLine, composedMailFold, isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
+import { appView, composedMailFold } from "./composed-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
 import { AttachMenu, AttachedList, attachedIn, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 import { Dictated } from "../../dictation.jsx";
@@ -271,29 +271,21 @@ export function StageConversation({
               );
             }
             const source = byId.get(message.id);
-            // The opening is what the specialist is sent to start the stage;
-            // the person never said it, and the document strip already shows
-            // what it carried.
-            if (source && isStageOpening(source)) return null;
-            // The evaluator's notes the app sent the specialist are an event
-            // in the stage, never the person's words.
-            if (source && isEvaluatorNotes(source)) {
-              return (
-                <div key={message.id} className="event conv-event">
-                  <details className="bubble-fold">
-                    <summary>Evaluator notes sent to the specialist</summary>
-                    <Markdown source={source.body} />
-                  </details>
-                </div>
-              );
-            }
             const text = messageText(message);
             const you = message.role === "user";
-            const line = source ? appEventLine(source, byId.get(answeredBy.get(message.id) ?? "")) : null;
-            if (line) {
+            const view = source ? appView(source, byId.get(answeredBy.get(message.id) ?? "")) : null;
+            if (view === "hidden") return null;
+            if (view) {
               return (
                 <div key={message.id} className="event conv-event">
-                  {line}
+                  {view.detail ? (
+                    <details className="bubble-fold">
+                      <summary>{view.line}</summary>
+                      <Markdown source={view.detail} />
+                    </details>
+                  ) : (
+                    view.line
+                  )}
                 </div>
               );
             }

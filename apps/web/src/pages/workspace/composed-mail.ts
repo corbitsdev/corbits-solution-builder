@@ -140,3 +140,15 @@ export function appEventLine(message: Pick<ChatMessage, "author" | "subject">, a
   const about = subject.slice(close + 2);
   return message.author === "me" ? sent(about) : (answer?.(about) ?? null);
 }
+
+/** How a message the app composed shows in either chat view: hidden, as one
+ *  event line (with the sent text folded beneath), or null for an ordinary turn. */
+export function appView(
+  message: Pick<ChatMessage, "author" | "subject" | "body">,
+  answers?: Pick<ChatMessage, "author" | "subject">,
+): "hidden" | { readonly line: string; readonly detail: string | null } | null {
+  if (isStageOpening(message)) return "hidden";
+  if (isEvaluatorNotes(message)) return { line: "Evaluator notes sent to the specialist", detail: message.body };
+  const line = appEventLine(message, answers);
+  return line ? { line, detail: null } : null;
+}

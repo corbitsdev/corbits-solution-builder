@@ -13,6 +13,7 @@ import {
   type ChatMessage,
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check, Send } from "lucide-react";
+import { appView } from "./composed-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -254,6 +255,7 @@ export function StageDocument({
   // Memoised: the thread re-pins its scroll whenever this array is new, and a
   // fresh one on every keystroke in the composer made the transcript twitch.
   // The turns that report a round the platform could not complete, set apart in the transcript.
+  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
   const failedTurns = useMemo(() => new Set(turns.filter((turn) => turn.failed).map((turn) => turn.id)), [turns]);
 
   const messages: ChatMessage[] = useMemo(() => {
@@ -421,6 +423,23 @@ export function StageDocument({
               return (
                 <span className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}>
                   {event.text}
+                </span>
+              );
+            }
+            const turn = turnById.get(message.id);
+            const view = turn && message.role === "user" ? appView({ author: "me", body: turn.body, ...(turn.subject ? { subject: turn.subject } : {}) }) : null;
+            if (view === "hidden") return null;
+            if (view) {
+              return (
+                <span className="event conv-event">
+                  {view.detail ? (
+                    <details className="bubble-fold">
+                      <summary>{view.line}</summary>
+                      <Markdown source={view.detail} />
+                    </details>
+                  ) : (
+                    view.line
+                  )}
                 </span>
               );
             }

@@ -18,6 +18,7 @@ export type StageTurn = {
   /** The questions a specialist turn opened a round with; null on every other turn. */
   readonly questions: string[] | null;
   readonly createdAt: string;
+  readonly subject?: string;
   /** Set on a specialist turn that reports a round the platform could not complete. */
   readonly failed?: true;
 };
