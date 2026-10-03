@@ -13,7 +13,7 @@
  * nothing to open: the reply is a draft whether or not a review has
  * persisted it yet.
  */
-import { versionIdFor } from "@solutions-builder/app/artifact-graph";
+import { documentMediaType, versionIdFor } from "@solutions-builder/app/artifact-graph";
 import type { ArtifactNode, StageWorkArtifact } from "../../client.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { isSubstantialDraft } from "./guidance.ts";
@@ -67,50 +67,25 @@ export function draftReferences(
   return refs;
 }
 
-/** One version of a stage document kept in an artifact, and the reply that left it there (null for none). */
-export type DocumentVersion = { readonly node: ArtifactNode; readonly replyId: string | null };
-
 /**
- * A stage document the specialist keeps in one artifact, as the versions the
- * person saw, oldest first: the version each reply left it at -- a reply's
- * earlier writes are not versions -- then the current one when no reply has
- * left it yet (a write still in progress, or an earlier version restored).
- * A version written after one reply and by the next is the next reply's.
- * Each node's id names its exact version, so reading it reads that version.
+ * A stage document the specialist keeps in one artifact: every version of
+ * it, in version order. Each node's id names its exact version, so reading
+ * it reads that version.
  */
-export function documentVersions(
-  messages: readonly ChatMessage[],
-  document: StageWorkArtifact,
-  stage: number,
-  kind: string,
-  title: string,
-): DocumentVersion[] {
-  const picked: { version: StageWorkArtifact["versions"][number]; replyId: string | null }[] = [];
-  let from = Number.NEGATIVE_INFINITY;
-  for (const reply of messages.filter((message) => message.author === "agent")) {
-    const until = Date.parse(reply.at);
-    const left = document.versions.filter((entry) => Date.parse(entry.createdAt) > from && Date.parse(entry.createdAt) <= until).at(-1);
-    if (left) picked.push({ version: left, replyId: reply.id });
-    from = until;
-  }
-  const current = document.versions.at(-1);
-  if (current && picked.at(-1)?.version.version !== current.version) picked.push({ version: current, replyId: null });
-  return picked.map(({ version, replyId }, index) => ({
-    replyId,
-    node: {
-      id: versionIdFor(document.id, version.version),
-      kind,
-      variant: null,
-      stage,
-      title,
-      version: version.version,
-      artifactId: document.id,
-      contentHash: versionIdFor(document.id, version.version),
-      mediaType: "text/markdown",
-      createdAt: version.createdAt,
-      supersededByNodeId: index + 1 < picked.length ? versionIdFor(document.id, picked[index + 1]!.version.version) : null,
-      provenance: { producer: "agent" },
-      contentSha256: version.contentSha256,
-    },
+export function documentVersions(document: StageWorkArtifact, stage: number, kind: string, title: string): ArtifactNode[] {
+  return document.versions.map((version, index) => ({
+    id: versionIdFor(document.id, version.version),
+    kind,
+    variant: null,
+    stage,
+    title,
+    version: version.version,
+    artifactId: document.id,
+    contentHash: versionIdFor(document.id, version.version),
+    mediaType: documentMediaType(kind),
+    createdAt: version.createdAt,
+    supersededByNodeId: index + 1 < document.versions.length ? versionIdFor(document.id, document.versions[index + 1]!.version) : null,
+    provenance: { producer: "agent" },
+    contentSha256: version.contentSha256,
   }));
 }

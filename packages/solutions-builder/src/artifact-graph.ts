@@ -160,6 +160,11 @@ const STAGE_OF_DOCUMENT_KIND: ReadonlyMap<string, Stage> = new Map(
     .filter(([, stage]) => stageUsesArtifactTools(stage)),
 );
 
+/** A stage document's media type: a design is a page, every other document Markdown. */
+export function documentMediaType(kind: string): string {
+  return kind === "design_artifact" ? "text/html" : "text/markdown";
+}
+
 /** A drafting stage's document as its specialist wrote it, read off the platform's own record. */
 function stageDocumentSb(entry: ArtifactListEntry, projectId: string): ArtifactGraphMetadata | null {
   const stage = entry.source?.origin === "workflow" && entry.kind ? STAGE_OF_DOCUMENT_KIND.get(entry.kind) : undefined;
@@ -168,7 +173,7 @@ function stageDocumentSb(entry: ArtifactListEntry, projectId: string): ArtifactG
     projectId,
     kind: entry.kind!,
     stage,
-    mediaType: "text/markdown",
+    mediaType: documentMediaType(entry.kind!),
     sourceVersionIds: [],
     provenance: { producer: "agent", agentRole: agentFor(stage).id },
   };
