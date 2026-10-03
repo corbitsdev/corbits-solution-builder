@@ -58,3 +58,4 @@ describe("revisionRequest carries the current version, as alpha main's round did
     expect(splitRevision("Drop the mobile form.")).toBeNull();
   });
 });
+

@@ -50,3 +50,24 @@ export function repairedStackDraft(stage: number, messages: readonly ChatMessage
   const body = withStackSection(draft.body, section);
   return parseStackRecord(body) ? { ...draft, body } : draft;
 }
+
+/**
+ * A stage 6 plan kept in one artifact, with the Stack section of the newest
+ * earlier version of that artifact that had a valid one carried in; null
+ * when `content` has a valid block, or no earlier version gives one.
+ */
+export async function stackCarriedFromEarlierVersion(
+  content: string,
+  version: number,
+  read: (version: number) => Promise<string>,
+): Promise<string | null> {
+  if (parseStackRecord(content)) return null;
+  for (let earlier = version - 1; earlier >= 1; earlier -= 1) {
+    const body = await read(earlier);
+    const section = parseStackRecord(body) ? stackSectionOf(body) : null;
+    if (!section) continue;
+    const carried = withStackSection(content, section);
+    return parseStackRecord(carried) ? carried : null;
+  }
+  return null;
+}

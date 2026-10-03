@@ -9,7 +9,15 @@
  * names mirror the deleted `apps/hub/src/schema.ts`'s `artifactNode` table
  * and the deleted `apps/hub/src/domain.ts`'s `ArtifactDraft.provenance` on
  * purpose, so the old shape and the new metadata read the same.
+ *
+ * A drafting stage's document is the exception: its specialist writes it
+ * with the artifact tools, in the project's own tenant, and the platform's
+ * record already says all the graph needs (the tenant is the project, the
+ * kind names the stage, the origin is the workflow), so nothing stamps it.
  */
+import { agentFor } from "./kit.js";
+import type { Stage } from "./ledger.js";
+import { STAGE_ARTIFACT_KIND, stageUsesArtifactTools } from "./specialist-source.js";
 
 /** Mirrors the deleted `apps/hub/src/domain.ts`'s `ArtifactDraft.provenance`. */
 export type ArtifactProvenance = {
@@ -58,6 +66,8 @@ export type ArtifactListEntry = {
   version: number;
   title: string;
   createdAt: string;
+  /** The platform's own kind; read here only for a stage document no one stamps. */
+  kind?: string;
   metadata: Record<string, unknown> | null;
   /** Opaque; read here only for `source.upload.size` (CL-8709) — an uploaded
    *  file's real byte count, which the list route otherwise has no place to
@@ -136,10 +146,43 @@ function artifactIdFromVersionId(versionId: string): string {
   return versionId.slice(0, versionId.lastIndexOf("@"));
 }
 
-function readSb(entry: ArtifactListEntry): ArtifactGraphMetadata | null {
+/** The artifact and version a `versionIdFor` id names, or null for a plain artifact id. */
+export function parseVersionId(id: string): { artifactId: string; version: number } | null {
+  const at = id.lastIndexOf("@");
+  const version = Number(id.slice(at + 1));
+  return at > 0 && Number.isInteger(version) && version > 0 ? { artifactId: id.slice(0, at), version } : null;
+}
+
+/** The stage whose specialist writes its document under each kind with the artifact tools. */
+const STAGE_OF_DOCUMENT_KIND: ReadonlyMap<string, Stage> = new Map(
+  (Object.entries(STAGE_ARTIFACT_KIND) as [string, string][])
+    .map(([stage, kind]) => [kind, Number(stage) as Stage] as const)
+    .filter(([, stage]) => stageUsesArtifactTools(stage)),
+);
+
+/** A stage document's media type: a design is a page, every other document Markdown. */
+export function documentMediaType(kind: string): string {
+  return kind === "design_artifact" ? "text/html" : "text/markdown";
+}
+
+/** A drafting stage's document as its specialist wrote it, read off the platform's own record. */
+function stageDocumentSb(entry: ArtifactListEntry, projectId: string): ArtifactGraphMetadata | null {
+  const stage = entry.source?.origin === "workflow" && entry.kind ? STAGE_OF_DOCUMENT_KIND.get(entry.kind) : undefined;
+  if (stage === undefined) return null;
+  return {
+    projectId,
+    kind: entry.kind!,
+    stage,
+    mediaType: documentMediaType(entry.kind!),
+    sourceVersionIds: [],
+    provenance: { producer: "agent", agentRole: agentFor(stage).id },
+  };
+}
+
+function readSb(entry: ArtifactListEntry, projectId: string): ArtifactGraphMetadata | null {
   const metadata = entry.metadata as Partial<ArtifactMetadata> | null;
   const sb = metadata?.sb;
-  return sb && typeof sb === "object" ? sb : null;
+  return sb && typeof sb === "object" ? sb : stageDocumentSb(entry, projectId);
 }
 
 function readUploadSize(entry: ArtifactListEntry): number | undefined {
@@ -149,11 +192,14 @@ function readUploadSize(entry: ArtifactListEntry): number | undefined {
 
 /**
  * Folds one project's node/edge graph from a tenant's full artifact list.
- * Artifacts outside `projectId` (or with no `sb` metadata yet) are dropped.
+ * Artifacts outside `projectId` (or with no `sb` metadata yet) are dropped,
+ * except a drafting stage's document (`stageDocumentSb`). `artifacts` is the
+ * project tenant's own list plus records labelled with `projectId`
+ * elsewhere, so an unlabelled one is the project's.
  */
 export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: string): ArtifactGraph {
   const scoped = artifacts
-    .map((entry) => ({ entry, sb: readSb(entry) }))
+    .map((entry) => ({ entry, sb: readSb(entry, projectId) }))
     .filter((row): row is { entry: ArtifactListEntry; sb: ArtifactGraphMetadata } => row.sb?.projectId === projectId);
 
   const supersededBy = new Map<string, string>();

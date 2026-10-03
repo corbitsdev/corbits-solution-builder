@@ -37,6 +37,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
 import { composeApprovedChain } from "./approved-chain.ts";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -142,7 +143,7 @@ export function useOpeningDispatch({
     }
     let cancelled = false;
     void api
-      .artifactContent(tenantId, previousApproved.artifactId)
+      .artifactContent(tenantId, versionIdFor(previousApproved.artifactId, previousApproved.version))
       .then((result) => {
         if (!cancelled) setStage6Material(result.content || null);
       })
@@ -235,7 +236,7 @@ export function useOpeningDispatch({
       void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
     } else if (previousApproved) {
       void api
-        .artifactContent(tenantId, previousApproved.artifactId)
+        .artifactContent(tenantId, versionIdFor(previousApproved.artifactId, previousApproved.version))
         .then((result) => {
           if (!result.content) return;
           // Stage 8's opening also names the frozen target — lost on reload

@@ -11,6 +11,7 @@
  * `policy`), and each stakeholder's vote is its own `audience` decision.
  * Nothing here builds evidence for it any more.
  */
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import type { ArtifactNode, Remediation } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import { approveReasonText, type ApproveReason, type Stage6Evidence, type Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
@@ -96,11 +97,11 @@ async function approvedPlanText(
 ): Promise<{ status: "read"; text: string } | { status: "unapproved" } | { status: "unread" }> {
   const stage6Review = deps.workflowView?.reviews[6];
   if (!stage6Review || stage6Review.status !== "approved") return { status: "unapproved" };
-  const planNode = deps.nodes.find(
-    (node) => node.artifactId === stage6Review.artifactId && node.version === stage6Review.version,
-  );
-  if (!planNode) return { status: "unread" };
-  return { status: "read", text: (await deps.artifactContent(deps.tenantId, planNode.id)).content };
+  // Exactly the version the review names: a plan kept in one artifact may
+  // have moved past it since.
+  if (!deps.nodes.some((node) => node.artifactId === stage6Review.artifactId)) return { status: "unread" };
+  const versionId = versionIdFor(stage6Review.artifactId, stage6Review.version);
+  return { status: "read", text: (await deps.artifactContent(deps.tenantId, versionId)).content };
 }
 
 async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
