@@ -4,6 +4,8 @@
  * names one of the stage's documents, the document's text is attached under
  * an "Attached" heading rather than left for the specialist to ask for.
  */
+import { composedTurn } from "@solutions-builder/app/stage-prompt";
+
 export type StageDocument = {
   /** A stable key: `requirements`, `review:application`, … */
   readonly key: string;
@@ -57,7 +59,10 @@ export function mentionedDocuments(body: string, documents: readonly StageDocume
 export function withAttachedDocuments(body: string, documents: readonly StageDocument[]): string {
   const attach = mentionedDocuments(body, documents).filter((doc) => doc.content.trim().length > 0 && !body.includes(doc.content.trim()));
   if (attach.length === 0) return body;
-  return [body.trimEnd(), ...attach.map((doc) => `---\n\n${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}`)].join("\n\n");
+  return composedTurn(
+    attach.map((doc) => `${ATTACHED_HEADING} ${doc.label}\n\n${doc.content.trim()}\n\n---`),
+    body,
+  );
 }
 
 /** The whole document as a message of its own: what "Send to the architect" sends. */
