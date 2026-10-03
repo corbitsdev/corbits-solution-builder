@@ -464,7 +464,12 @@ export type ArtifactNode = {
   variant: string | null;
   stage: number;
   title: string;
+  /** The artifact's own version, which a review or approval names. A saved
+   *  draft is a new artifact, so this is 1 wherever it sits in its lineage. */
   version: number;
+  /** Where the node sits in its lineage, counting from 1: what a person is
+   *  shown as its version. */
+  position?: number;
   artifactId: string;
   contentHash: string;
   /** Unknown unless the version is a package upload record; never a misleading 0. */

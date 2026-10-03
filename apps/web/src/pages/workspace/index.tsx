@@ -809,7 +809,7 @@ export function StageWorkspace({
           <div className="docmeta">
             <span>
               <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
-              {artifacts.activeNode.version}
+              {artifacts.activeNode.position ?? artifacts.activeNode.version}
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
@@ -863,7 +863,7 @@ export function StageWorkspace({
             <DesignFrames
               framed={framedDesign(artifacts.activeContent, frameMode, artifacts.activeNode.title)}
               frameKey={artifacts.activeNode.id}
-              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.version}`}
+              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position ?? artifacts.activeNode.version}`}
               paneClassName="artifact-page"
             />
           ) : (
@@ -1263,7 +1263,7 @@ export function StageWorkspace({
             promote={
               superseded
                 ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.at(-1)?.version}`,
+                    label: `${artifacts.selected.label} v${artifacts.activeNode.position ?? artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.length}`,
                     run: () => void promote(),
                     busy: promoting,
                   }
