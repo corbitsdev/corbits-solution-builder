@@ -42,7 +42,7 @@ type Step = "welcome" | "look" | "provider" | "model" | "project";
 const TITLES: Record<Step, [string, string]> = {
   welcome: [
     "Welcome.",
-    "Describe a problem. Specialists take it through nine stages — you decide at the gates.",
+    "Describe a problem. Specialists take it from the problem to a delivered build, one stage at a time — you decide at the gates.",
   ],
   look: [
     "Set it up how you like.",
