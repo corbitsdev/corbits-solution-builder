@@ -9,8 +9,6 @@ import { budgetVersions, textOf, deterministicGuidance, guidancePrompt, guideSte
 import type { ArtifactNode } from "../../client.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 
-const message = (author: ChatMessage["author"], at: string, body = "…"): ChatMessage => ({ id: at, author, at, body });
-
 describe("answerTo", () => {
   let n = 0;
   const say = (author: ChatMessage["author"], body: string): ChatMessage => {

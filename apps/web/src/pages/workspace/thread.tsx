@@ -125,7 +125,6 @@ function messageText(message: UiChatMessage): string {
  * working-and-Stop behavior.
  */
 export function StageConversation({
-  stage,
   messages,
   value,
   onValueChange,
@@ -145,7 +144,6 @@ export function StageConversation({
   draftRefs = EMPTY_REFS,
   onOpenVersion,
 }: {
-  stage: number;
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;

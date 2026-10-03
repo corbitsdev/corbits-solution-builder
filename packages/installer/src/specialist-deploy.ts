@@ -14,7 +14,6 @@ import { ApiError, type Transport } from "@intx/hub-client";
 import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
-  BUILD_STAGE,
   SPECIALIST_ENTRY_PATH,
   specialistDependencies,
   specialistEntrySource,
@@ -408,7 +407,7 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools }),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, artifactTools }),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -460,14 +459,13 @@ export async function specialistEntryIsCurrent(
   stage: Stage,
   offering: Parameters<typeof sourceFor>[2],
   artifactTools: boolean,
-  roleKey: string,
   role: AgentRole,
 ): Promise<boolean> {
   const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
   if (deployed === null) return true;
   const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
-  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools });
+  const rendered = specialistEntrySource({ stage, source, role, artifactTools });
   return rendered === deployed;
 }
 
@@ -591,7 +589,6 @@ async function ensureSpecialistDeploymentOnce(
       stage,
       leading,
       artifactTools,
-      roleKey,
       role,
     );
     if (current) {

@@ -50,7 +50,6 @@ import {
   type EnsuredProjectWorkflow,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
-  type ProjectWorkflowDeployment,
   type ProjectWorkflowStageInput,
   type SidecarCapability,
   type SpecialistDeployment,
@@ -1519,7 +1518,7 @@ export const api = {
   projectView: (projectId: string) => loadProjectView(projectId, createHubTransport()).catch((cause: unknown) => { installerFailure(cause); }),
   /** One project, described — folded from the same tenant record and run/artifact folds as `projectView`. */
   projectInfo: (projectId: string): Promise<ProjectInfo> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const [project, detail, deployments, ref] = await Promise.all([
         installerRequireProject(transport, projectId),
         loadProjectView(projectId, transport),
@@ -1647,7 +1646,7 @@ export const api = {
    * those are what get attached, each under its path in the archive.
    */
   attachMaterial: (projectId: string, files: File[]) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const attached = await Promise.all(
         (await expandArchives(files)).map(async (file) => {
           const mediaType = file.type || "application/octet-stream";
@@ -2123,7 +2122,7 @@ export const api = {
       return { archived, kept: plan.keep.length, lineages: plan.lineages };
     }),
   artifactGraph: (projectId: string) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const graph = await artifactGraphFor(transport, projectId);
       return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
     }),
@@ -2505,7 +2504,7 @@ export const api = {
    * -- not only after this session's own `ensureProjectWorkflow` call.
    */
   projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
       const view = await loadProjectWorkflowView(transport, ref);

@@ -11,7 +11,6 @@
  */
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
-import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
 import { STACK_RUBRIC } from "./stack-rubric.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */

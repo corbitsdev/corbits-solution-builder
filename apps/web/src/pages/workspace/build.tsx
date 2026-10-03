@@ -357,7 +357,6 @@ export function BuildPanel({
             </div>
           ) : null}
           <StageConversation
-            stage={8}
             messages={messages}
             value={composer}
             onValueChange={setComposer}
