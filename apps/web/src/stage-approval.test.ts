@@ -22,6 +22,7 @@ function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     stage: 1,
     title: "Draft",
     version: 1,
+    position: 1,
     artifactId: "art_1",
     contentHash: "art_1@1",
     createdAt: "2026-01-01T00:00:00.000Z",

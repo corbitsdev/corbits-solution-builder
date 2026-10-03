@@ -61,7 +61,7 @@ export function draftReferences(
         return at >= from && at < until;
       }) ??
       null;
-    refs.set(draft.id, { version: node?.version ?? null, nodeId: node?.id ?? null, noun });
+    refs.set(draft.id, { version: node?.position ?? null, nodeId: node?.id ?? null, noun });
   });
   return refs;
 }

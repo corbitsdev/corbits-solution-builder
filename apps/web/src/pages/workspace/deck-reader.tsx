@@ -13,6 +13,7 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { deckFrom, packageOutlineProblem, type Deck } from "@solutions-builder/app/deck";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
@@ -156,7 +157,7 @@ export function useRecordedDeck(args: {
         }
       }
     } catch (cause) {
-      setNotice(`Slides could not be exported: ${cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause)}`);
+      toast.error(`Slides could not be exported: ${cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
       setExporting(false);
     }
