@@ -62,6 +62,7 @@ const StartBody = type({
 const PackageBody = type({
   "fileName?": "string",
   "targets?": "unknown[]",
+  "target?": "string",
 });
 
 /**
@@ -164,8 +165,9 @@ export function registerBuildRoutes(api: Hono) {
         ...(body.fileName ? { fileName: body.fileName } : {}),
         targets,
         maxBytes: HOST_PACKAGE_MAX_BYTES,
-        // A person's own start command, run here on the host: the manifest says so.
+        // Run here on the host, the attempt's declared commands or a person's own: the manifest says so.
         ranOn: "host",
+        ...(body.target ? { declaredTarget: body.target } : {}),
       });
       return context.json({ packaged });
     } catch (cause) {

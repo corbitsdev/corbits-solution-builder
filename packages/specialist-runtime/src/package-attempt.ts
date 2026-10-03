@@ -166,7 +166,7 @@ export async function verifyAndRecord(
   manifest: DeliveryManifestContent,
   archiveBytes: Buffer,
   manifestNodeId: string,
-  args: { exclude: readonly string[]; targets: readonly TargetProbe[] },
+  args: { exclude: readonly string[]; targets: readonly TargetProbe[]; declaredTarget?: string | undefined },
   targetDir: string,
   ranOn: "sidecar" | "host",
 ): Promise<VerificationSummary> {
@@ -178,6 +178,7 @@ export async function verifyAndRecord(
     cwd: targetDir,
     exclude: new Set(args.exclude),
     ranOn,
+    ...(args.declaredTarget === undefined ? {} : { declaredTarget: args.declaredTarget }),
   });
   manifest.verification = verification;
   return {
@@ -227,6 +228,8 @@ export async function packageAttempt(input: {
   maxBytes?: number;
   /** Where this runs, recorded on the manifest: the sidecar unless the host says otherwise. */
   ranOn?: "sidecar" | "host";
+  /** The delivery target whose run declaration is run (`run-declared.ts`). */
+  declaredTarget?: string;
 }): Promise<PackagedAttempt> {
   const fileName = input.fileName ?? "build.tar.gz";
   const exclude = [...new Set([...DEFAULT_EXCLUDES, ...(input.exclude ?? [])])];
@@ -245,6 +248,6 @@ export async function packageAttempt(input: {
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const manifest = await buildManifest(input.attempt, input.dir, exclude, { fileName, sizeBytes: bytes.byteLength, sha256 });
-  const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { exclude, targets }, input.dir, input.ranOn ?? "sidecar");
+  const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { exclude, targets, declaredTarget: input.declaredTarget }, input.dir, input.ranOn ?? "sidecar");
   return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }
