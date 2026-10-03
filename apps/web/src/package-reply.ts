@@ -4,7 +4,7 @@
  * stage 5 deployment (#41 step 3), so two requests in flight share the
  * thread, and "the next agent turn" could be either's answer.
  */
-import { appSubject } from "./pages/workspace/composed-mail.ts";
+import { packageAudienceOf } from "./pages/workspace/composed-mail.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 import { pairReplies } from "./withdrawn-turns.ts";
 
@@ -15,8 +15,7 @@ import { pairReplies } from "./withdrawn-turns.ts";
  * or has no paired reply yet.
  */
 export function packageReplyFor(messages: readonly ChatMessage[], seenIds: ReadonlySet<string>, name: string): ChatMessage | null {
-  const subject = appSubject("package", name);
-  const request = messages.find((message) => message.author === "me" && !seenIds.has(message.id) && message.subject === subject);
+  const request = messages.find((message) => !seenIds.has(message.id) && packageAudienceOf(message) === name);
   if (!request) return null;
   const { answeredBy } = pairReplies(messages);
   return messages.find((message) => message.author === "agent" && answeredBy.get(message.id) === request.id) ?? null;

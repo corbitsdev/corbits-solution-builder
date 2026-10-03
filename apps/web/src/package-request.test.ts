@@ -25,11 +25,11 @@ describe("packageRequest", () => {
 
   test("a reply with a deck outline is a package; one without is refused with the reason", () => {
     const pkg = "## Audience: Mr Finance\n### One-pager\nWorth it.\n### Deck outline\n1. **Problem: costs** — Manual work.\n2. **Solution** — The app.\n### Decision request\nProceed.";
-    expect(packageReplyProblem("Mr Finance", pkg)).toBeNull();
-    expect(packageReplyProblem("Mr Finance", "The deck for Mr Finance has rendered as slides.pptx — nine slides.")).toBe(
+    expect(packageReplyProblem({ name: "Mr Finance", role: "budget_approver" }, pkg)).toBeNull();
+    expect(packageReplyProblem({ name: "Mr Finance", role: "budget_approver" }, "The deck for Mr Finance has rendered as slides.pptx — nine slides.")).toBe(
       "Mr Finance's package was not written: the reply it has no \"### Deck outline\" section, and a package's slides are built from that outline. Ask for it again.",
     );
-    expect(packageReplyProblem("Mr Tech", "### Deck outline\n\nSome prose, no numbered slides.")).toStartWith("Mr Tech's package was not written: the reply its \"### Deck outline\" section has no numbered slides");
+    expect(packageReplyProblem({ name: "Mr Tech", role: "security_reviewer" }, "### Deck outline\n\nSome prose, no numbered slides.")).toStartWith("Mr Tech's package was not written: the reply its \"### Deck outline\" section has no numbered slides");
   });
 
   // #225: the follow-up after a reply that was not a package says where the

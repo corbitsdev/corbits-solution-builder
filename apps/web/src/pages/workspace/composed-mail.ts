@@ -13,6 +13,7 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
 import { stageName } from "../../stage-names.ts";
 import { shortPromptHash } from "../../design-disposition.ts";
+import { isOwner, type PackageAudience } from "../../package-request.ts";
 
 export type ComposedFold = {
   /** The one line the chat shows; null when nothing folds and only `lead` shows. */
@@ -120,8 +121,17 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
  *  subject: the chat shows it, and the reply `pairReplies` pairs with it, as
  *  one event line, without reading either body. */
 const APP_SUBJECT = "[app:";
-const APP_LINES = new Map<string, readonly [(about: string) => string, ((about: string) => string) | null]>([
-  ["package", [(audience) => `Asked for the package for ${audience}`, (audience) => `Answered the package request for ${audience}`]],
+/** On the project owner's package request, so its line says "your" from the role, not their name. */
+const OWNER_TAG = "[role:project_owner]";
+type AppLine = (about: string, tags: readonly string[]) => string;
+const APP_LINES = new Map<string, readonly [AppLine, AppLine | null]>([
+  [
+    "package",
+    [
+      (audience, tags) => (tags.includes(OWNER_TAG) ? "Asked for your package" : `Asked for the package for ${audience}`),
+      (audience, tags) => (tags.includes(OWNER_TAG) ? "Answered the request for your package" : `Answered the package request for ${audience}`),
+    ],
+  ],
   ["brief", [(attempt) => `Recorded attempt ${attempt} for the build supervisor`, null]],
   ["choice", [(approach) => `You chose ${approach}`, null]],
 ]);
@@ -133,11 +143,29 @@ export function appSubject(kind: AppKind, about: string, tags: readonly string[]
   return `${APP_SUBJECT}${kind}] ${[...tags, about].join(" ")}`;
 }
 
+/** The subject of a request for an audience's package. */
+export function packageSubject(audience: PackageAudience): string {
+  return appSubject("package", audience.name, isOwner(audience) ? [OWNER_TAG] : []);
+}
+
 /** What a person-side app subject names, by kind; null for any other message. */
-function appSubjectOf(message: Pick<ChatMessage, "author" | "subject"> | undefined): { readonly kind: string; readonly about: string } | null {
+function appSubjectOf(
+  message: Pick<ChatMessage, "author" | "subject"> | undefined,
+): { readonly kind: string; readonly about: string; readonly tags: readonly string[] } | null {
   const subject = message?.author === "me" ? (message.subject ?? "") : "";
   if (!subject.startsWith(APP_SUBJECT)) return null;
-  return { kind: subject.slice(APP_SUBJECT.length, subject.indexOf("]")), about: subject.slice(subject.lastIndexOf("] ") + 2) };
+  const aboutAt = subject.lastIndexOf("] ") + 2;
+  return {
+    kind: subject.slice(APP_SUBJECT.length, subject.indexOf("]")),
+    about: subject.slice(aboutAt),
+    tags: subject.slice(subject.indexOf("] ") + 2, aboutAt).split(" "),
+  };
+}
+
+/** The audience a package request names, or null. */
+export function packageAudienceOf(message: Pick<ChatMessage, "author" | "subject">): string | null {
+  const app = appSubjectOf(message);
+  return app?.kind === "package" ? app.about : null;
 }
 
 /** The stage 3 approach a message chose, or null. */
@@ -153,7 +181,7 @@ export function appEventLine(message: Pick<ChatMessage, "author" | "subject">, a
   const lines = app ? APP_LINES.get(app.kind) : undefined;
   if (!app || !lines) return null;
   const [sent, answer] = lines;
-  return message.author === "me" ? sent(app.about) : (answer?.(app.about) ?? null);
+  return message.author === "me" ? sent(app.about, app.tags) : (answer?.(app.about, app.tags) ?? null);
 }
 
 /** How a message the app composed shows in either chat view: hidden, as one
