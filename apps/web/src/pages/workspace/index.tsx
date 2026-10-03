@@ -19,6 +19,8 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
@@ -228,7 +230,13 @@ export function StageWorkspace({
   const agentAddress = agent.address;
   // Stable across renders — an inline arrow would re-subscribe the mailbox
   // stream every render since it is a dep of the thread effect.
-  const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
+  // A nudge is also a reply landing, by which time the specialist has
+  // written the stage's artifact.
+  const queryClient = useQueryClient();
+  const nudgeWorkflow = useCallback(() => {
+    void workflow.reload();
+    void queryClient.invalidateQueries({ queryKey: keys.stageWork.all });
+  }, [workflow.reload, queryClient]);
   const thread = useStageThread(tenantId, agentAddress, agent.addresses, nudgeWorkflow, setError);
   const loadThread = thread.reload;
 
@@ -294,47 +302,28 @@ export function StageWorkspace({
   // never had one.
   // A drafting stage with artifact tools keeps its document in an artifact
   // the specialist writes; the host reads the newest one of the stage's kind
-  // rather than trusting what the reply says it wrote. It is read again as
-  // the thread moves, and polled while a reply is pending so the pane follows
-  // the specialist's writes. A stage with no artifact yet, such as a project
+  // rather than trusting what the reply says it wrote. It is read again when
+  // a reply lands, and polled while one is pending so the pane follows the
+  // specialist's writes. A stage with no artifact yet, such as a project
   // drafted before the tools, keeps reading its draft from the mail.
   const usesArtifact = stageUsesArtifactTools(stage as Stage);
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
-  const [work, setWork] = useState<WorkArtifact | null>(null);
-  const [workTick, setWorkTick] = useState(0);
-  useEffect(() => {
-    if (!usesArtifact || !awaitingReply) return;
-    const timer = setInterval(() => setWorkTick((tick) => tick + 1), 5000);
-    return () => clearInterval(timer);
-  }, [usesArtifact, awaitingReply]);
-  useEffect(() => {
-    if (!usesArtifact || !workKind) {
-      setWork(null);
-      return;
-    }
-    let cancelled = false;
-    api.stageWorkArtifact(tenantId, workKind).then(
-      (artifact) => {
-        if (!cancelled) setWork(artifact ? { state: "ready", artifact } : { state: "none" });
-      },
-      (cause: unknown) => {
-        if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [usesArtifact, workKind, tenantId, foldedMessages, workTick]);
+  const workQuery = useQuery({
+    queryKey: keys.stageWork.of(tenantId, workKind ?? ""),
+    queryFn: usesArtifact && workKind !== null ? () => api.stageWorkArtifact(tenantId, workKind) : skipToken,
+    refetchInterval: awaitingReply ? 5_000 : false,
+  });
+  const work = useMemo((): WorkArtifact | null => {
+    if (workQuery.error) return { state: "unreadable", message: workQuery.error.message };
+    if (workQuery.data === undefined) return null;
+    return workQuery.data ? { state: "ready", artifact: workQuery.data } : { state: "none" };
+  }, [workQuery.error, workQuery.data]);
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
     return { ...latestSpecialistMessage, body: work.artifact.content };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
-  const workUnreadable = work?.state === "unreadable" ? work.message : null;
-  useEffect(() => {
-    if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
-  }, [workUnreadable]);
   const draftMessage = useMemo(
     () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
     [stage, foldedMessages, workDraft],
@@ -897,6 +886,11 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
+      {work?.state === "unreadable" ? (
+        <Banner tone="error" title="The stage document could not be read">
+          {work.message} Approval waits until it can be read.
+        </Banner>
+      ) : null}
       {error ? (
         <Banner
           tone="error"
