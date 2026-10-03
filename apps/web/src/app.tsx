@@ -848,7 +848,6 @@ export function App() {
         }}
       />
 
-      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -907,6 +906,8 @@ export function App() {
 
       <ZenGarden />
     </div>
+    {/* Outside the .app grid: its section would otherwise take the canvas's row. */}
+    <Toaster theme={resolvedMode} richColors closeButton />
     {printing ? <PrintView target={printing} /> : null}
     </>
   );
