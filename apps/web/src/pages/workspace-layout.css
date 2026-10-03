@@ -9,7 +9,9 @@
 
 .topbar.topbar-project {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* Side tracks may shrink to nothing, so the stepper stays centred on the
+     window and a long title ellipsises instead of pushing it off-centre. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   height: 52px;
   min-height: 52px;
 }
@@ -29,7 +31,8 @@
 
 .topbar-project .step-name {
   font-family: var(--wb-font-mono);
-  font-size: 10px;
+  font-size: 0.6875rem;
+  line-height: 1;
   letter-spacing: 0.04em;
   color: var(--wb-muted-foreground);
   white-space: nowrap;
@@ -162,6 +165,25 @@
 .canvas-body.is-fill .panes {
   flex: 1;
   min-height: 0;
+}
+
+/* The centered conversation and the side-by-side view are different
+   layouts; the switch between them runs as a view transition, with the
+   conversation and the document pane named so each moves as one piece. */
+.panes > .conv {
+  view-transition-name: stage-conversation;
+}
+
+.panes > .stage-pane {
+  view-transition-name: stage-document;
+}
+
+::view-transition-new(stage-document) {
+  animation: stage-document-in 320ms ease-out both;
+}
+
+@keyframes stage-document-in {
+  from { opacity: 0; transform: translateX(32px); }
 }
 
 .panes.is-solo {
@@ -297,7 +319,7 @@
 .conv .msg {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   max-width: 92%;
   /* A flex item's floor is its longest unbreakable line, so a code block
      with long lines widened a message past the column and, for a person's
@@ -383,7 +405,7 @@
 .conv [data-slot="message-bubble"] {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   max-width: 92%;
 }
 
@@ -586,7 +608,10 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-1) var(--space-2);
+  min-height: 32px;
+  /* The composer's grid gap spaces it from the box; this only lines its
+     words up with the text inside the box. */
+  padding: 0 0 0 var(--space-4);
 }
 
 .composer .approve button,
@@ -594,8 +619,10 @@
   background: transparent;
   border-color: transparent;
   color: var(--wb-muted-foreground);
-  padding: 4px 8px;
-  font-size: 11.5px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  gap: 6px;
+  font-size: 0.8125rem;
   font-weight: 550;
   border-radius: var(--radius-md);
   transition:
@@ -630,6 +657,71 @@
   .panes-splitter {
     display: none;
   }
+
+  /* A lone conversation runs to the window's right edge, where the guide's
+     button is fixed: the composer keeps clear of it (44px plus its inset). */
+  .panes.is-solo .composer,
+  .panes.chat-first .composer {
+    padding-right: calc(var(--space-4) + 44px + var(--space-6));
+  }
+}
+
+/* Phone widths, from 402px: the bar keeps its controls whole and lets the
+   title give way, and every pane takes the 16px gutter. */
+@media (max-width: 640px) {
+  .topbar.topbar-project {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+  }
+
+  .topbar-project .stepper li > span,
+  .topbar-project .stepper li > button {
+    width: 12px;
+  }
+
+  .topbar-project .stepper li[aria-current="step"] > span {
+    width: 18px;
+  }
+
+  .topbar-project .step-name {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stage-model-row {
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .conv-scroll {
+    padding: var(--space-4);
+  }
+
+  .composer {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .artifact-strip {
+    padding: var(--space-2) var(--space-4) 0;
+  }
+
+  .artifact-strip .version-note {
+    display: none;
+  }
+
+  .stage-inner {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+
+  .doc {
+    padding: var(--space-4);
+  }
+
+  .stage-view > .stage-lead {
+    margin: var(--space-3) var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+  }
 }
 
 /* ---- artifact strip: ghost tabs, selected = pane paper, live = primary ---- */
@@ -659,23 +751,38 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* One line per tab: the list scrolls sideways, so a tab never shrinks
+     into a two-line label to make room for its neighbours. */
+  flex: none;
+  white-space: nowrap;
+  height: 32px;
   font-family: var(--wb-font-mono);
   font-size: 11.5px;
   color: var(--wb-muted-foreground);
-  padding: 6px 12px;
+  padding: 0 12px;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   border: 1px solid transparent;
   border-bottom: 1px solid transparent;
   margin-bottom: -1px;
   background: transparent;
   font-weight: 400;
+  transition:
+    color 150ms var(--ease-out, ease),
+    background-color 150ms var(--ease-out, ease);
 }
 
 .artifact-strip-tabs [role="tab"]:hover {
   color: var(--wb-foreground);
+  background: color-mix(in srgb, var(--wb-muted) 60%, transparent);
 }
 
-.artifact-strip-tabs [role="tab"][aria-selected="true"] {
+/* The list scrolls, so a ring drawn outside the tab would be clipped. */
+.artifact-strip-tabs [role="tab"]:focus-visible {
+  outline-offset: -2px;
+}
+
+.artifact-strip-tabs [role="tab"][aria-selected="true"],
+.artifact-strip-tabs [role="tab"][aria-selected="true"]:hover {
   background: var(--card);
   border-color: var(--wb-border);
   border-bottom-color: var(--card);
@@ -714,8 +821,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--wb-border);
   border-radius: 50%;
@@ -727,6 +834,7 @@
 
 .artifact-strip-scroll:hover {
   color: var(--wb-foreground);
+  border-color: var(--wb-border-strong);
 }
 
 .artifact-strip-scroll[hidden] {
@@ -745,10 +853,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  margin-bottom: var(--space-1);
-  flex-shrink: 0;
-  padding: 0 0 var(--space-1);
+  /* Centred on the tabs' 32px row, beside the selected tab. */
+  height: 32px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0;
   border-bottom: 0;
+}
+
+.artifact-strip .version-strip > * {
+  flex: none;
 }
 
 /* ---- send-back popover: popover paper, not card ---- */

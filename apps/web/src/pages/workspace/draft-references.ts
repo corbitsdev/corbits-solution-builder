@@ -40,9 +40,12 @@ export function draftReferences(
   messages: readonly ChatMessage[],
   versions: readonly ArtifactNode[],
   noun: string,
+  /** The document is an artifact, so a reply is short whatever it changed:
+   *  every reply is matched to the version saved after it. */
+  everyReply = false,
 ): ReadonlyMap<string, DraftRef> {
   const drafts = messages
-    .filter((message) => message.author === "agent" && isSubstantialDraft(message.body))
+    .filter((message) => message.author === "agent" && (everyReply || isSubstantialDraft(message.body)))
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   if (drafts.length === 0) return EMPTY;
   const heads = new Map(versions.flatMap((node) => (replyIdOf(node) ? [[replyIdOf(node)!, node] as const] : [])));
@@ -61,7 +64,12 @@ export function draftReferences(
         return at >= from && at < until;
       }) ??
       null;
-    refs.set(draft.id, { version: node?.version ?? null, nodeId: node?.id ?? null, noun });
+    // A short reply that produced no version wrote nothing, so it names none.
+    if (everyReply && node === null) return;
+    // The lineage's position, as the version strip numbers it: a saved
+    // draft's own `version` is 1 wherever it sits in the lineage.
+    const position = node ? versions.indexOf(node) + 1 : 0;
+    refs.set(draft.id, { version: position > 0 ? position : null, nodeId: node?.id ?? null, noun });
   });
   return refs;
 }

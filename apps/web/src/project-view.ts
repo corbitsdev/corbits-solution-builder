@@ -64,6 +64,22 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
   );
 }
 
+/** Numbers each node by its place in its lineage (stage, kind and variant), oldest first. */
+function withLineagePositions(nodes: ArtifactNode[]): ArtifactNode[] {
+  const lineages = new Map<string, ArtifactNode[]>();
+  for (const node of nodes) {
+    const key = `${String(node.stage)}:${node.kind}:${node.variant ?? ""}`;
+    lineages.set(key, [...(lineages.get(key) ?? []), node]);
+  }
+  const position = new Map<string, number>();
+  for (const lineage of lineages.values()) {
+    [...lineage]
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      .forEach((node, index) => position.set(node.id, index + 1));
+  }
+  return nodes.map((node) => ({ ...node, position: position.get(node.id) ?? node.version }));
+}
+
 /** Maps an `ArtifactGraphNode` fold onto the `ArtifactNode` shape the pages already consume. */
 export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>>["nodes"][number]): ArtifactNode {
   const version = Number(node.versionId.slice(node.versionId.lastIndexOf("@") + 1));
@@ -119,7 +135,7 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     installerRequireProject(transport, projectId),
     artifactGraphFor(transport, projectId),
   ]);
-  const nodes = graph.nodes.map((node) => toArtifactNode(node));
+  const nodes = withLineagePositions(graph.nodes.map((node) => toArtifactNode(node)));
 
   const { stage, done } = await workflowStage(transport, projectId);
 

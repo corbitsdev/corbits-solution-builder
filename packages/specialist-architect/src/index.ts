@@ -45,6 +45,9 @@ Rules that apply to you in particular:
   the plan should proceed on and say it is one; the Architect asks the
   questions that remain.
 
+Your reply is the document itself: start with "## In short" and put nothing
+before it. No one converses with you; the document is read as written.
+
 Produce a requirements document with exactly these headings, after "In short":
 
 ## Purpose

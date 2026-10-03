@@ -191,7 +191,7 @@ export function VersionStrip({
         aria-label="Previous version"
         onClick={() => step(-1)}
       >
-        ‹
+        <ChevronLeft aria-hidden="true" />
       </button>
       {versions.map((v, i) => (
         // The lineage's position, not `v.version` — a superseded draft is
@@ -216,7 +216,7 @@ export function VersionStrip({
         aria-label="Next version"
         onClick={() => step(1)}
       >
-        ›
+        <ChevronRight aria-hidden="true" />
       </button>
       <span className="version-note">
         {new Date(active.createdAt).toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}

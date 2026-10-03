@@ -209,6 +209,17 @@ export function StageConversation({
     if (node === null || !pinnedRef.current) return;
     node.scrollTop = node.scrollHeight;
   }, [uiMessages]);
+  // The column shrinks when the busy strip opens at the window's foot; a
+  // thread read at its newest turn stays there instead of losing it below.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) node.scrollTop = node.scrollHeight;
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [uiMessages.length > 0]);
 
   return (
     <div className="stage-conversation">
@@ -255,6 +266,18 @@ export function StageConversation({
             if (source && isStageOpening(source)) return null;
             const text = messageText(message);
             const you = message.role === "user";
+            // Stage 5 asks for each stakeholder's package itself, and the
+            // package lands in its own tab: the chat records both as events,
+            // not as the person's words or a document pasted in the thread.
+            const asked = you ? /^Write the package for: ([^,\n]+)/.exec(text) : null;
+            const wrote = !you && stage === 5 ? /^#{2,3}\s+Audience:\s*(.+)$/m.exec(text) : null;
+            if (asked || wrote) {
+              return (
+                <div key={message.id} className="event conv-event">
+                  {asked ? `Asked for the package for ${asked[1]!.trim()}` : `Wrote the package for ${wrote![1]!.trim()}`}
+                </div>
+              );
+            }
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
             const composed = source ? composedMailFold(source) : null;
             return (

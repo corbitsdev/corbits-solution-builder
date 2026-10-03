@@ -18,6 +18,7 @@
  * and each render block a focused component (`workspace-chrome.tsx`). What
  * stays here is the wiring between them and the stage-specific composition.
  */
+import { isStageOpening } from "./composed-mail.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -51,7 +52,7 @@ import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { Flame } from "lucide-react";
+import { ArrowLeft, Flame, Send, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -76,7 +77,7 @@ import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
+import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
@@ -116,7 +117,10 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
  *  read, or it exists and could not be read, which is shown, not hidden. */
 type WorkArtifact =
   | { readonly state: "none" }
-  | { readonly state: "ready"; readonly artifact: { readonly id: string; readonly version: number; readonly content: string } }
+  | {
+      readonly state: "ready";
+      readonly artifact: { readonly id: string; readonly version: number; readonly content: string; readonly updatedAt: string };
+    }
   | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
@@ -330,7 +334,9 @@ export function StageWorkspace({
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
-    return { ...latestSpecialistMessage, body: work.artifact.content };
+    // Dated by its last write, not by the reply it follows: a write made
+    // while the next reply is pending is newer than any saved version.
+    return { ...latestSpecialistMessage, body: work.artifact.content, at: work.artifact.updatedAt };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
   const workUnreadable = work?.state === "unreadable" ? work.message : null;
   useEffect(() => {
@@ -376,7 +382,9 @@ export function StageWorkspace({
   // or result-node bookkeeping under mail-chat).
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.map((message) => ({
+      // The stage opening is what the specialist is sent, not something the
+      // person said; the document strip already shows the record it carried.
+      foldedMessages.filter((message) => !isStageOpening(message)).map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -406,9 +414,14 @@ export function StageWorkspace({
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(
+            usesArtifact ? foldedMessages : referenceMessages,
+            liveVersions ?? [],
+            documentName(draftKind).toLowerCase(),
+            usesArtifact && work?.state === "ready",
+          )
         : undefined,
-    [stage, draftKind, referenceMessages, liveVersions],
+    [stage, draftKind, referenceMessages, foldedMessages, liveVersions, usesArtifact, work],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
@@ -433,6 +446,8 @@ export function StageWorkspace({
   // have been.
   const [routedEvents, setRoutedEvents] = useState<StageEvent[]>([]);
   const [requirementsAsk, setRequirementsAsk] = useState<{ body: string; at: number } | null>(null);
+  // Where stage 6's panel puts its request control: the plan's own toolbar.
+  const [stage6Tools, setStage6Tools] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setRoutedEvents([]);
     setRequirementsAsk(null);
@@ -782,14 +797,24 @@ export function StageWorkspace({
   // (a design is a page in a sandbox, a file is a file), headed by which
   // stage it belongs to, with the two things a person can do from here --
   // go back to this stage's work, or send the project back to change it.
+  // A stage whose pane is a panel of its own (the design, the packages, the
+  // build, the delivery) shows only its own lineage's newest version there,
+  // so a tab or a version chip naming anything else read as doing nothing:
+  // the reader shows it instead, as it does another stage's.
+  const panelCannotShow =
+    artifacts.selected !== null &&
+    artifacts.activeNode !== null &&
+    artifacts.selected.stage === stage &&
+    !DOCUMENT_STAGES.has(stage) &&
+    (artifacts.selected.kind !== STAGE_DRAFT_KIND[stage] || artifacts.activeNode.id !== artifacts.selected.versions.at(-1)?.id);
   const reader =
-    artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode ? (
+    artifacts.selected !== null && (artifacts.selected.stage !== stage || panelCannotShow) && artifacts.activeNode ? (
       <div className="stage-inner">
         <div className="doc reader-doc">
           <div className="docmeta">
             <span>
               <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
-              {artifacts.activeNode.version}
+              {artifacts.activeNode.position ?? artifacts.activeNode.version}
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
@@ -803,11 +828,19 @@ export function StageWorkspace({
                 // The same way out every stage document has (#242): Markdown, or the print layer's PDF.
                 <DocumentExportMenu node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
               ) : null}
-              <Button variant="ghost" onClick={() => artifacts.select(null)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  artifacts.select(null);
+                  artifacts.selectVersion(null);
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
                 Back to {stageName(stage)}
               </Button>
               {artifacts.activeNode.stage < stage ? (
                 <Button variant="ghost" disabled={decisions.sendingBack} onClick={() => setReaderSendBack((open) => !open)}>
+                  <Undo2 aria-hidden="true" />
                   Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
@@ -843,7 +876,7 @@ export function StageWorkspace({
             <DesignFrames
               framed={framedDesign(artifacts.activeContent, frameMode, artifacts.activeNode.title)}
               frameKey={artifacts.activeNode.id}
-              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.version}`}
+              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position ?? artifacts.activeNode.version}`}
               paneClassName="artifact-page"
             />
           ) : (
@@ -852,6 +885,29 @@ export function StageWorkspace({
         </div>
       </div>
     ) : null;
+
+  // Stage 6's documents beside the plan: the plan's toolbar holds the
+  // panel's request control; the requirements and each review can be handed
+  // to the architect as a message (#345).
+  const stage6DocumentTools = () => {
+    if (artifacts.isStageDraft) return <span ref={setStage6Tools} className="document-tools-slot" />;
+    const node = artifacts.activeNode;
+    const content = artifacts.activeContent;
+    if (!node || !content) return null;
+    const doc =
+      node.kind === "product_requirements"
+        ? requirementsDocument(content)
+        : node.kind === "engineering_review" && node.variant
+          ? reviewDocument(node.variant, content)
+          : null;
+    if (!doc) return null;
+    return (
+      <Button variant="ghost" disabled={sending} onClick={() => void send(documentAsMessage(doc))}>
+        <Send aria-hidden="true" />
+        Send to the architect
+      </Button>
+    );
+  };
 
   const conversation = (
     <StageConversation
@@ -973,11 +1029,14 @@ export function StageWorkspace({
           <span className="inference-flame" role="img" aria-label={busy ? "Inference running" : "Inference idle"}>
             <Flame aria-hidden="true" />
           </span>
-          <span className="inline-note">
-            Inference:{" "}
-            {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
-          </span>
+          <label className="stage-model-label" htmlFor="stage-inference">
+            Inference
+          </label>
+          {/* The select is the one place the running model is named: it
+              shows the running row, or, when no Settings row matches it,
+              the running model itself as the unchosen first option. */}
           <select
+            id="stage-inference"
             aria-label="Switch this stage's inference"
             title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
             disabled={modelSwitch.switching || inferenceProviders === null}
@@ -988,7 +1047,11 @@ export function StageWorkspace({
             }}
           >
             <option value="" disabled>
-              {modelSwitch.switching ? "Switching…" : "Switch inference…"}
+              {modelSwitch.switching
+                ? "Switching…"
+                : activeModel
+                  ? `${activeModel.providerLabel} · ${activeModel.canonicalName}`
+                  : "Loading…"}
             </option>
             {inferenceChoices.map((option) => (
               <option key={option.providerRowId} value={option.providerRowId}>
@@ -1046,6 +1109,7 @@ export function StageWorkspace({
         guidance={guide.guidance}
         explaining={guide.explaining}
         note={guide.note}
+        now={agentAddress ? { title: guidance.title, detail: guidance.detail } : null}
       />
 
       {agentAddress && openingDispatch.error ? (
@@ -1158,13 +1222,13 @@ export function StageWorkspace({
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
-          onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
           reader={reader}
           pane={!(draftMessage && artifacts.activeNode && artifacts.selected)}
+          toolsSlot={stage6Tools}
         />
       ) : null}
 
@@ -1240,10 +1304,11 @@ export function StageWorkspace({
             composerPopover={sendBackPopover}
             events={events}
             strip={stripEl}
+            tools={stage === 6 ? stage6DocumentTools() : null}
             promote={
               superseded
                 ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.at(-1)?.version}`,
+                    label: `${artifacts.selected.label} v${artifacts.activeNode.position ?? artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.length}`,
                     run: () => void promote(),
                     busy: promoting,
                   }
