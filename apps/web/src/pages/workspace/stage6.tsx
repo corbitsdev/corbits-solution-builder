@@ -271,16 +271,12 @@ export function Stage6Panel({
       state.status === "waiting" && state.address ? [{ key, address: state.address, requestedAt: state.requestedAt }] : [],
     ),
   ];
-  const settle = (key: string, next: Partial<Stage6RoleState>) => {
-    if (key === STAGE6_REQUIREMENTS_ROLE_KEY) setRequirements((prev) => (prev.status === "waiting" ? { ...prev, ...next } : prev));
-    else setReviews((prev) => (prev[key]?.status === "waiting" ? { ...prev, [key]: { ...prev[key]!, ...next } } : prev));
-  };
-  useWaitingReplies(
-    tenantId,
-    waiting,
-    (key, reply) => settle(key, { status: "done", reply }),
-    (key, error) => settle(key, { status: "error", error }),
-  );
+  // A settled reply is applied as this renders; it then leaves `waiting`, so this runs once per reply.
+  const settled = useWaitingReplies(tenantId, waiting);
+  for (const [key, outcome] of settled) {
+    if (key === STAGE6_REQUIREMENTS_ROLE_KEY) setRequirements((prev) => ({ ...prev, ...outcome }));
+    else setReviews((prev) => ({ ...prev, [key]: { ...(prev[key] ?? STAGE6_IDLE_ROLE), ...outcome } }));
+  }
 
   // What the stage has written so far, as documents a message may name (#345).
   const documents: StageDocument[] = [

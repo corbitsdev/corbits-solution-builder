@@ -129,12 +129,9 @@ export function usePanelReviews({
     const state = reviews[role.key];
     return state?.status === "waiting" && state.address ? [{ key: role.key, address: state.address, requestedAt: state.requestedAt }] : [];
   });
-  useWaitingReplies(
-    tenantId,
-    waiting,
-    (key, reply) => update(key, (prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
-    (key, error) => update(key, (prev) => (prev.status === "waiting" ? { ...prev, status: "error", error } : prev)),
-  );
+  // A settled reply is applied as this renders; it then leaves `waiting`, so this runs once per reply.
+  const settled = useWaitingReplies(tenantId, waiting);
+  for (const [key, outcome] of settled) update(key, (prev) => ({ ...prev, ...outcome }));
 
   return { reviews, requestReview, stateOf: (roleKey: string) => reviews[roleKey] ?? IDLE };
 }
