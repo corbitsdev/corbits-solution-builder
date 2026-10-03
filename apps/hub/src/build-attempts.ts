@@ -108,6 +108,8 @@ const QUALITY_BAR = [
   `- The interface uses the design's components, states and copy, including its empty, loading and error states.`,
   `- A README says what it is, how to install, run and test it, and anything left unbuilt.`,
   `- A .gitignore names the toolchain's build output, caches and installed dependencies: what it ignores is left out of the delivered archive.`,
+  `- No hard-coded, default or shared credentials. The first run creates the owner's account, or reads it from an environment variable the README names. Never write a password, token, key or other secret into your final message, the README, a log or a seed file.`,
+  `- The business's name and words come from the approved documents above; never invent a name, brand or business detail they do not give.`,
 ].join("\n");
 
 /**
@@ -120,6 +122,7 @@ const QUALITY_BAR = [
 export function assembleBuildPrompt(input: BuildPromptInput): string {
   return [
     `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
+    `Build the plan's architecture and the frozen stack exactly as written: its hosting, data store, services and how it runs. If any part cannot be built as written, do not substitute another; stop, and end your final message with a line starting \`Blocked:\` that names the part and why.`,
     ...(input.continuing
       ? [
           ``,
