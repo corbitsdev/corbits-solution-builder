@@ -105,7 +105,7 @@ describe("client project tenant writes", () => {
       // A project workflow signal, in whichever tenant it is sent to.
       if (/\/workflows\/[^/]+\/signals$/.test(path) && method === "POST") return json({ ok: true }, 202);
       // Artifacts: any tenant's listing is empty, and a create answers with a row in that tenant.
-      if (/\/api\/tenants\/[^/]+\/artifacts(\?|$)/.test(path) && method === "GET") return json({ data: [], nextCursor: null });
+      if (/\/api\/tenants\/[^/]+\/artifacts(\?|$)/.test(path) && method === "GET") return json({ artifacts: [], nextCursor: null });
       if (/\/api\/tenants\/[^/]+\/artifacts$/.test(path) && method === "POST") {
         return json({ artifact: { id: `art_${String(calls.length)}`, version: 1, title: "", metadata: JSON.parse(String(init?.body ?? "{}")).metadata ?? null } }, 201);
       }
@@ -149,9 +149,10 @@ describe("client project tenant writes", () => {
     expect(calls.some((call) => call.url.startsWith("/api/tenants/tnt_ws/artifacts") && call.method === "POST")).toBe(false);
   });
 
-  test("persistAudiencePackage writes a stakeholder's package into the project tenant", async () => {
+  test("persistAudiencePackage reads the project's packages, then writes the stakeholder's into the project tenant", async () => {
     const { calls } = mockHub();
     await api.persistAudiencePackage("proj-1", "You", "# Package\n\nHello.");
+    expect(calls).toContainEqual({ url: "/api/tenants/proj-1/artifacts?limit=100", method: "GET" });
     const writes = calls.filter((call) => call.method === "POST" && /\/artifacts$/.test(call.url)).map((call) => call.url);
     expect(writes).toEqual(["/api/tenants/proj-1/artifacts"]);
   });
