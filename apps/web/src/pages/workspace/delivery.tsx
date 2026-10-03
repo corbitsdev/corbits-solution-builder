@@ -89,11 +89,11 @@ function VerificationList({ verification }: { verification: DeliveryVerification
       ) : summary.passed === 0 ? (
         <p className="inline-note">Nothing was verified</p>
       ) : null}
-      {/* Folded unless something failed: a clean list of every file is
+      {/* Folded unless something failed: a clean list of every check is
           there to check, not to read. */}
       <details className="delivery-files" open={summary.failed > 0}>
         <summary>
-          {summary.passed} of {rows.length} file{rows.length === 1 ? "" : "s"} verified
+          {summary.passed} of {rows.length} check{rows.length === 1 ? "" : "s"} verified
         </summary>
         <ul className="checklist">
           {rows.map((row) => (
