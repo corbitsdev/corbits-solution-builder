@@ -589,15 +589,13 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
-  // Files handed over from any composer; a refused upload says so.
   const addMaterial = async (files: File[]) => {
     try {
       await api.attachMaterial(detail.project.id, files);
+      void refreshWorkflow();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      return;
     }
-    void refreshWorkflow();
   };
 
   const send = async (body: string) => {
