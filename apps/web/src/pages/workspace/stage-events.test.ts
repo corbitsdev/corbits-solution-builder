@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { stageEvents } from "./stage-events.ts";
+import { eventMessages, stageEvents } from "./stage-events.ts";
 import type { ArtifactNode } from "../../client.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 
@@ -35,6 +35,23 @@ function decision(over: Partial<DecisionRecord>): DecisionRecord {
 }
 
 describe("stageEvents", () => {
+  test("a brand-new project has no boundary to show -- nothing precedes it yet", () => {
+    const events = stageEvents(1, [], [node({ kind: "source_material", title: "Opening problem statement" })], []);
+    expect(events.some((event) => event.tone === "boundary")).toBe(false);
+  });
+
+  test("opens with the stage boundary, then orders by time", () => {
+    const events = stageEvents(
+      1,
+      [decision({ kind: "open_review", artifactId: "a", version: 2, at: "2026-01-01T12:00:00.000Z" })],
+      [node({ version: 1 }), node({ id: "n-a2", version: 2, createdAt: "2026-01-01T11:30:00.000Z" })],
+      [],
+    );
+    expect(events[0]?.tone).toBe("boundary");
+    expect(events[0]?.text).toContain("Problem discovery");
+    expect(events.map((e) => e.text)).toEqual(["Problem discovery"]);
+  });
+
   test("scopes nodes to the stage and hides internal kinds", () => {
     const events = stageEvents(
       2,
@@ -46,7 +63,7 @@ describe("stageEvents", () => {
       ],
       [],
     );
-    expect(events.map((e) => e.text)).toEqual(["Attached: brand.pdf"]);
+    expect(events.map((e) => e.text)).toEqual(["Solution shape", "Attached: brand.pdf"]);
   });
 
   test("send-back reads differently on the sending and receiving stage", () => {
@@ -62,6 +79,27 @@ describe("stageEvents", () => {
       { messageId: "m1", stage: 1, at: "2026-01-01T09:00:00.000Z" },
       { messageId: "m2", stage: 2, at: "2026-01-01T09:00:00.000Z" },
     ];
-    expect(stageEvents(1, [], [], marks).map((e) => e.text)).toEqual(["The owner stopped this reply"]);
+    expect(stageEvents(1, [], [], marks).map((e) => e.text)).toEqual([
+      "Problem discovery",
+      "The owner stopped this reply",
+    ]);
+  });
+});
+
+describe("eventMessages", () => {
+  test("interleaves system rows into the transcript by timestamp", () => {
+    const merged = eventMessages(
+      [
+        {
+          id: "t1",
+          role: "user",
+          parts: [{ type: "text", text: "hi" }],
+          createdAt: "2026-01-01T10:30:00.000Z",
+        },
+      ],
+      stageEvents(1, [], [node({})], []),
+    );
+    expect(merged.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(merged[0]?.id).toBe("ev:boundary");
   });
 });

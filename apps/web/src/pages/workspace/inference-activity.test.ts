@@ -5,9 +5,9 @@ import { join } from "node:path";
 const here = import.meta.dir;
 const read = (relative: string) => readFileSync(join(here, relative), "utf8");
 
-// #87: while a specialist turn is in flight the inference row's flame burns,
-// driven by the one pending turn the workspace already tracks, and goes still
-// under reduced motion.
+// #87: while a specialist turn is in flight the inference row's flame burns
+// and the conversation column breathes; both are driven by the one pending
+// turn the workspace already tracks, and both go still under reduced motion.
 describe("inference activity", () => {
   test("the inference row carries the pending state and a flame that names it", () => {
     const index = read("./index.tsx");
@@ -23,10 +23,11 @@ describe("inference activity", () => {
     expect(read("./workspace-chrome.tsx")).toContain('data-inference-pending={busy ? "" : undefined}');
   });
 
-  test("the flame is styled, and stilled under reduced motion", () => {
+  test("the flame and the breathing border are styled, and stilled under reduced motion", () => {
     const css = read("../../styles.css");
     expect(css).toContain(".stage-model-row[data-inference-pending] .inference-flame {");
+    expect(css).toContain(".conv[data-inference-pending] {");
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-    expect(reduced).toContain(".stage-model-row[data-inference-pending] .inference-flame { animation: none; }");
+    expect(reduced).toContain(".conv[data-inference-pending] { animation: none; }");
   });
 });

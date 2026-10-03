@@ -60,9 +60,9 @@ describe("filesInZip", () => {
   test("refuses an archive with nothing keepable, and one that is not a zip, by name", async () => {
     const empty = await zipFile("empty.zip", { "tool.exe": "binary" });
     await expect(filesInZip(empty)).rejects.toThrow(ArchiveRefused);
-    await expect(filesInZip(empty)).rejects.toThrow("empty.zip holds nothing this can keep.");
+    await expect(filesInZip(empty)).rejects.toThrow("Couldn't attach empty.zip: it has no files the specialists can read.");
     const notZip = new File(["just text"], "notes.zip", { type: "application/zip" });
-    await expect(filesInZip(notZip)).rejects.toThrow("notes.zip could not be read as a zip archive.");
+    await expect(filesInZip(notZip)).rejects.toThrow("Couldn't open notes.zip: it isn't a readable zip file.");
   });
 });
 

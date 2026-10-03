@@ -23,24 +23,43 @@ export type StageEvent = {
   readonly tone: "boundary" | "line";
 };
 
-/** The record lines one stage's conversation shows among its turns. */
+/** The lines one stage's conversation shows: the stage's name where its
+ *  opening would sit, then the record lines among its turns. */
 export function stageEvents(
   stage: number,
   decisions: readonly DecisionRecord[],
   nodes: readonly ArtifactNode[],
   marks: readonly WithdrawnMark[],
 ): StageEvent[] {
+  // A brand-new project at stage 1 has nothing before it to bound -- its
+  // only nodes are the opening statement and, if it attached a file, the
+  // extracted reading beside it. The hairline rule and heading are only
+  // worth showing once there's something they're separating.
+  const freshProject =
+    stage === 1 &&
+    decisions.length === 0 &&
+    marks.length === 0 &&
+    nodes.every((node) => node.kind === "source_material" || node.kind === "material_reading");
+  const out: StageEvent[] = freshProject
+    ? []
+    : [
+        {
+          id: "ev:boundary",
+          at: "",
+          text: stageName(stage),
+          tone: "boundary",
+        },
+      ];
   // Read by anyone the project is shared with, so each line says who acted
   // and names the document as its tab does. The owner is the only actor: the
   // workflow authorises only the owner's principals at every stage
   // (`ensureProjectWorkflowWith`, client.ts) and records anyone else's
   // decision as refused, and a stakeholder's vote is an `audience` decision
   // the owner records, which no line here shows.
-  const out: StageEvent[] = [];
   const approved = (decision: DecisionRecord): string => {
     const node = nodes.find((entry) => entry.artifactId === decision.artifactId && entry.version === decision.version);
     if (!node) return `The owner approved ${stageName(stage)}`;
-    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.version)}`;
+    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.position ?? node.version)}`;
   };
   const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
 

@@ -1,7 +1,8 @@
 /**
  * Mail the app composes in the person's name, and how the chat shows it
- * (#429). A stage's opening, a send-back cue and a requirement-ids block
- * are written for the specialist; read back in the chat as the person's
+ * (#429). A stage's opening, a send-back cue, a requirement-ids block and
+ * the material attached after an opening (#607) are written for the
+ * specialist; read back in the chat as the person's
  * own words they are a page of hashes, a plan, or a marker. Alpha main's
  * prompt never reached the chat at all. Here each such mail folds behind
  * one line, and a marker a person never typed is not shown.
@@ -10,7 +11,9 @@
  * renders what this returns.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
+import { stageName } from "../../components.jsx";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
+import { namedTogether, splitMaterialMail } from "./attached-material.ts";
 
 export type ComposedFold = {
   /** The one line the chat shows; null when nothing folds and only `lead` shows. */
@@ -57,6 +60,17 @@ export function isStageOpening(message: Pick<ChatMessage, "author" | "subject">)
 }
 
 /**
+ * The fold for material attached after the opening (#607), or null for any
+ * other body: the chat names the files and keeps what they say behind the
+ * fold, the markers with it. For a body already known to be the person's.
+ */
+export function materialMailFold(body: string): ComposedFold | null {
+  const material = splitMaterialMail(body);
+  if (!material) return null;
+  return { summary: "What the attached material says", body: material.material, lead: `Attached ${namedTogether(material.names) || "material"}.` };
+}
+
+/**
  * The fold for a person-authored message the app composed, or null for a
  * message the person wrote. Only `author === "me"` is ever inspected, so
  * nothing a specialist writes can be folded away by echoing a marker.
@@ -66,8 +80,10 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
   // Stage 1 opens with the person's own words, shown as they wrote them.
   if (opening && Number(opening[1]) > 1) {
-    return { summary: `What stage ${opening[1]!} opened with`, body: withoutSendBackRef(message.body), lead: null };
+    return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
   }
+  const material = materialMailFold(message.body);
+  if (material) return material;
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);
   if (!isCue && !hasIds) return null;

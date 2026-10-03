@@ -15,7 +15,7 @@ import { isHtmlDocument } from "./pages/workspace/guidance.ts";
  * the stage 4 artifact of record. A Markdown design passes through as is.
  */
 /** The line that opens the design's text in a hand-off; what the transcript folds on (#301). */
-export const HANDOFF_LEAD = "The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:";
+export const HANDOFF_LEAD = "The approved design is an HTML mockup, on record as the GUI design artifact. Its text, for reference:";
 
 export function designHandoff(design: string): string {
   if (!isHtmlDocument(design)) return design;
@@ -76,5 +76,5 @@ export function designAsText(html: string, cap = DESIGN_TEXT_CAP): string {
     .trim();
   const titled = title && !text.startsWith(`# ${title}`) ? `# ${decodeEntities(title)}\n\n${text}` : text;
   if (titled.length <= cap) return titled;
-  return `${titled.slice(0, cap).trimEnd()}\n\n[… the design's text continues; the full mockup is the stage 4 artifact]`;
+  return `${titled.slice(0, cap).trimEnd()}\n\n[… the design's text continues; the full mockup is the GUI design artifact]`;
 }

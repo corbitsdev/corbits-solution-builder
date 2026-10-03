@@ -116,14 +116,14 @@ describe("replayAdoption", () => {
   test("stops when a step is ahead of the workflow", async () => {
     const wf = workflow("proj_1");
     const outcome = await replayAdoption(wf.deps, plan({ steps: [{ stage: 1, ref: ref(1) }, { stage: 3, ref: ref(3) }] }), fast);
-    expect(outcome).toEqual({ landed: 2, stopped: "the workflow is at stage 2, not 3" });
+    expect(outcome).toEqual({ landed: 2, stopped: "the workflow is at Solution shape, not Solution proposal" });
   });
 
   test("stops at the first refusal and says which stage", async () => {
     const wf = workflow("proj_1", { refuse: (decision) => decision["kind"] === "open_review" && decision["stage"] === 2 });
     const outcome = await replayAdoption(wf.deps, plan(), fast);
     expect(outcome.landed).toBe(2);
-    expect(outcome.stopped).toMatch(/^opening stage 2's review was refused: /);
+    expect(outcome.stopped).toMatch(/^opening Solution shape's review was refused: /);
   });
 
   test("reports a workflow that never reports a stage", async () => {

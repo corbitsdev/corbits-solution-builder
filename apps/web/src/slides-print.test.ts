@@ -24,7 +24,7 @@ describe("slidesPrintHtml", () => {
     expect((html.match(/<section class="slide /g) ?? []).length).toBe(4);
     expect(html).toContain("<h1>Acme &lt;Rebuild&gt;</h1>");
     expect(html).toContain("<li>— Costs are rising &amp; margins are thinning.</li>");
-    expect(html).toContain("<h2>Decision request</h2>");
+    expect(html).toContain("<h2>Decisions to Make</h2>");
     expect((html.match(/<img class="picture/g) ?? []).length).toBe(2);
     expect(html).toContain('class="cover-text with-picture"');
     expect(html).toContain('class="lines with-picture"');

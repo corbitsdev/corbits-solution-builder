@@ -325,6 +325,17 @@ export function DesignFeedbackView({
             <FrameSelect value={frameMode} onChange={setFrameMode} />
             <CopyButton text={content || null} />
             {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
+            {design && approval.canApprove ? (
+              <Button
+                variant="primary"
+                loading={busy === "approve"}
+                disabled={busy !== null && busy !== "approve"}
+                onClick={() => run("approve", () => approval.onApprove(design))}
+              >
+                <Check aria-hidden="true" />
+                {approval.soloApproval ? "Approve and continue" : "Send for approval"}
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -359,19 +370,6 @@ export function DesignFeedbackView({
             <Markdown source={content} />
           </div>
         )}
-        {design && approval.canApprove ? (
-          <div className="pane-approve">
-            <Button
-              variant="primary"
-              loading={busy === "approve"}
-              disabled={busy !== null && busy !== "approve"}
-              onClick={() => run("approve", () => approval.onApprove(design))}
-            >
-              <Check aria-hidden="true" />
-              {approval.soloApproval ? "Approve and continue" : "Send for approval"}
-            </Button>
-          </div>
-        ) : null}
       </div>
 
       {feedbackMode && !submitted ? (

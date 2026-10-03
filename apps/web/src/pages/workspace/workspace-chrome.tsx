@@ -458,7 +458,8 @@ export function StagePanes({
   children: ReactNode;
   /** Draft closed: conversation takes the width. */
   solo?: boolean;
-  /** A specialist turn is in flight (#87), until the reply lands. */
+  /** A specialist turn is in flight: the conversation column breathes
+   *  (`.conv[data-inference-pending]`, #87) until the reply lands. */
   busy?: boolean;
   conversationRef?: Ref<HTMLElement>;
   className?: string;

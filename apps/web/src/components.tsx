@@ -525,7 +525,7 @@ export function StageRing({ stage, total = 9 }: { stage: number; total?: number 
       className="stage-ring"
       viewBox="0 0 20 20"
       role="img"
-      aria-label={`Stage ${stage} of ${total}`}
+      aria-label={`${stageName(stage)} · ${stage} of ${total}`}
     >
       <circle cx="10" cy="10" r={radius} className="stage-ring-track" />
       <circle
