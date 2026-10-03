@@ -1016,6 +1016,7 @@ export function StageWorkspace({
       }}
       working={sending}
       disabled={!agentAddress}
+      ended={!!workflowView?.done}
       withdrawnIds={withdrawnIds}
       pending={busy}
       onStop={() => void stopTurn()}
