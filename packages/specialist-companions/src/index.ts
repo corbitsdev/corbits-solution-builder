@@ -24,8 +24,6 @@ Produce exactly these headings:
 Recommend a route. Never take one.`,
 });
 
-/** Never deployed: its prompt is the system prompt of the host's one-shot
- *  naming call (`apps/hub/src/api-project-title.ts`). */
 export const namer = role({
   id: "namer",
   title: "Namer",

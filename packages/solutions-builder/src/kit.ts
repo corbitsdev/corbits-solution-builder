@@ -15,7 +15,7 @@
 import { PANEL_ROLES } from "@solutions-builder/specialist-plan-review";
 import { architect, requirementsAuthor } from "@solutions-builder/specialist-architect";
 import { brainstormer } from "@solutions-builder/specialist-brainstormer";
-import { briefEvaluator, productGuide } from "@solutions-builder/specialist-companions";
+import { briefEvaluator, namer, productGuide } from "@solutions-builder/specialist-companions";
 import { constraintsMapper } from "@solutions-builder/specialist-constraints-mapper";
 import { deliveryVerifier } from "@solutions-builder/specialist-delivery-verifier";
 import { buildSupervisor } from "@solutions-builder/specialist-build-supervisor";
@@ -58,6 +58,7 @@ export const AGENT_KIT: readonly AgentRole[] = [
   buildSupervisor,
   deliveryVerifier,
   productGuide,
+  namer,
   briefEvaluator,
 ].map(kind);
 

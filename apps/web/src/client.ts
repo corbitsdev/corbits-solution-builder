@@ -554,7 +554,7 @@ const UNTITLED = "Untitled project";
 const URL_TOKEN = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S*$/i;
 
 /**
- * The fallback name until the host's naming call names the project for real
+ * The fallback name until the namer names the project for real
  * (`nameProject`): the opening statement's first clause, links dropped,
  * trimmed to about five words, never the whole paragraph. Links are dropped
  * before the clause is cut, since a URL's own dots would otherwise end it.
@@ -579,44 +579,66 @@ async function openingOf(transport: Transport, projectId: string): Promise<{ bod
   return { body: artifact.content, createdAt: node.createdAt };
 }
 
-/**
- * The namer's reply as a title, or null when it is not one: its first line,
- * a "Title:"-style prefix, quotes and trailing punctuation stripped, and
- * three to eight words long.
- */
-export function titleFromReply(reply: string): string | null {
-  const line = reply.trim().split("\n")[0]!.trim();
-  const title = line
-    .replace(/^(?:project\s+)?(?:title|name)\s*:\s*/i, "")
-    .replace(/^["'“‘`*_]+|["'”’`*_]+$/g, "")
-    .replace(/[\s.,;:!?]+$/, "")
-    .trim();
-  const words = title.split(/\s+/).filter(Boolean).length;
-  if (words < 3 || words > 8 || title.length > TITLE_MAX) return null;
-  return title;
+const NAMER_ROLE_KEY = "namer";
+
+/** The namer's role -- named explicitly so a rename of the kit role fails
+ *  loudly here rather than silently deploying the wrong prompt. */
+const NAMER_ROLE = agentById(NAMER_ROLE_KEY);
+if (!NAMER_ROLE) {
+  throw new Error(`kit role "${NAMER_ROLE_KEY}" is missing`);
 }
 
+/** Marks the one mail that asks the namer for a title. */
+const NAME_SUBJECT = "[name]";
+/** How long the namer may take to reply, and how often its thread is read meanwhile. */
+const NAME_REPLY_BUDGET_MS = 180_000;
+const NAME_POLL_MS = 3_000;
+
 /**
- * Names a just-created project from its opening statement through the host's
- * one inference call (`POST /projects/:id/title`), and writes the title
- * through the installer only while the record still carries `fallback`: a
- * title a person chose meanwhile is never overwritten. Any failure leaves
- * `fallback`.
+ * Names a just-created project from its opening statement: the namer runs as
+ * its own deployment, apart from the project workflow's run, is mailed the
+ * statement once and replies with one line. The title is written through the
+ * installer only while the record still carries `fallback`, so a title a
+ * person chose meanwhile is never overwritten. Any failure leaves `fallback`
+ * and is logged with its reason.
  */
-async function nameProject(transport: Transport, projectId: string, problem: string, fallback: string): Promise<void> {
+const nameProject = async (projectId: string, problem: string, fallback: string): Promise<void> => {
   try {
-    const { reply } = await request<{ reply: string }>(`/projects/${encodeURIComponent(projectId)}/title`, {
-      method: "POST",
-      body: JSON.stringify({ problemStatement: problem }),
+    const namer = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const deployment = await ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        projectId,
+        1 as Stage,
+        specialistHubOrigin(),
+        false,
+        NAMER_ROLE_KEY,
+        await localizedRole(transport, workspaceTenantId, NAMER_ROLE),
+      );
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure("the namer", placement);
+      return deployment;
     });
-    const title = titleFromReply(reply);
-    if (!title) return;
+    await api.sendStageMail(projectId, namer.address, { body: JSON.stringify({ problemStatement: problem }), subject: NAME_SUBJECT });
+    const deadline = Date.now() + NAME_REPLY_BUDGET_MS;
+    let reply: ChatMessage | undefined;
+    while (!reply) {
+      if (Date.now() >= deadline) throw new Error(`the namer did not reply within ${NAME_REPLY_BUDGET_MS / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, NAME_POLL_MS));
+      reply = (await api.readStageThread(projectId, [namer.address])).find((message) => message.author === "agent");
+    }
+    const title = reply.body.trim();
+    if (!title || title.length > TITLE_MAX || title.includes("\n")) throw new Error(`the namer's reply is not a title: ${title.slice(0, 120)}`);
+    const transport = createHubTransport();
     const record = await installerRequireProject(transport, projectId);
     if (record.title === fallback) await installerUpdateProject(transport, projectId, { title });
   } catch (cause) {
-    console.warn("[projects] the project keeps its fallback title:", cause);
+    console.warn(`[projects] ${projectId} keeps its title "${fallback}":`, cause instanceof ApiFailure ? cause.detail.message : cause);
   }
-}
+};
 
 function projectSlug(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
@@ -1533,7 +1555,7 @@ export const api = {
       });
       // Not awaited: the project opens under its fallback title, and the
       // project list's poll picks up the generated one when it lands.
-      if (problem && !payload.title?.trim()) void nameProject(transport, project.id, problem, title);
+      if (problem && !payload.title?.trim()) void nameProject(project.id, problem, title);
       return opened;
     } catch (cause) {
       installerFailure(cause);
