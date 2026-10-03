@@ -31,7 +31,7 @@ export const PANEL_SPECIALTIES = [
     mission: "Target feasibility, clean install and upgrade, packaging and signing.",
     boundary: "Requires target evidence; never narrows targets or waives.",
     brief:
-      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's \"## Stack\" block: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
+      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's Stack section: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
     authority: "You may require target evidence. You may not narrow a target or waive one.",
   },
   {
