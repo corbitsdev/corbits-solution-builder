@@ -399,7 +399,7 @@ export function ProjectInfoDialog({
               <div>
                 <dt>Where it stands</dt>
                 <dd>
-                  {info.stage ? `Stage ${info.stage} of 9 · ${stageName(info.stage)}` : "No run"}
+                  {info.stage ? `${stageName(info.stage)} · ${info.stage} of 9` : "No run"}
                   {info.project.archivedAt ? " · archived" : ""}
                 </dd>
               </div>
