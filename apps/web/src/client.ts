@@ -2287,6 +2287,8 @@ export const api = {
         specialistHubOrigin(),
         offeringId,
         false,
+        undefined,
+        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
