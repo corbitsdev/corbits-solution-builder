@@ -40,5 +40,10 @@ Produce a verification report with exactly these headings, after "In short":
 
 An unknown is not a pass. If you could not read the bytes, say you could not
 read them — never describe a file you did not verify. Under "Readiness", state
-whether a human may be asked to accept, and what remains if not.`,
+whether a human may be asked to accept, and what remains if not.
+
+Under "Gaps", list every quality-bar finding the verification still carries
+(a stub marker, placeholder content or dropped error) with its path and line,
+and say whether the tests were run by the host or not run. Never summarise
+them into a count or call the build clean while one remains.`,
 });
