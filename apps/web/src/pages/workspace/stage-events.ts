@@ -10,7 +10,7 @@ import type { WithdrawnMark } from "../../withdrawn-turns.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { stageName } from "../../components.jsx";
+import { documentName, stageName } from "../../components.jsx";
 import { handoffMarkerOf } from "./use-model-handoff.ts";
 
 export type StageEvent = {
@@ -22,41 +22,30 @@ export type StageEvent = {
   readonly tone: "boundary" | "line";
 };
 
-/** The lines one stage's conversation shows, in time order after the
- *  stage's boundary. */
+/** The record lines one stage's conversation shows among its turns. */
 export function stageEvents(
   stage: number,
   decisions: readonly DecisionRecord[],
   nodes: readonly ArtifactNode[],
   marks: readonly WithdrawnMark[],
 ): StageEvent[] {
-  const titleOf = new Map(nodes.map((node) => [node.artifactId, node.title]));
-  // A brand-new project at stage 1 has nothing before it to bound -- its
-  // only nodes are the opening statement and, if it attached a file, the
-  // extracted reading beside it. The hairline rule and heading are only
-  // worth showing once there's something they're separating.
-  const freshProject =
-    stage === 1 &&
-    decisions.length === 0 &&
-    marks.length === 0 &&
-    nodes.every((node) => node.kind === "source_material" || node.kind === "material_reading");
-  const out: StageEvent[] = freshProject
-    ? []
-    : [
-        {
-          id: "ev:boundary",
-          at: "",
-          text: `Stage ${stage} · ${stageName(stage)}`,
-          tone: "boundary",
-        },
-      ];
+  // Read by anyone the project is shared with, so each line says who acted
+  // and names the document as its tab does. Only the owner decides today.
+  const nodeOf = new Map(nodes.map((node) => [node.artifactId, node]));
+  const out: StageEvent[] = [];
+  const approved = (decision: DecisionRecord): string => {
+    const node = decision.artifactId ? nodeOf.get(decision.artifactId) : undefined;
+    if (!node) return `The owner approved stage ${String(stage)}`;
+    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.position ?? decision.version ?? 1)}`;
+  };
+  const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
 
   for (const node of nodes) {
     if (node.stage !== stage || node.kind !== "source_material") continue;
     out.push({
       id: `ev:node:${node.id}`,
       at: node.createdAt,
-      text: `Attached · ${node.title}`,
+      text: `Attached: ${node.title}`,
       tone: "line",
     });
   }
@@ -67,21 +56,21 @@ export function stageEvents(
       out.push({
         id: `ev:${decision.decisionId}`,
         at,
-        text: `Approved · ${decision.artifactId ? `${titleOf.get(decision.artifactId) ?? "the stage"} v${decision.version ?? ""}` : `stage ${stage}`}`,
+        text: approved(decision),
         tone: "line",
       });
     } else if (decision.kind === "send_back" && decision.stage === stage) {
       out.push({
         id: `ev:${decision.decisionId}`,
         at,
-        text: `Sent back${decision.targetStage ? ` · to ${stageName(decision.targetStage)}` : ""}${decision.reason ? ` · “${decision.reason}”` : ""}`,
+        text: `The owner sent this stage back${decision.targetStage ? ` to ${stageName(decision.targetStage)}` : ""}${because(decision.reason)}`,
         tone: "line",
       });
     } else if (decision.kind === "send_back" && decision.targetStage === stage) {
       out.push({
         id: `ev:${decision.decisionId}:in`,
         at,
-        text: `Returned · sent back from ${stageName(decision.stage)}${decision.reason ? ` · “${decision.reason}”` : ""}`,
+        text: `The owner sent this back here from ${stageName(decision.stage)}${because(decision.reason)}`,
         tone: "line",
       });
     }
@@ -89,7 +78,7 @@ export function stageEvents(
 
   for (const mark of marks) {
     if (mark.stage !== stage) continue;
-    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "Turn aborted", tone: "line" });
+    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "The owner stopped this reply", tone: "line" });
   }
 
   return out;
