@@ -2314,9 +2314,9 @@ export const api = {
   /**
    * A stage's draft evaluator (CL-8736 for stage 1's brief evaluator): its
    * own deployed agent, running the stage's `evaluatorFor` role, mailed the
-   * current draft and read back for an advisory verdict. Deploys lazily --
-   * only when a caller actually has a draft worth judging, never on project
-   * creation -- onto its own asset (`ensureSpecialistDeployment`'s
+   * current draft and read back for an advisory verdict. Deploys once the
+   * stage's specialist is placed (`useStageAgent`), while it drafts, onto
+   * its own asset (`ensureSpecialistDeployment`'s
    * `roleKey`, the role's id, distinct from the stage's primary drafter).
    * Memoised per project and stage the same way `ensureStageAgent` is.
    */
