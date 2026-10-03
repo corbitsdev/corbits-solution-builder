@@ -6,8 +6,8 @@
  * named next action here — including the states that are endings, which say
  * so plainly rather than leaving a screen that simply stops.
  *
- * Pure, and exhaustive over the ledger's states, so `smoke:guidance` can prove
- * there is no state that leaves a person without a next move.
+ * Pure, and exhaustive over the ledger's states: no state leaves a person
+ * without a next move.
  */
 import type { RunState } from "./ledger.js";
 
