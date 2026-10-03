@@ -73,8 +73,9 @@ import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
-import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
-import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
+import { currentInference, inferenceOptions, inferenceRemoved } from "./inference-options.ts";
+import { dismissPrimary, useDismissedPrimary, useModelMismatch, writeModelMismatch } from "./model-nudge-store.ts";
+import { useMountEffect } from "../../use-mount-effect.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
@@ -402,10 +403,8 @@ export function StageWorkspace({
   }, [detail.project.id, stage, agentAddress]);
 
   // The Inference picker: Settings' provider-and-model rows, in Settings'
-  // order (`inference-options.ts`). Fetched once the specialist exists and
-  // again after a pick, since a pick reorders those rows.
+  // order (`inference-options.ts`). Fetched once the specialist exists.
   const [inferenceProviders, setInferenceProviders] = useState<Provider[] | null>(null);
-  const [inferenceNonce, setInferenceNonce] = useState(0);
   useEffect(() => {
     if (!agentAddress) return;
     let cancelled = false;
@@ -415,30 +414,20 @@ export function StageWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [agentAddress, inferenceNonce]);
+  }, [agentAddress]);
   const inferenceChoices = inferenceOptions(inferenceProviders ?? []);
   const runningInference = currentInference(activeModel, inferenceChoices);
+  const runningRemoved = inferenceRemoved(activeModel, inferenceProviders);
 
   const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
-  // Choosing an inference is the same as dragging its row to the top in
-  // Settings -- it becomes the default -- and this stage switches onto it.
-  const pickInference = async (option: InferenceOption) => {
-    if (!inferenceProviders) return;
-    await api.reorderProviders(orderLeadingWith(inferenceProviders, option.providerRowId));
-    setInferenceNonce((nonce) => nonce + 1);
-    setWorkspaceDefaultModel({ providerLabel: option.providerLabel, canonicalName: option.model });
-    await modelSwitch.switchTo(option.offeringId);
-  };
 
-  // The owner's ask: opening a project whose current stage is running a
-  // model other than the workspace's current default should offer, not
-  // force, catching it up -- never a redeploy the person did not choose.
-  // `workspaceDefaultModel` is unscoped (`api.activeModel()`, no
-  // projectId/stage), the same "lowest-priority offering" read Settings'
-  // own default row uses, so this nudge and the deploy path always agree on
-  // what "the default" means. Dismissing records the default's OWN name
-  // (`model-nudge-store.ts`), so a later default change asks again rather
-  // than staying quiet forever.
+  // Opening a project whose current stage runs a model other than the
+  // primary asks, switches or keeps, as the person chose in Settings
+  // (`useModelMismatch`). `workspaceDefaultModel` is unscoped
+  // (`api.activeModel()`, no projectId/stage), the same read Settings'
+  // "Primary model" row uses, so this and the deploy path agree on what the
+  // primary is. "Keep" records the primary's OWN name per project+stage
+  // (`model-nudge-store.ts`), so a later primary change asks again.
   const [workspaceDefaultModel, setWorkspaceDefaultModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -449,24 +438,28 @@ export function StageWorkspace({
       cancelled = true;
     };
   }, [detail.project.id]);
-  const [nudgeDismissedFor, setNudgeDismissedFor] = useState<string | null>(null);
-  useEffect(() => {
-    setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));
-  }, [detail.project.id, stage]);
-  // The default is Settings' top row: the first inference option.
+  const nudgeDismissedFor = useDismissedPrimary(detail.project.id, stage);
+  const mismatchChoice = useModelMismatch();
+  const [dontAskAgain, setDontAskAgain] = useState(false);
+  // The primary is Settings' top row: the first inference option.
   const defaultOffering = inferenceChoices[0] ?? undefined;
-  const modelNudgeVisible =
+  const modelDiffers =
     !!agentAddress &&
     !!activeModel &&
     !!workspaceDefaultModel &&
     !!defaultOffering &&
-    activeModel.canonicalName !== workspaceDefaultModel.canonicalName &&
-    nudgeDismissedFor !== workspaceDefaultModel.canonicalName;
+    activeModel.canonicalName !== workspaceDefaultModel.canonicalName;
+  const modelNudgeVisible = modelDiffers && mismatchChoice === "ask" && nudgeDismissedFor !== workspaceDefaultModel?.canonicalName;
   const dismissModelNudge = () => {
-    if (!workspaceDefaultModel) return;
-    saveDismissedDefault(detail.project.id, stage, workspaceDefaultModel.canonicalName);
-    setNudgeDismissedFor(workspaceDefaultModel.canonicalName);
+    if (workspaceDefaultModel) dismissPrimary(detail.project.id, stage, workspaceDefaultModel.canonicalName);
   };
+  // "Always switch" applies once the stage is known to be idle, so a switch
+  // never lands mid-reply, and tries each primary once: a failed switch is
+  // reported, not retried.
+  const autoSwitchTo =
+    mismatchChoice === "switch" && modelDiffers && !busy && runState.state !== "unknown" && modelSwitch.target !== defaultOffering?.offeringId
+      ? defaultOffering
+      : undefined;
   // Fires the hand-off for ANY redeploy of a stage that already has mail
   // under a prior address — an explicit switch (above) or any other cause
   // (restart, recovery) — never for a brand-new stage (CL-8927's own opening
@@ -925,15 +918,20 @@ export function StageWorkspace({
           <span className="inline-note">
             Inference:{" "}
             {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
+            {runningRemoved ? " · provider removed, choose another" : null}
           </span>
           <select
             aria-label="Switch this stage's inference"
-            title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
-            disabled={modelSwitch.switching || inferenceProviders === null}
+            title={
+              busy
+                ? "Waits for the reply in flight: a stage never switches mid-reply."
+                : "The provider and model rows from Settings, in their order. Choosing one switches this stage to it; the primary in Settings is unchanged."
+            }
+            disabled={busy || modelSwitch.switching || inferenceProviders === null}
             value={runningInference?.providerRowId ?? ""}
             onChange={(event) => {
               const option = inferenceChoices.find((entry) => entry.providerRowId === event.target.value);
-              if (option) void pickInference(option);
+              if (option) void modelSwitch.switchTo(option.offeringId);
             }}
           >
             <option value="" disabled>
@@ -948,31 +946,47 @@ export function StageWorkspace({
         </div>
       ) : null}
 
-      {/* The owner's ask: a calm inline prompt, never a modal wall, and never
-          a redeploy without the person choosing — "Keep" just dismisses
-          (remembered per project+stage until the default moves again),
-          "Switch" runs the same switch path the manual select above uses. */}
-      {modelNudgeVisible && workspaceDefaultModel && defaultOffering ? (
+      {/* A calm inline prompt, never a modal wall, and never a redeploy the
+          person did not choose. "Don't ask again" turns either answer into
+          the Settings preference. */}
+      {modelNudgeVisible && workspaceDefaultModel && activeModel ? (
         <div className="model-nudge" role="status">
-          <span className="inline-note">
-            Your default model is now {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
-            Switch this stage to it?
-          </span>
+          <p className="model-nudge-text">
+            This project uses {activeModel.providerLabel} · {activeModel.canonicalName}. Your primary is now{" "}
+            {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
+            {busy ? " Switching waits for the reply in flight." : null}
+          </p>
           <div className="model-nudge-actions">
+            <label className="model-nudge-remember" title="Change this any time in Settings → Inference">
+              <input type="checkbox" checked={dontAskAgain} onChange={(event) => setDontAskAgain(event.target.checked)} />
+              Don't ask again
+            </label>
             <Button
+              variant="ghost"
               onClick={() => {
+                if (dontAskAgain) writeModelMismatch("keep");
                 dismissModelNudge();
-                void modelSwitch.switchTo(defaultOffering.offeringId);
               }}
             >
-              Switch
+              {dontAskAgain ? "Always keep" : `Keep ${activeModel.canonicalName}`}
             </Button>
-            <Button variant="ghost" onClick={dismissModelNudge}>
-              Keep {activeModel?.canonicalName}
+            <Button
+              disabled={busy || modelSwitch.switching}
+              onClick={() => {
+                // "Always switch" is carried out by `autoSwitchTo` below.
+                if (dontAskAgain) writeModelMismatch("switch");
+                else if (defaultOffering) {
+                  dismissModelNudge();
+                  void modelSwitch.switchTo(defaultOffering.offeringId);
+                }
+              }}
+            >
+              {dontAskAgain ? "Always switch" : `Switch to ${workspaceDefaultModel.canonicalName}`}
             </Button>
           </div>
         </div>
       ) : null}
+      {autoSwitchTo ? <OnMount action={() => void modelSwitch.switchTo(autoSwitchTo.offeringId)} /> : null}
 
       {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
       {modelHandoff.error ? (
@@ -1225,6 +1239,12 @@ export function StageWorkspace({
 }
 
 /** Loads the stage-4 design history and its feedback, then renders the flow. */
+/** Carries out, after render, a decision the render made. */
+function OnMount({ action }: { action: () => void }) {
+  useMountEffect(action);
+  return null;
+}
+
 function DesignPanel({
   detail,
   tenantId,
