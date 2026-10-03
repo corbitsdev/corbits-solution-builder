@@ -93,7 +93,7 @@ export async function getArtifact(
     );
     return artifact;
   } catch (cause) {
-    if (cause instanceof ApiError && (cause.status === 404 || cause.status === 403)) return null;
+    if (cause instanceof ApiError && cause.status === 404) return null;
     throw cause;
   }
 }
