@@ -204,9 +204,28 @@
   margin: 0 auto;
 }
 
+/* The column runs the full height, so the composer sits at the window's
+   foot with the thread above it, not just under the last message. */
 .panes.chat-first .conv {
+  flex: 1;
   width: 100%;
   border-right: 0;
+}
+
+/* The composer arrives once there is something it could send: it rises
+   into place rather than appearing. */
+.panes.chat-first .composer {
+  animation: composer-in 280ms ease-out backwards;
+}
+
+@keyframes composer-in {
+  from { opacity: 0; transform: translateY(16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panes.chat-first .composer {
+    animation: none;
+  }
 }
 
 /* Chat-first, before the first message: center the composer (and the empty
@@ -223,22 +242,6 @@
   flex: 0 1 auto;
   justify-content: center;
   text-align: center;
-}
-
-/* The opening screen: a calm chat start, not a loading screen. The stage
-   intro sits a little below the top of the column — near the upper-middle,
-   never dead center — so the composer at the bottom doesn't read as an
-   empty page. */
-.opening-intro {
-  margin-top: clamp(24px, 10vh, 96px);
-  margin-bottom: var(--space-4);
-}
-
-.opening-stage-name {
-  margin: 0 0 var(--space-1);
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--wb-foreground);
 }
 
 .conv {
@@ -456,6 +459,55 @@
   .conv .think .thinking {
     animation: none;
   }
+}
+
+/* While the specialist gets ready: one tip at a time, in the middle of
+   the space below the thread, each fading in as it replaces the last. */
+.conv .waiting-tips {
+  margin: auto 0;
+  padding: var(--space-4) var(--space-6);
+  text-align: center;
+}
+
+.conv .waiting-tips-head {
+  margin: 0 0 var(--space-2);
+  font-family: var(--wb-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--wb-muted-foreground);
+}
+
+.conv .waiting-tip {
+  margin: 0 auto;
+  max-width: 40ch;
+  min-height: 3em;
+  color: var(--wb-foreground);
+  animation: waiting-tip-in 600ms ease-out both;
+}
+
+@keyframes waiting-tip-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv .waiting-tip {
+    animation: none;
+  }
+}
+
+/* The live activity, when the zen garden is turned off: the strip's
+   caption as one quiet line. */
+.conv .busy-line {
+  margin: 0;
+  font-family: var(--wb-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--wb-muted-foreground);
+}
+
+.conv .busy-line-clock {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- composer: mock composer-box ---- */

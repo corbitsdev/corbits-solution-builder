@@ -420,6 +420,9 @@ export function StageWorkspace({
     onViewedStage?.(viewedStage);
     return () => onViewedStage?.(null);
   }, [viewedStage, onViewedStage]);
+  // The centered conversation gives way to the split once there is a
+  // document to show beside it.
+  const split = draftMessage !== null && (viewedStage !== null || (artifacts.activeNode !== null && artifacts.selected !== null));
 
   // The transcript's quiet record: boundaries, versions, decisions, aborted
   // turns and a model switch's own announcement, folded in beside the mail
@@ -706,7 +709,6 @@ export function StageWorkspace({
     return (
       <OpeningScreen
         resuming={resuming}
-        stage={openingStage}
         who={openingWho}
         opening={openingStatement}
         draft={openingDraft}
@@ -1031,7 +1033,6 @@ export function StageWorkspace({
       {!agentAddress && !agent.error ? (
         <OpeningScreen
           resuming={resuming}
-          stage={openingStage}
           who={openingWho}
           opening={openingStatement}
           draft={openingDraft}
@@ -1267,7 +1268,7 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && stage !== 6 && !draftMessage ? (
+      {agentAddress && DOCUMENT_STAGES.has(stage) && stage !== 6 && !split ? (
         // No drafted artifact yet: a single centered column, chat only, no
         // right pane — the split only earns its keep once there is
         // something to split against.
@@ -1284,7 +1285,7 @@ export function StageWorkspace({
 
       {/* A past stage opened from the stepper while this stage has a draft:
           the reader, not this stage's document and its approve gate. */}
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage !== null ? (
+      {agentAddress && DOCUMENT_STAGES.has(stage) && split && draftMessage && viewedStage !== null ? (
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader}
         </StagePanes>
