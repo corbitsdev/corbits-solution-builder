@@ -5,7 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useState, useRef } from "react";
+import { Component, useCallback, useEffect, useState, useRef, type ReactNode } from "react";
 import {
   api,
   ApiFailure,
@@ -143,6 +143,26 @@ function ProjectLoadFailure({
       </details>
     </div>
   );
+}
+
+/** A render failure in a project reads as one, with a way back, never a blank window. */
+class ProjectRenderBoundary extends Component<{ children: ReactNode; onBackToProjects: () => void }, { failure: string | null }> {
+  override state = { failure: null as string | null };
+
+  static getDerivedStateFromError(cause: unknown) {
+    return { failure: cause instanceof Error ? (cause.stack ?? cause.message) : String(cause) };
+  }
+
+  override render() {
+    if (this.state.failure === null) return this.props.children;
+    return (
+      <ProjectLoadFailure
+        detail={this.state.failure}
+        onRetry={() => this.setState({ failure: null })}
+        onBackToProjects={this.props.onBackToProjects}
+      />
+    );
+  }
 }
 
 /**
@@ -831,7 +851,7 @@ export function App() {
 
         {view === "project" ? (
           detail ? (
-            <>
+            <ProjectRenderBoundary key={detail.project.id} onBackToProjects={() => navigate("projects")}>
               {/* Imported and never rendered, so the walkthrough simply
                   did not exist. It runs once, on the surface it describes,
                   and remembers that it has. */}
@@ -847,7 +867,7 @@ export function App() {
                 {...(focusArtifact ? { focusArtifact } : {})}
                 onViewedStage={setViewedStage}
               />
-            </>
+            </ProjectRenderBoundary>
           ) : detailError ? (
             <ProjectLoadFailure detail={detailError} onRetry={retryDetail} onBackToProjects={() => navigate("projects")} />
           ) : (

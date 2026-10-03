@@ -214,7 +214,8 @@ export function StageWorkspace({
   // concurrently with `ensureProjectWorkflow`'s own ensure/poll cycle
   // instead of serially after it, without ever guessing a stage for a
   // project with history.
-  const confirmedStage = detail.stage > 1 || detail.nodes.length === 0 ? detail.stage : null;
+  // A workflow at stage 0 has not written its first state: nothing is confirmed yet.
+  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && detail.nodes.length === 0) ? detail.stage : null;
 
   const agent = useStageAgent(detail.project.id, stage, workflowResolved, confirmedStage);
   const agentAddress = agent.address;
@@ -662,7 +663,7 @@ export function StageWorkspace({
     openingDraftNode && openingDraftContent !== null
       ? { title: openingDraftNode.title, version: openingDraftNode.version, content: openingDraftContent }
       : null;
-  const openingWho = agentFor(openingStage as Stage).title.toLowerCase();
+  const openingWho = openingStage >= 1 ? agentFor(openingStage as Stage).title.toLowerCase() : "specialist";
 
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
