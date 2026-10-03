@@ -8,7 +8,7 @@
  * surface has no route for an older version's body, only its metadata
  * (`versions`).
  */
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 
 function tenantPathFor(scope: string, rest: string): string {
   return `/api/tenants/${scope}${rest}`;
@@ -92,8 +92,9 @@ export async function getArtifact(
       tenantPathFor(tenantId, `/artifacts/${artifactId}`),
     );
     return artifact;
-  } catch {
-    return null;
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return null;
+    throw cause;
   }
 }
 
