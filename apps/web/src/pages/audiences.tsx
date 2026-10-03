@@ -31,7 +31,7 @@ import { mockupShots, placeMockups, type MockupShot } from "../mockup-shots.ts";
 import { isHtmlDocument } from "./workspace/guidance.ts";
 import { packageSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
-import { packageReplyFor } from "../package-reply.ts";
+import { packageReplyFor, unrecordedPackageRequest } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
@@ -397,8 +397,20 @@ export function AudiencePackages({
   const writingFor = audiences.filter((audience) => writing.has(audience.name));
   useBusyWhile(writingFor.length > 0, writingFor.length === 1 ? packageWork(writingFor[0]!) : `Writing ${String(writingFor.length)} packages`);
   const cancelledRef = useRef(false);
-  useEffect(() => () => {
-    cancelledRef.current = true;
+  // Until the thread is read for a request a reload left in flight, no
+  // package is asked for again.
+  const [resuming, setResuming] = useState(true);
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    cancelledRef.current = false;
+    if (!resumedRef.current) {
+      resumedRef.current = true;
+      void resumePackages();
+    }
+    return () => {
+      cancelledRef.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const quorum = policy.audienceQuorum ?? 0;
@@ -463,30 +475,58 @@ export function AudiencePackages({
     // brief that cannot be read never stops a package being asked for.
     const brief = await api.deckBrief(detail.project.id, audience.role).catch(() => null);
     await api.sendStageMail(tenantId, deployment.address, { subject: packageSubject(audience), body: packageRequest(audience, design, brief) });
-    let reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
+    await recordPackage(audience, deployment.address, seenIds, true);
+  };
+
+  /** Waits for the reply to the request for `audience` sent after `seenIds` and records it as their package. */
+  const recordPackage = async (audience: PackageAudience, address: string, seenIds: ReadonlySet<string>, mayNudge: boolean) => {
+    let reply = await awaitPackageReply(tenantId, address, seenIds, audience.name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     // Not every reply is a package (#220): one with no deck outline is
     // refused and never recorded. The specialist is asked once more in the
     // same thread, told what was missing and that the reply itself is the
     // package (#225); a second miss is said so "Write it" stays offered.
     let problem = packageReplyProblem(audience, reply.body);
-    if (problem) {
-      const seenBefore = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
-      await api.sendStageMail(tenantId, deployment.address, { subject: packageSubject(audience), body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
-      reply = await awaitPackageReply(tenantId, deployment.address, seenBefore, name, () => cancelledRef.current);
+    if (problem && mayNudge) {
+      const seenBefore = new Set((await api.readStageThread(tenantId, [address])).map((message) => message.id));
+      await api.sendStageMail(tenantId, address, { subject: packageSubject(audience), body: packageNudge(audience, packageOutlineProblem(reply.body) ?? "it has no deck outline") });
+      reply = await awaitPackageReply(tenantId, address, seenBefore, audience.name, () => cancelledRef.current);
       if (cancelledRef.current) return;
       problem = packageReplyProblem(audience, reply.body);
-      if (problem) throw new Error(problem);
     }
-    await api.persistAudiencePackage(detail.project.id, name, reply.body);
+    if (problem) throw new Error(problem);
+    await api.persistAudiencePackage(detail.project.id, audience.name, reply.body);
   };
 
-  const writePackages = async (names: string[]) => {
+  const resumePackages = async () => {
+    try {
+      const deployment = await api.ensureStageAgent(detail.project.id, 5);
+      const messages = await api.readStageThread(tenantId, [deployment.address]);
+      const unrecorded = new Map(
+        audiences.flatMap((audience) => {
+          const seenIds = unrecordedPackageRequest(messages, audience.name, packages.find((node) => node.variant === audience.name)?.createdAt ?? null);
+          return seenIds ? [[audience.name, { audience, seenIds }] as const] : [];
+        }),
+      );
+      await runPackages([...unrecorded.keys()], (name) => {
+        const { audience, seenIds } = unrecorded.get(name)!;
+        return recordPackage(audience, deployment.address, seenIds, false);
+      });
+    } catch (cause) {
+      if (!cancelledRef.current) setWriteError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      if (!cancelledRef.current) setResuming(false);
+    }
+  };
+
+  const writePackages = (names: string[]) => runPackages(names, writeOnePackage);
+
+  const runPackages = async (names: string[], work: (name: string) => Promise<void>) => {
     if (names.length === 0 || writing.size > 0) return;
     setWriteError(null);
     setWriting(new Set(names));
     try {
-      await Promise.all(names.map((name) => writeOnePackage(name)));
+      await Promise.all(names.map(work));
       if (!cancelledRef.current) onChanged();
     } catch (cause) {
       if (!cancelledRef.current) {
@@ -840,7 +880,7 @@ export function AudiencePackages({
                 {writing.has(audience.name) ? (
                   <StateLabel tone="info">Writing…</StateLabel>
                 ) : (
-                  <Button loading={false} disabled={writing.size > 0} onClick={() => void writePackages([audience.name])}>
+                  <Button loading={false} disabled={writing.size > 0 || resuming} onClick={() => void writePackages([audience.name])}>
                     Write it
                   </Button>
                 )}
@@ -851,7 +891,7 @@ export function AudiencePackages({
             <Button
               variant="primary"
               loading={writing.size > 1}
-              disabled={writing.size > 0}
+              disabled={writing.size > 0 || resuming}
               onClick={() => void writePackages(missing.map((audience) => audience.name))}
             >
               Write all {missing.length}
@@ -1003,7 +1043,7 @@ export function AudiencePackages({
                 {selectedAudience ? (
                   <Button
                     loading={writing.has(selectedAudience.name)}
-                    disabled={writing.size > 0}
+                    disabled={writing.size > 0 || resuming}
                     doing={packageWork(selectedAudience)}
                     onClick={() => void writePackages([selectedAudience.name])}
                   >
