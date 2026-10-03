@@ -707,6 +707,17 @@ export function StageWorkspace({
     },
   });
 
+  // Files handed over from any composer; a refused upload says so.
+  const addMaterial = async (files: File[]) => {
+    try {
+      await api.attachMaterial(detail.project.id, files);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return;
+    }
+    void refreshWorkflow();
+  };
+
   /** Whether the message went; a refused one keeps its attachments in the composer. */
   const send = async (body: string, attached: readonly AttachedDocument[] = []): Promise<boolean> => {
     if (!agentAddress || body.trim().length === 0) return false;
@@ -958,10 +969,7 @@ export function StageWorkspace({
               }}
               documents={attachDocuments}
               attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
-              onAddMaterial={async (files) => {
-                await api.attachMaterial(detail.project.id, files);
-                void refreshWorkflow();
-              }}
+              onAddMaterial={addMaterial}
               onSubmit={() => void approve()}
               soloApproval={detail.soloApproval}
               canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
@@ -1027,9 +1035,7 @@ export function StageWorkspace({
       }
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
-      onAttach={(files) => {
-        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-      }}
+      onAttach={(files) => void addMaterial([...files])}
       documents={attachDocuments}
       documentLabels={documentLabels}
       {...(draftRefs ? { draftRefs } : {})}
@@ -1303,9 +1309,7 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
-          onAttach={(files) => {
-            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-          }}
+          onAttach={(files) => void addMaterial([...files])}
           documents={attachDocuments}
           documentLabels={documentLabels}
         />
