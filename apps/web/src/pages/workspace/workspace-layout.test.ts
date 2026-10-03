@@ -194,7 +194,7 @@ describe("project chrome paint", () => {
     const index = read("./index.tsx");
     expect(index).toContain("<StagePanes");
     expect(index).toContain("DOCUMENT_STAGES.has(stage)");
-    expect(index).toContain("!draftMessage");
+    expect(index).toContain("!split");
     expect(index).toContain("stage === 4");
     expect(index).toContain("stage === 5");
     expect(index).toContain("stage === 6");
@@ -234,8 +234,8 @@ describe("project chrome paint", () => {
     expect(chrome).toContain("Reconnecting to the");
     expect(chrome).toContain("is getting ready…");
     expect(chrome).toContain("<StagePanes");
-    expect(chrome).toContain("opening-stage-name");
-    expect(chrome).toContain("<ChatInput");
+    expect(chrome).not.toContain("opening-stage-name");
+    expect(chrome).not.toContain("<ChatInput");
     const index = read("./index.tsx");
     expect(index).not.toContain("Starting the");
     expect(index).toContain("<OpeningScreen");
