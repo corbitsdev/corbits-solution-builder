@@ -25,7 +25,7 @@ import { Banner, Button, Mark, stageName } from "./components.jsx";
 import type { Surface } from "@solutions-builder/app/project-workflow/contracts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
-import { exportProjectBundle, ProjectMenu } from "./pages/project-menu.jsx";
+import { ProjectMenu, exportProjectBundle } from "./pages/project-menu.jsx";
 import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
@@ -241,10 +241,15 @@ const SURFACE_NOUN: Readonly<Record<Surface, string>> = {
   desktop: "an installed app",
 };
 
-function stageSteps(stage: number, surface: Surface | null, skipped: readonly number[]): WorkflowStep[] {
+function stageSteps(stage: number, done: boolean, surface: Surface | null, skipped: readonly number[]): WorkflowStep[] {
   return STAGES.map((number) => ({
     number,
-    label: skipped.includes(number) && surface ? `${stageName(number)} — not needed for ${SURFACE_NOUN[surface]}` : stageName(number),
+    label:
+      done && number === stage
+        ? "Delivered"
+        : skipped.includes(number) && surface
+          ? `${stageName(number)} — not needed for ${SURFACE_NOUN[surface]}`
+          : stageName(number),
     status: number < stage ? "completed" : number === stage ? "current" : "pending",
   }));
 }
@@ -372,7 +377,7 @@ export function AppBar({
         {inProject ? (
           <>
             <StageStepper
-              steps={stageSteps(detail.stage, detail.surface, detail.skipped)}
+              steps={stageSteps(detail.stage, detail.done, detail.surface, detail.skipped)}
               skipped={detail.skipped}
               viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
               {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
@@ -463,7 +468,13 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const [view, setShownView] = useState<View>(initialView);
+  // What one page said, a download's notice or a refusal, is not carried onto the next.
+  const setView = (next: View) => {
+    setNotice(null);
+    setError(null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
@@ -667,12 +678,12 @@ export function App() {
     setView("project");
   };
 
-  /** The same export the projects list's menu item makes. */
+  /** The same export, and the same notice, as the project menu's. */
   const exportProject = async () => {
     if (exporting || !detail) return;
     setExporting(true);
     try {
-      await exportProjectBundle(detail.project);
+      setNotice(await exportProjectBundle(detail.project));
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {

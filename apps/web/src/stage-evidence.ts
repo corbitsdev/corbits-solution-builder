@@ -29,7 +29,7 @@ import { stageName } from "./stage-names.ts";
  *  stage 7, and the copy never calls it a "stack decision": a person has
  *  only ever seen the build plan and its Stack section. */
 const STACK_MISSING_MESSAGE =
-  "The approved build plan (stage 6) has no Stack section, so there is nothing to freeze. Send the project back to stage 6 and ask the architect to re-issue the plan with one.";
+  "The approved build plan has no Stack section, so there is nothing to freeze. Send the project back to the build plan and ask the architect to re-issue it with one.";
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
@@ -40,7 +40,7 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   stack_missing: STACK_MISSING_MESSAGE,
   stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
-  not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
+  not_audience_stage: "Stakeholder decisions are recorded at concept approval only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
@@ -208,7 +208,7 @@ export type Stage7Problem = { readonly message: string; readonly remediation?: R
  *  the send-back picker, seeded with the reason, aimed at stage 6. Stage 6
  *  is read-only once approved, so re-issuing the plan is the only fix. */
 function sendBackToStage6(reason: string): Remediation {
-  return { kind: "send_back", label: "Send back to stage 6…", targetStage: 6, reason };
+  return { kind: "send_back", label: "Send back to the build plan…", targetStage: 6, reason };
 }
 
 /**
@@ -243,7 +243,7 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
   if (problems.length === 0) return null;
   const detail = citationDetail(problems);
   return {
-    message: `The approved build plan's Stack section has uncited or unknown requirement ids (${detail}), so it cannot be frozen. Send the project back to stage 6 and ask the architect to fix the citations.`,
+    message: `The approved build plan's Stack section has uncited or unknown requirement ids (${detail}), so it cannot be frozen. Send the project back to the build plan and ask the architect to fix the citations.`,
     remediation: sendBackToStage6(`The build plan's Stack section has citation problems: ${detail}. Please fix them.`),
   };
 }

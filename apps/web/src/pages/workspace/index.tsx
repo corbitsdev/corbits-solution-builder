@@ -710,6 +710,17 @@ export function StageWorkspace({
     },
   });
 
+  // Files handed over from any composer; a refused upload says so.
+  const addMaterial = async (files: File[]) => {
+    try {
+      await api.attachMaterial(detail.project.id, files);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      return;
+    }
+    void refreshWorkflow();
+  };
+
   /** Whether the message went; a refused one keeps its attachments in the composer. */
   /** `choice` names the stage 3 approach the chooser sent, so the chat shows the mail as that event. */
   const send = async (body: string, attached: readonly AttachedDocument[] = [], choice?: string): Promise<boolean> => {
@@ -966,10 +977,7 @@ export function StageWorkspace({
               }}
               documents={attachDocuments}
               attachedByTurn={new Map(foldedMessages.map((message) => [message.id, message.author === "me" ? attachedIn(message.subject, documentLabels) : []]))}
-              onAddMaterial={async (files) => {
-                await api.attachMaterial(detail.project.id, files);
-                void refreshWorkflow();
-              }}
+              onAddMaterial={addMaterial}
               onSubmit={() => void approve()}
               soloApproval={detail.soloApproval}
               // A settled version with no reply in flight can be approved while
@@ -1019,6 +1027,7 @@ export function StageWorkspace({
       working={sending}
       disabled={!agentAddress}
       draftPane={stage !== 5}
+      ended={!!workflowView?.done}
       withdrawnIds={withdrawnIds}
       pending={busy}
       onStop={() => void stopTurn()}
@@ -1038,9 +1047,7 @@ export function StageWorkspace({
       }
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
-      onAttach={(files) => {
-        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-      }}
+      onAttach={(files) => void addMaterial([...files])}
       documents={attachDocuments}
       documentLabels={documentLabels}
       {...(draftRefs ? { draftRefs } : {})}
@@ -1052,7 +1059,7 @@ export function StageWorkspace({
     <div className="stage-view">
       {/* Stage 9 says this in its own pane, where it does not push the panes down. */}
       {workflowView?.done && (stage !== 9 || !agentAddress) ? (
-        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
+        <Banner tone="okay" title="This project is delivered. Its delivery was approved and the workflow has finished." />
       ) : null}
 
       {openingFailed ? (
@@ -1314,9 +1321,7 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
-          onAttach={(files) => {
-            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-          }}
+          onAttach={(files) => void addMaterial([...files])}
           documents={attachDocuments}
           documentLabels={documentLabels}
         />
