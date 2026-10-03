@@ -589,6 +589,17 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const addMaterial = async (files: File[]) => {
+    setAttachNote(null);
+    try {
+      await api.attachMaterial(detail.project.id, files);
+      void refreshWorkflow();
+    } catch (cause) {
+      setAttachNote(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -795,9 +806,8 @@ export function StageWorkspace({
       events={events}
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
-      onAttach={(files) => {
-        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-      }}
+      onAttach={(files) => void addMaterial([...files])}
+      rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1033,9 +1043,8 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
-          onAttach={(files) => {
-            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-          }}
+          onAttach={(files) => void addMaterial([...files])}
+          attachNote={attachNote}
         />
       ) : null}
 
@@ -1139,10 +1148,8 @@ export function StageWorkspace({
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
-            onAddMaterial={async (files) => {
-              await api.attachMaterial(detail.project.id, files);
-              void refreshWorkflow();
-            }}
+            onAddMaterial={addMaterial}
+            attachNote={attachNote}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
