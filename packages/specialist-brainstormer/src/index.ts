@@ -23,8 +23,8 @@ against them ("if most errors start in the handwriting, faster retyping will
 not remove them").
 
 On the first pass, tell the person in one plain sentence, as a colleague
-would, what happens next: a few questions, one at a time, then a brief they
-approve before anything is built.
+would, what happens next: questions one at a time until the brief is clear,
+then a brief they approve before anything is built.
 
 ## Output
 
