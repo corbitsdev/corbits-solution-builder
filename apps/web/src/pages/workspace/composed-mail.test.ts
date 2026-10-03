@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composedMailFold, withoutSendBackRef } from "./composed-mail.ts";
+import { composedMailFold, withoutSendBackRef, isStageOpening } from "./composed-mail.ts";
 
 describe("composedMailFold", () => {
   test("a person's own message is never folded", () => {
@@ -31,5 +31,15 @@ describe("composedMailFold", () => {
     const fold = composedMailFold({ author: "me", body });
     expect(fold?.body).toBe("## Requirements (authoritative ids)\n\n- FR-1: Does a thing.");
     expect(fold?.lead).toBe("This stage was sent back: add auth. Address it and send the whole document again as a new draft.");
+  });
+});
+
+describe("isStageOpening", () => {
+  test("only the app's opening mail counts, never a person's or a specialist's", () => {
+    expect(isStageOpening({ author: "me", subject: "[opening:prj_1:4] GUI design" })).toBe(true);
+    expect(isStageOpening({ author: "me", subject: "[opening:prj_1:1] Problem discovery" })).toBe(false);
+    expect(isStageOpening({ author: "me", subject: "Re: the brief" })).toBe(false);
+    expect(isStageOpening({ author: "me" })).toBe(false);
+    expect(isStageOpening({ author: "agent", subject: "[opening:prj_1:4] GUI design" })).toBe(false);
   });
 });

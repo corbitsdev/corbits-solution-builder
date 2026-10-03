@@ -580,7 +580,7 @@ export function StageDocument({
                   : attached.length > 0
                   ? "What should change about this?"
                   : openQuestion
-                    ? "Message the specialist…"
+                    ? `Message the ${agentFor(node.stage as Stage).title.toLowerCase()}…`
                     : "What should change? Add as much as you like."
             }
             attachments={attached.map((entry, index) => ({
@@ -617,7 +617,7 @@ export function StageDocument({
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
-                v{node.version} · {documentName(node.kind)}
+                v{node.position ?? node.version} · {documentName(node.kind)}
                 {node.supersededByNodeId ? " · superseded" : ""}
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
@@ -626,7 +626,7 @@ export function StageDocument({
               ) : newer ? (
                 <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
                   <ArrowUp aria-hidden="true" />
-                  Version {newer.version} is ready
+                  Version {newer.position ?? newer.version} is ready
                 </button>
               ) : null}
               <div className="document-tools">
@@ -639,7 +639,7 @@ export function StageDocument({
                   >
                     {versions.map((version) => (
                       <option key={version.id} value={version.id}>
-                        Version {version.version}
+                        Version {version.position ?? version.version}
                         {version.supersededByNodeId ? " (superseded)" : ""}
                       </option>
                     ))}
@@ -648,7 +648,7 @@ export function StageDocument({
                 {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-                    <span>Changes since v{previous.version}</span>
+                    <span>Changes since v{previous.position ?? previous.version}</span>
                   </label>
                 ) : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}

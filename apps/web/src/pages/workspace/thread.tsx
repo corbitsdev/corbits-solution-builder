@@ -4,7 +4,7 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold } from "./composed-mail.ts";
+import { composedMailFold, isStageOpening } from "./composed-mail.ts";
 import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -149,6 +149,7 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  onAnswer,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -183,7 +184,10 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** Sends a tapped answer to the latest turn's question, as typing it would. */
+  onAnswer?: ((answer: string) => void) | undefined;
 }) {
+  const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -209,6 +213,17 @@ export function StageConversation({
     if (node === null || !pinnedRef.current) return;
     node.scrollTop = node.scrollHeight;
   }, [uiMessages]);
+  // The column shrinks when the busy strip opens at the window's foot; a
+  // thread read at its newest turn stays there instead of losing it below.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) node.scrollTop = node.scrollHeight;
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [uiMessages.length > 0]);
 
   return (
     <div className="stage-conversation">
@@ -248,10 +263,14 @@ export function StageConversation({
                 </div>
               );
             }
+            const source = byId.get(message.id);
+            // The opening is what the specialist is sent to start the stage;
+            // the person never said it, and the document strip already shows
+            // what it carried.
+            if (source && isStageOpening(source)) return null;
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
-            const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
@@ -272,11 +291,15 @@ export function StageConversation({
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
-                  ) : draft ? (
-                    <>
-                      <DraftReference draft={draft} onOpen={onOpenVersion} />
-                      {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
-                    </>
+                  ) : !you ? (
+                    <SpecialistTurn
+                      text={text}
+                      note={null}
+                      draft={draft}
+                      onOpenVersion={onOpenVersion ?? (() => undefined)}
+                      onAnswer={message.id === lastAgentId && !pending ? onAnswer : undefined}
+                      onDraft={onValueChange}
+                    />
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -450,6 +473,7 @@ export function SpecialistTurn({
                 ))}
               </div>
             ) : null}
+            {segment.options.length > 0 && onAnswer ? <p className="turn-option-hint">Or type your own answer below.</p> : null}
           </div>
         );
       })}
