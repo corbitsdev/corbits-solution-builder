@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { toArtifactNode } from "./project-view.ts";
+import { artifactNodesOf } from "./project-view.ts";
 
-function node(overrides: Partial<Parameters<typeof toArtifactNode>[0]> = {}) {
+const toArtifactNode = (graphNode: Parameters<typeof artifactNodesOf>[0][number]) => artifactNodesOf([graphNode])[0]!;
+
+function node(overrides: Partial<Parameters<typeof artifactNodesOf>[0][number]> = {}) {
   return {
     id: "art-1",
     versionId: "art-1@1",

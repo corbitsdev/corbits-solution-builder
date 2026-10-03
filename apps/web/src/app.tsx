@@ -21,7 +21,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
+import { Banner, Button, Mark, downloadArtifact, notify, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu } from "./pages/project-menu.jsx";
@@ -300,7 +300,7 @@ export function AppBar({
    *  four omitted where the chrome renders without a live project. */
   onProjectChanged?: () => void;
   onProjectDeleted?: () => void;
-  onNotice?: (message: string) => void;
+  onNotice?: (message: string, complete?: boolean) => void;
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
@@ -333,7 +333,7 @@ export function AppBar({
                 align="start"
                 trigger={
                   <button type="button" className="wordmark wordmark-menu" aria-label={`Options for ${detail.project.title}`}>
-                    {detail.project.title}
+                    <span className="wordmark-text">{detail.project.title}</span>
                     <ChevronDown aria-hidden="true" />
                   </button>
                 }
@@ -698,7 +698,7 @@ export function App() {
       });
       downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setExporting(false);
     }
@@ -806,15 +806,14 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={(message) => toast.success(message)}
-        onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
+        onNotice={notify}
+        onError={(cause) => toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
           setFocusArtifact({ stage, at: Date.now() });
         }}
       />
 
-      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -873,6 +872,8 @@ export function App() {
 
       <ZenGarden />
     </div>
+    {/* Outside the .app grid: its section would otherwise take the canvas's row. */}
+    <Toaster theme={resolvedMode} richColors closeButton />
     {printing ? <PrintView target={printing} /> : null}
     </>
   );

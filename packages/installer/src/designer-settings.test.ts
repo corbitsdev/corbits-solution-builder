@@ -58,7 +58,7 @@ describe("designer settings on the tenant config", () => {
 
   test("a value the type rejects is refused and nothing is written", async () => {
     const { row, transport, requests } = fakeTenant();
-    await expect(saveDesignerSettings(transport, "tnt_ws", { maxTokens: 1 })).rejects.toThrow("Designer settings");
+    await expect(saveDesignerSettings(transport, "tnt_ws", { surface: "neon" as "light" })).rejects.toThrow("Designer settings");
     expect(requests).toEqual(["GET /api/tenants/tnt_ws"]);
     expect(row.config).toBeUndefined();
   });
