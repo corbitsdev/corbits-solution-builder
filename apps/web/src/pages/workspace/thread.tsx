@@ -5,7 +5,7 @@ import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
 import { composedMailFold } from "./composed-mail.ts";
-import { splitRevision } from "@solutions-builder/app/stage-prompt";
+import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -56,7 +56,7 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
  * scripts and no same-origin since a generated design is untrusted.
  * Everything else is Markdown as before.
  */
-function MessageBody({ text }: { text: string }) {
+export function MessageBody({ text }: { text: string }) {
   if (isHtmlDocument(text)) {
     return (
       <details className="bubble-fold">
@@ -80,16 +80,17 @@ function MessageBody({ text }: { text: string }) {
       </>
     );
   }
-  // A revision turn carries the version it revises (#431); the chat shows
-  // the person's words and keeps the version behind a fold.
-  const revision = splitRevision(text);
-  if (revision) {
+  // A message the app composed around the person's words (the version it
+  // revises, an attached document, a choice reminder) shows only those
+  // words; what the app added stays behind a fold.
+  const composed = personWordsIn(text);
+  if (composed) {
     return (
       <>
-        <Markdown source={revision.ask} />
+        <Markdown source={composed.words} />
         <details className="bubble-fold">
-          <summary>The version this revises</summary>
-          <Markdown source={revision.document} />
+          <summary>{composed.added.startsWith(REVISION_LEAD) ? "The version this revises" : "What the app sent with this"}</summary>
+          <Markdown source={composed.added} />
         </details>
       </>
     );
