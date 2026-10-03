@@ -5,6 +5,8 @@
  * instance of that resource.
  */
 export const keys = {
+  /** The shell's one read: host status, providers, decisions, projects and the workspace tenant. */
+  home: ["home"] as const,
   me: ["me"] as const,
   memberships: ["memberships"] as const,
   tenant: {
@@ -22,6 +24,7 @@ export const keys = {
   approvals: {
     all: ["approvals"] as const,
     of: (tenantId: string) => ["approvals", tenantId] as const,
+    delivery: (tenantId: string, projectId: string) => ["approvals", tenantId, "delivery", projectId] as const,
   },
   workflowRef: {
     all: ["workflowRef"] as const,
@@ -39,15 +42,26 @@ export const keys = {
     all: ["projectView"] as const,
     of: (projectId: string) => ["projectView", projectId] as const,
   },
+  projectOpening: {
+    of: (projectId: string) => ["projectOpening", projectId] as const,
+  },
   projects: ["projects"] as const,
   decisions: ["decisions"] as const,
   thread: {
     all: ["thread"] as const,
+    in: (tenantId: string) => ["thread", tenantId] as const,
     of: (tenantId: string, addresses: readonly string[]) => ["thread", tenantId, [...addresses].sort()] as const,
   },
   stageAgent: {
     all: ["stageAgent"] as const,
     of: (projectId: string, stage: number) => ["stageAgent", projectId, stage] as const,
+    status: (projectId: string, stage: number) => ["stageAgent", projectId, stage, "status"] as const,
+    addresses: (projectId: string, stage: number, live: string) => ["stageAgent", projectId, stage, "addresses", live] as const,
+    run: (projectId: string, stage: number, live: string) => ["stageAgent", projectId, stage, "run", live] as const,
+  },
+  buildAttempts: {
+    of: (projectId: string) => ["buildAttempts", projectId] as const,
+    log: (projectId: string, attempt: number) => ["buildAttempts", projectId, attempt, "log"] as const,
   },
   activeModel: {
     all: ["activeModel"] as const,

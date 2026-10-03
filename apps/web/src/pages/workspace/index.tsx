@@ -25,9 +25,10 @@ import {
   ApiFailure,
   type ArtifactNode,
   type ProjectDetail,
-  type Provider,
   type StageTurn,
 } from "../../client.js";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
@@ -170,48 +171,27 @@ export function StageWorkspace({
   // `api.projectOpening` always has (the `source_material`/opening artifact
   // `createProject` wrote), never simulated. Null once read resolves with
   // nothing recorded; undefined while still loading.
-  const [openingStatement, setOpeningStatement] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    setOpeningStatement(undefined);
-    void api
-      .projectOpening(detail.project.id)
-      .then((result) => {
-        if (!cancelled) setOpeningStatement(result?.body ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setOpeningStatement(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id]);
+  const opening = useQuery({
+    queryKey: keys.projectOpening.of(detail.project.id),
+    queryFn: async () => (await api.projectOpening(detail.project.id))?.body ?? null,
+    staleTime: Infinity,
+  });
+  const openingStatement = opening.isPending ? undefined : (opening.data ?? null);
 
   // The opening screen's own current-stage draft content — read the same
   // way `ProductRequirements` reads a single node's content below, off the
   // artifact fold already on `detail.nodes` rather than the mail thread, so
   // it renders before the stage specialist (and its mailbox) exist at all.
   const [openingDraftNodeId, setOpeningDraftNodeId] = useState<string | null>(null);
-  const [openingDraftContent, setOpeningDraftContent] = useState<string | null>(null);
-  useEffect(() => {
-    if (!openingDraftNodeId) {
-      setOpeningDraftContent(null);
-      return;
-    }
-    let cancelled = false;
-    setOpeningDraftContent(null);
-    void api
-      .artifactContent(tenantId, openingDraftNodeId)
-      .then((result) => {
-        if (!cancelled) setOpeningDraftContent(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setOpeningDraftContent(UNREADABLE);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [openingDraftNodeId, tenantId]);
+  // An artifact id names a fixed version, so its content is never stale.
+  const openingDraftRead = useQuery({
+    queryKey: keys.artifact.of(tenantId, openingDraftNodeId ?? ""),
+    queryFn: async () => (await api.artifactContent(tenantId, openingDraftNodeId!)).content,
+    enabled: openingDraftNodeId !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const openingDraftContent = openingDraftNodeId === null ? null : openingDraftRead.isError ? UNREADABLE : (openingDraftRead.data ?? null);
 
   const workflow = useWorkflowView(detail.project.id, onChanged);
   const workflowView = workflow.view;
@@ -493,32 +473,22 @@ export function StageWorkspace({
   // the live deployment's pinned source, `resolveActiveModel`) — refetched
   // whenever the live address moves, since that's exactly when a new pin
   // has landed, whether from an explicit switch or any other redeploy.
-  const [activeModel, setActiveModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void api.activeModel(detail.project.id, stage).then((model) => {
-      if (!cancelled) setActiveModel(model);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage, agentAddress]);
+  const queryClient = useQueryClient();
+  const activeModel =
+    useQuery({
+      queryKey: [...keys.activeModel.of(detail.project.id, stage), agentAddress],
+      queryFn: () => api.activeModel(detail.project.id, stage),
+    }).data ?? null;
 
   // The Inference picker: Settings' provider-and-model rows, in Settings'
   // order (`inference-options.ts`). Fetched once the specialist exists and
   // again after a pick, since a pick reorders those rows.
-  const [inferenceProviders, setInferenceProviders] = useState<Provider[] | null>(null);
-  const [inferenceNonce, setInferenceNonce] = useState(0);
-  useEffect(() => {
-    if (!agentAddress) return;
-    let cancelled = false;
-    void api.providers().then((result) => {
-      if (!cancelled) setInferenceProviders(result.providers);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [agentAddress, inferenceNonce]);
+  const inferenceProviders =
+    useQuery({
+      queryKey: keys.providers,
+      queryFn: async () => (await api.providers()).providers,
+      enabled: agentAddress !== null,
+    }).data ?? null;
   const inferenceChoices = inferenceOptions(inferenceProviders ?? []);
   const runningInference = currentInference(activeModel, inferenceChoices);
 
@@ -528,8 +498,8 @@ export function StageWorkspace({
   const pickInference = async (option: InferenceOption) => {
     if (!inferenceProviders) return;
     await api.reorderProviders(orderLeadingWith(inferenceProviders, option.providerRowId));
-    setInferenceNonce((nonce) => nonce + 1);
-    setWorkspaceDefaultModel({ providerLabel: option.providerLabel, canonicalName: option.model });
+    void queryClient.invalidateQueries({ queryKey: keys.providers });
+    queryClient.setQueryData(keys.activeModel.of(), { providerLabel: option.providerLabel, canonicalName: option.model });
     await modelSwitch.switchTo(option.offeringId);
   };
 
@@ -542,16 +512,7 @@ export function StageWorkspace({
   // what "the default" means. Dismissing records the default's OWN name
   // (`model-nudge-store.ts`), so a later default change asks again rather
   // than staying quiet forever.
-  const [workspaceDefaultModel, setWorkspaceDefaultModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void api.activeModel().then((model) => {
-      if (!cancelled) setWorkspaceDefaultModel(model);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id]);
+  const workspaceDefaultModel = useQuery({ queryKey: keys.activeModel.of(), queryFn: () => api.activeModel() }).data ?? null;
   const [nudgeDismissedFor, setNudgeDismissedFor] = useState<string | null>(null);
   useEffect(() => {
     setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));

@@ -30,6 +30,8 @@ Nothing outside `keys.ts` writes a key literal.
   `adoption-replay.ts`, `use-workflow-view.ts`'s stage-0 wait,
   `audiences.tsx`'s reply wait). They are request round-trips, not cached
   reads, and belong in the call that made the write.
+- The advisory watchers (`use-advisory.ts`): a send, a reply deadline and
+  a failure budget, not a cached read.
 - Pure UI clocks (`build.tsx`'s elapsed and timeout ticks).
 - Binary caches (`deck-images.ts`).
 - The SSE streams themselves.

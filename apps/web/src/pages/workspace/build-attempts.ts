@@ -13,8 +13,10 @@
  * Everything here is pure or a thin poll; nothing infers progress from the
  * worker's output. The verdict on a build stays a person's.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -182,36 +184,19 @@ export function useBuildAttempts(projectId: string, enabled: boolean): {
   error: string | null;
   refresh: () => Promise<void>;
 } {
-  const [attempts, setAttempts] = useState<BuildAttempt[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const query = useQuery({
+    queryKey: keys.buildAttempts.of(projectId),
+    queryFn: async () => (await api.buildAttempts(projectId)).attempts,
+    enabled,
+    refetchInterval: (current) =>
+      current.state.data?.some((entry) => entry.state === "running" || entry.state === "detached") ? 2_000 : 10_000,
+  });
+  const { refetch } = query;
   const refresh = useCallback(async () => {
-    if (!enabled) return;
-    try {
-      const result = await api.buildAttempts(projectId);
-      setAttempts(result.attempts);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoaded(true);
-    }
-  }, [projectId, enabled]);
-
-  useEffect(() => {
-    setAttempts([]);
-    setLoaded(false);
-    if (!enabled) return;
-    void refresh();
-  }, [enabled, refresh]);
-
-  const running = attempts.some((entry) => entry.state === "running" || entry.state === "detached");
-  useEffect(() => {
-    if (!enabled) return;
-    const timer = setInterval(() => void refresh(), running ? 2_000 : 10_000);
-    return () => clearInterval(timer);
-  }, [enabled, running, refresh]);
-
-  return { attempts, loaded, error, refresh };
+    if (enabled) await refetch();
+  }, [enabled, refetch]);
+  const error = query.error ? (query.error instanceof Error ? query.error.message : String(query.error)) : null;
+  return { attempts: (enabled && query.data) || NO_ATTEMPTS, loaded: enabled && query.isFetchedAfterMount, error, refresh };
 }
+
+const NO_ATTEMPTS: BuildAttempt[] = [];
