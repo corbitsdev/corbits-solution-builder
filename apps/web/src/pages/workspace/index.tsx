@@ -671,6 +671,7 @@ export function StageWorkspace({
     return (
       <OpeningScreen
         resuming={resuming}
+        ended={!!workflowView?.done}
         stage={openingStage}
         who={openingWho}
         opening={openingStatement}
@@ -877,6 +878,7 @@ export function StageWorkspace({
       {!agentAddress && !agent.error ? (
         <OpeningScreen
           resuming={resuming}
+          ended={!!workflowView?.done}
           stage={openingStage}
           who={openingWho}
           opening={openingStatement}

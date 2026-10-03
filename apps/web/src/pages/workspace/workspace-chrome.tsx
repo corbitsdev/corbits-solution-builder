@@ -259,12 +259,15 @@ function capitalize(word: string): string {
  *  rather than a fake state until its read resolves. */
 export function OpeningScreen({
   resuming = false,
+  ended = false,
   stage,
   who,
   opening,
   draft,
 }: {
   resuming?: boolean;
+  /** A finished project: no specialist is coming and nothing can be sent. */
+  ended?: boolean;
   stage: number;
   /** The specialist's name, lowercased, for the reconnect line — e.g.
    *  "brainstormer". */
@@ -296,23 +299,27 @@ export function OpeningScreen({
                   </div>
                 </div>
               ) : null}
-              <div className="think" role="status">
-                <span className="who conv-who">{specialist}</span>
-                <span className="thinking">
-                  {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
-                </span>
+              {ended ? null : (
+                <div className="think" role="status">
+                  <span className="who conv-who">{specialist}</span>
+                  <span className="thinking">
+                    {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
+                  </span>
+                </div>
+              )}
+            </div>
+            {ended ? null : (
+              <div className="composer" aria-hidden="true">
+                <ChatInput
+                  className={COMPOSER_BOX_CLASS}
+                  value=""
+                  onValueChange={() => {}}
+                  onSend={() => {}}
+                  disabled
+                  placeholder={`Message the ${who}…`}
+                />
               </div>
-            </div>
-            <div className="composer" aria-hidden="true">
-              <ChatInput
-                className={COMPOSER_BOX_CLASS}
-                value=""
-                onValueChange={() => {}}
-                onSend={() => {}}
-                disabled
-                placeholder={`Message the ${who}…`}
-              />
-            </div>
+            )}
           </div>
         }
       >
