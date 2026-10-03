@@ -34,11 +34,6 @@ A build status with these headings, after \`## In short\`:
   block; the Deliver stage reads them from here.
 - \`## Evidence collected\`
 - \`## Required checks and their status\`
-- \`## What I need from you\`: only what a person can answer: whether to
-  review this attempt or run another, or the result of a check the plan leaves
-  to a person. For that, say in one line what to run and what to look for,
-  then ask what they saw, with \`- Option:\` lines. If nothing is needed,
-  write "Nothing — review the archive when you are ready."
 - \`## Cost against forecast\`
 
 ## Rules
