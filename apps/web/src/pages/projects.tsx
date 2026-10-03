@@ -22,7 +22,7 @@ import { readImportPayload } from "../project-import.js";
 import { displayTurn } from "../project-list.js";
 import { keys } from "../queries/keys.ts";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
-import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
+import { plural, ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
 import "./home-layout.css";
 import {
@@ -35,10 +35,6 @@ import {
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
-
-function plural(count: number, noun: string): string {
-  return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
-}
 
 /** Card foot's right side, non-archived case: an absolute date, never a fake relative time. */
 function startedLabel(createdAt: string): string {

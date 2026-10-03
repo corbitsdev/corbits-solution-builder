@@ -1,17 +1,21 @@
 /**
- * Importing a project bundle `project-export.ts`'s `assembleBundle` wrote
- * (CL-8725). The bundle's process history is never replayed: every artifact
- * and conversation is recreated fresh under a NEW project id, and that
- * project's own workflow starts at stage 1 like any other new project.
- * Approvals are for the person to make again.
+ * Importing a project `project-export.ts` exported (CL-8725) as a NEW
+ * project. Every bundled artifact is recreated with all its versions
+ * written in order, oldest artifact first, so version numbers match the
+ * source and build archives from earlier attempts come along. The approvals
+ * the workflow had recorded are folded into an adoption plan
+ * (`adoption-replay.ts` lands it once the new project's workflow runs).
  *
  * Mail history cannot be recreated (there is no mailbox to write into before
  * a stage specialist deploys), so each bundled conversation becomes one
  * read-only text artifact instead, `sb.kind: "imported_conversation"`.
  */
 import JSZip from "jszip";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
+import { LAST_ADOPTED_STAGE, type AdoptedReference, type AdoptionPlan, type AdoptionStep, type AudienceVote } from "@solutions-builder/app/legacy-adoption";
+import { toBase64 } from "./base64.ts";
 import { stageName } from "./components.jsx";
-import type { ProjectBundle } from "./project-export.ts";
+import { ARCHIVE_STATE_FILE, type ExportedWorkflow, type ProjectBundle } from "./project-export.ts";
 
 export const IMPORTED_CONVERSATION_KIND = "imported_conversation";
 
@@ -21,8 +25,18 @@ export type ImportWrite = {
   readonly sb: Record<string, unknown>;
 };
 
+/** One bundled artifact to write: its id there, the one it superseded, and its versions in order. */
+export type ArtifactImport = {
+  readonly from: string;
+  readonly supersedes: string | null;
+  readonly versions: readonly ImportWrite[];
+};
+
+/** Where each bundled version (`versionIdFor`) was written here. */
+export type ImportedVersions = ReadonlyMap<string, { readonly artifactId: string; readonly version: number }>;
+
 export type ImportPlan = {
-  readonly artifacts: readonly ImportWrite[];
+  readonly artifacts: readonly ArtifactImport[];
   readonly conversations: readonly ImportWrite[];
 };
 
@@ -40,26 +54,38 @@ export function transcript(messages: ProjectBundle["conversations"][number]["mes
 
 /**
  * The pure write plan for one bundle under a freshly created project id: no
- * network, nothing minted here. Every artifact becomes its own fresh
- * version-1 write -- `sourceVersionIds` reset to none -- with
- * `kind`/`stage`/`variant`/`mediaType`/`provenance` carried over from the
- * bundled node, re-keyed to `newProjectId`. Content, including a `data:` URL
- * for a binary original, is kept exactly as bundled.
+ * network, nothing minted here. Artifacts come oldest first, so the one an
+ * artifact supersedes is written before it; each version carries
+ * `kind`/`stage`/`variant`/`mediaType`/`provenance` from the bundled node,
+ * re-keyed to `newProjectId`, with `sourceVersionIds` reset to none.
+ * Content, including a `data:` URL for a binary original, is kept exactly.
  */
 export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportPlan {
-  const artifacts: ImportWrite[] = bundle.artifacts.map(({ node, content }) => ({
-    title: node.title,
-    content,
-    sb: {
-      projectId: newProjectId,
-      kind: node.kind,
-      stage: node.stage,
-      variant: node.variant,
-      sourceVersionIds: [],
-      provenance: { ...node.provenance },
-      ...(node.mediaType !== undefined ? { mediaType: node.mediaType } : {}),
-    },
-  }));
+  const supersedes = new Map<string, string>();
+  for (const { node } of bundle.artifacts) {
+    if (node.supersededByNodeId) supersedes.set(node.supersededByNodeId, node.id);
+  }
+  const artifacts = [...bundle.artifacts]
+    .sort((a, b) => Date.parse(a.node.createdAt) - Date.parse(b.node.createdAt))
+    .map(({ node, versions }): ArtifactImport => ({
+      from: node.id,
+      supersedes: supersedes.get(node.id) ?? null,
+      versions: [...versions]
+        .sort((a, b) => a.version - b.version)
+        .map(({ content }) => ({
+          title: node.title,
+          content,
+          sb: {
+            projectId: newProjectId,
+            kind: node.kind,
+            stage: node.stage,
+            variant: node.variant,
+            sourceVersionIds: [],
+            provenance: { ...node.provenance },
+            ...(node.mediaType !== undefined ? { mediaType: node.mediaType } : {}),
+          },
+        })),
+    }));
 
   return { artifacts, conversations: bundle.conversations.map((conversation) => conversationWrite(conversation, newProjectId)) };
 }
@@ -81,35 +107,121 @@ export function conversationWrite({ stage, messages }: ProjectBundle["conversati
   };
 }
 
+/**
+ * The approvals the exported workflow recorded, as a replay on the new
+ * project: each stage's approved review re-pointed at the version written
+ * here, so the digest is unchanged. Stage 5 carries its policy, votes and
+ * packages; stage 6 its requirement items. It stops where the record does,
+ * and at `LAST_ADOPTED_STAGE`, as the legacy import's replay does.
+ */
+export function workflowAdoptionPlan(workflow: ExportedWorkflow | null, newProjectId: string, ids: ImportedVersions): AdoptionPlan {
+  const plan = { projectId: newProjectId, legacyStage: workflow?.stage ?? 1, legacyDone: workflow?.done ?? false };
+  if (!workflow) return { ...plan, steps: [], notes: [] };
+  const notes: string[] = [];
+  const steps: AdoptionStep[] = [];
+  const repoint = (ref: AdoptedReference): AdoptedReference | null => {
+    const written = ids.get(versionIdFor(ref.artifactId, ref.version));
+    return written ? { ...written, sha256: ref.sha256 } : null;
+  };
+  const reached = workflow.done ? Infinity : workflow.stage;
+  if (reached > LAST_ADOPTED_STAGE + 1) {
+    notes.push(`Approvals are replayed no further than ${stageName(LAST_ADOPTED_STAGE)}; ${stageName(LAST_ADOPTED_STAGE + 1)} and later are yours to approve again here.`);
+  }
+  for (let stage = 1; stage < Math.min(reached, LAST_ADOPTED_STAGE + 1); stage += 1) {
+    const review = workflow.reviews[stage as keyof ExportedWorkflow["reviews"]];
+    if (review?.status !== "approved") break;
+    const ref = repoint(review);
+    if (!ref) {
+      notes.push(`${stageName(stage)}'s approval names an artifact the export does not carry; replay stops before it.`);
+      break;
+    }
+    if (stage === 5) {
+      const packages: Record<string, AdoptedReference> = {};
+      const votes: Record<string, AudienceVote> = {};
+      for (const [audience, vote] of Object.entries(workflow.audienceDecisions)) {
+        const reviewed = workflow.audiencePackages[audience] ? repoint(workflow.audiencePackages[audience]) : null;
+        if (!reviewed) {
+          notes.push(`${audience}'s vote names no package the export carries, so it is not replayed; they decide again here.`);
+          continue;
+        }
+        packages[audience] = reviewed;
+        votes[audience] = { decision: vote.decision, note: vote.note };
+      }
+      steps.push({ stage, ref, ...(workflow.audiencePolicy ? { policy: workflow.audiencePolicy } : {}), votes, packages });
+      continue;
+    }
+    if (stage === 6) {
+      steps.push({ stage, ref, requirementItems: workflow.requirements.map(({ kind, text }) => ({ kind, text })) });
+      continue;
+    }
+    steps.push({ stage, ref });
+  }
+  return { ...plan, steps, notes };
+}
+
 export type ImportDeps = {
   readonly createProject: (input: { title: string; policy: unknown }) => Promise<{ projectId: string }>;
-  readonly createArtifact: (write: ImportWrite) => Promise<{ id: string }>;
-  /** Called after each write, `done` counting both artifacts and conversations together. */
+  /** Creates an artifact at version 1. */
+  readonly createArtifact: (write: ImportWrite) => Promise<{ id: string; version: number }>;
+  /** Writes the next version of an artifact, returning the number the store gave it. */
+  readonly reviseArtifact: (artifactId: string, write: ImportWrite) => Promise<{ version: number }>;
+  /** Called after each write, `done` counting versions and conversations together. */
   readonly onProgress?: (done: number, total: number) => void;
 };
 
 export type ImportResult = {
   readonly projectId: string;
   readonly artifacts: number;
+  readonly versions: number;
   readonly conversations: number;
+  /** The approvals to replay once the new project's workflow runs. */
+  readonly plan: AdoptionPlan;
 };
 
 /**
- * Creates the new project, then writes `importPlan`'s artifacts and
+ * Creates the new project, then writes `importPlan`'s versions and
  * conversations into it one at a time -- an artifact-store write has no
- * batch form here, the same as `attachMaterial`.
+ * batch form here, the same as `attachMaterial`. A store that numbers a
+ * version other than the source did is an error, not a silent mismatch:
+ * the replayed approvals name those numbers.
  */
 export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Promise<ImportResult> {
   const { projectId } = await deps.createProject({ title: importedProjectTitle(bundle), policy: bundle.project.policy });
   const plan = importPlan(bundle, projectId);
-  const writes = [...plan.artifacts, ...plan.conversations];
+  const versions = plan.artifacts.reduce((total, artifact) => total + artifact.versions.length, 0);
+  const total = versions + plan.conversations.length;
+  const artifactIds = new Map<string, string>();
+  const ids = new Map<string, { artifactId: string; version: number }>();
   let done = 0;
-  for (const write of writes) {
-    await deps.createArtifact(write);
+  const step = () => {
     done += 1;
-    deps.onProgress?.(done, writes.length);
+    deps.onProgress?.(done, total);
+  };
+  for (const artifact of plan.artifacts) {
+    const superseded = artifact.supersedes ? artifactIds.get(artifact.supersedes) : undefined;
+    let id: string | undefined;
+    for (const [index, write] of artifact.versions.entries()) {
+      const sb = superseded ? { ...write.sb, supersedes: superseded } : write.sb;
+      let version: number;
+      if (id) ({ version } = await deps.reviseArtifact(id, { ...write, sb }));
+      else ({ id, version } = await deps.createArtifact({ ...write, sb }));
+      if (version !== index + 1) throw new Error(`the artifact store numbered "${write.title}" version ${String(index + 1)} as ${String(version)}`);
+      ids.set(versionIdFor(artifact.from, version), { artifactId: id, version });
+      step();
+    }
+    if (id) artifactIds.set(artifact.from, id);
   }
-  return { projectId, artifacts: plan.artifacts.length, conversations: plan.conversations.length };
+  for (const write of plan.conversations) {
+    await deps.createArtifact(write);
+    step();
+  }
+  return {
+    projectId,
+    artifacts: plan.artifacts.length,
+    versions,
+    conversations: plan.conversations.length,
+    plan: workflowAdoptionPlan(bundle.workflow, projectId, ids),
+  };
 }
 
 function looksLikeZip(file: File): boolean {
@@ -125,12 +237,42 @@ function isJsonEntry(path: string): boolean {
 }
 
 /**
- * The JSON object inside a zip export: exactly one `.json` file, which is
- * the same `assembleBundle` payload a `.json` download carries. Other files
- * (a README, say) are ignored; more than one JSON is an error, not a guess.
+ * The bundle an export zip carries, its versions' content read back from
+ * the files `project.json` names: a `data:` URL rebuilt from the bytes for a
+ * binary original, the text as written for everything else.
+ */
+async function bundleFromArchive(zip: JSZip, sourceName: string): Promise<unknown> {
+  const state: unknown = JSON.parse(await zip.file(ARCHIVE_STATE_FILE)!.async("string"));
+  const artifacts = (state as { artifacts?: unknown }).artifacts;
+  if (!Array.isArray(artifacts)) return state;
+  const read = async (entry: { path?: unknown; dataUrlHeader?: unknown }): Promise<string | undefined> => {
+    if (typeof entry.path !== "string") return undefined;
+    const file = zip.file(entry.path);
+    if (!file) throw new Error(`${sourceName} is missing ${entry.path}, which its ${ARCHIVE_STATE_FILE} names.`);
+    return typeof entry.dataUrlHeader === "string" ? entry.dataUrlHeader + toBase64(await file.async("uint8array")) : file.async("string");
+  };
+  return {
+    ...(state as object),
+    artifacts: await Promise.all(
+      artifacts.map(async (artifact: { versions?: unknown }) => ({
+        ...artifact,
+        versions: Array.isArray(artifact.versions)
+          ? await Promise.all(artifact.versions.map(async (entry: Record<string, unknown>) => ({ ...entry, content: await read(entry) })))
+          : artifact.versions,
+      })),
+    ),
+  };
+}
+
+/**
+ * The JSON object inside a zip: an export's `project.json` with its files,
+ * else exactly one `.json` file, the JSON bundle an older export zipped up.
+ * Other files (a README, say) are ignored; more than one JSON is an error,
+ * not a guess.
  */
 export async function jsonFromZip(bytes: Uint8Array, sourceName: string): Promise<unknown> {
   const zip = await JSZip.loadAsync(bytes);
+  if (zip.file(ARCHIVE_STATE_FILE)) return bundleFromArchive(zip, sourceName);
   const jsonFiles = Object.values(zip.files).filter((entry) => !entry.dir && isJsonEntry(entry.name));
   if (jsonFiles.length === 0) {
     throw new Error(`${sourceName} has no JSON bundle inside.`);
@@ -142,9 +284,8 @@ export async function jsonFromZip(bytes: Uint8Array, sourceName: string): Promis
 }
 
 /**
- * Reads a Home import file as the unknown payload `api.importProject` /
- * `parseBundle` already accept. A `.zip` is unpacked in the browser; a
- * `.json` is parsed as text. The bundle format itself is unchanged.
+ * Reads a Home import file as the unknown payload `api.importProject`
+ * accepts. A `.zip` is unpacked in the browser; a `.json` is parsed as text.
  */
 export async function readImportPayload(file: File): Promise<unknown> {
   if (looksLikeZip(file)) {
@@ -152,4 +293,3 @@ export async function readImportPayload(file: File): Promise<unknown> {
   }
   return JSON.parse(await file.text());
 }
-

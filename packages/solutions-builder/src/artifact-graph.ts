@@ -132,6 +132,13 @@ export function versionIdFor(artifactId: string, version: number): string {
   return `${artifactId}@${version}`;
 }
 
+/** The artifact and version a `versionIdFor` id names, or null for a plain artifact id. */
+export function parseVersionId(id: string): { artifactId: string; version: number } | null {
+  const at = id.lastIndexOf("@");
+  const version = Number(id.slice(at + 1));
+  return at > 0 && Number.isInteger(version) && version > 0 ? { artifactId: id.slice(0, at), version } : null;
+}
+
 function artifactIdFromVersionId(versionId: string): string {
   return versionId.slice(0, versionId.lastIndexOf("@"));
 }
