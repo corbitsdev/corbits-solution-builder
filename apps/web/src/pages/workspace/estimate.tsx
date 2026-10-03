@@ -60,9 +60,9 @@ export function EstimateView({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Label</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Basis</TableHead>
+              <TableHead>Cost line</TableHead>
+              <TableHead>Estimate</TableHead>
+              <TableHead>How it is worked out</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -79,6 +79,11 @@ export function EstimateView({
             ))}
           </TableBody>
         </Table>
+      ) : null}
+      {costRows.length > 0 ? (
+        <p className="inline-note">
+          Approximate. A line given in tokens has no money figure because no price per token was given.
+        </p>
       ) : null}
       {scopeItems.length > 0 ? (
         <ul className="scope-checklist">
