@@ -61,4 +61,10 @@ describe("the stakeholder editor's control", () => {
     expect(source).toContain("Manage stakeholders");
     expect(source).not.toMatch(/>\s*Edit\s*</);
   });
+
+  // #678: a disclosure, in place whether the panel is open or closed, that toggles it.
+  test("is a disclosure that opens and closes the panel", () => {
+    expect(source).toMatch(/<button type="button" className="disclosure" aria-expanded=\{editing\} aria-controls="stakeholder-panel" onClick=\{\(\) => setEditing\(!editing\)\}>/);
+    expect(source).toContain('<div className="stakeholder-editor" id="stakeholder-panel">');
+  });
 });
