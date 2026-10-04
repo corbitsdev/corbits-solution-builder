@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import type { ChatMessage } from "../../stage-mail.ts";
 import { zonedTime } from "./delivery-opening.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
@@ -214,4 +215,137 @@ export function useBuildAttempts(projectId: string, enabled: boolean): {
   }, [enabled, running, refresh]);
 
   return { attempts, loaded, error, refresh };
+}
+
+/** The first line of a progress brief, by which later polls recognise the ones already sent. */
+const PROGRESS_BRIEF_LEAD = "Build attempt";
+const PROGRESS_BRIEF_MARK = "is still running";
+
+/** How much of the worker's log the supervisor is shown in a progress brief. */
+const PROGRESS_LOG_KEEP = 6_000;
+
+/** How often, while the worker runs, the supervisor is briefed on its progress (#695). */
+export const PROGRESS_BRIEF_INTERVAL_MS = 10 * 60_000;
+/** The first brief waits for the worker to have reported something. */
+export const FIRST_PROGRESS_BRIEF_AFTER_MS = 2 * 60_000;
+
+/**
+ * The latest turn the worker has reported, read off its own `── turn N`
+ * lines in the log; null before the first. The number is the worker's, not
+ * an inference: the line is written from its hook's report.
+ */
+export function latestTurn(log: string): number | null {
+  let last: number | null = null;
+  for (const match of log.matchAll(/^── turn (\d+) · /gm)) last = Number(match[1]);
+  return last;
+}
+
+/** The tool calls the worker has reported so far, summed over its turn lines. */
+export function toolCallsSoFar(log: string): number {
+  let total = 0;
+  for (const match of log.matchAll(/^── turn \d+ · (\d+) tool call/gm)) total += Number(match[1]);
+  return total;
+}
+
+/**
+ * The brief the supervisor is mailed while an attempt runs (#695): how
+ * long the worker has been at it, what it has reported so far, and the last
+ * stretch of its own turn lines. Said as it is, with what is not yet known
+ * said as not known, so the interim status rests on the record.
+ */
+export function composeProgressBrief(input: {
+  readonly attempt: number;
+  readonly startedAt: string;
+  readonly now: string;
+  readonly log: string;
+  readonly worker?: string | null;
+}): string {
+  const turn = latestTurn(input.log);
+  const minutes = Math.max(0, Math.round((Date.parse(input.now) - Date.parse(input.startedAt)) / 60_000));
+  const tail = input.log.length > PROGRESS_LOG_KEEP ? `…${input.log.slice(-PROGRESS_LOG_KEEP)}` : input.log;
+  return [
+    `${PROGRESS_BRIEF_LEAD} ${String(input.attempt)} ${PROGRESS_BRIEF_MARK}; write an interim build status from this record, as of turn ${turn === null ? "none yet" : String(turn)} at ${zonedTime(input.now)}.`,
+    ``,
+    `## What the worker has reported so far`,
+    `- Worker: ${input.worker ?? "the coding agent"}, running since ${zonedTime(input.startedAt)} (${String(minutes)} minute${minutes === 1 ? "" : "s"}).`,
+    `- ${turn === null ? "No turn has been reported yet." : `${String(turn)} turn${turn === 1 ? "" : "s"} and ${String(toolCallsSoFar(input.log))} tool call${toolCallsSoFar(input.log) === 1 ? "" : "s"} reported through its hook.`}`,
+    `- The attempt has not ended: there is no exit status, no final text, and no archive. Nothing is recorded or passed yet.`,
+    `- The interface gives these turn lines, a final text and an exit status when it ends, and nothing else: no session, steering or checkpoint exists.`,
+    ``,
+    `### The worker's last turn lines`,
+    tail.trim().length > 0 ? tail.trim() : "(nothing yet)",
+    ``,
+    `## How to write it`,
+    `This status is interim. Open "In short" with the turn and time it is as of, and that the worker is still running. Under "What the worker reported", say only what the turn lines show the worker doing; a task it names is a task it is working on, not one that is done. Under "Evidence collected", say none is recorded until the attempt ends. Every required check is still unknown. Keep the headings as usual.`,
+  ].join("\n");
+}
+
+/** Whether a message is a progress brief for `attempt`, and which turn it was as of. */
+export function progressBriefOf(message: Pick<ChatMessage, "author" | "body">, attempt: number): { turn: number | null } | null {
+  if (message.author !== "me") return null;
+  const lead = `${PROGRESS_BRIEF_LEAD} ${String(attempt)} ${PROGRESS_BRIEF_MARK};`;
+  if (!message.body.startsWith(lead)) return null;
+  const match = /as of turn (\d+|none yet) at /.exec(message.body.split("\n")[0] ?? "");
+  return { turn: match && match[1] !== "none yet" ? Number(match[1]) : null };
+}
+
+/**
+ * Whether it is time to brief the supervisor on a running attempt (#695).
+ * The thread is the memory: the last brief for this attempt, and whether it
+ * was answered, are read from it, so a reload never briefs twice. The first
+ * brief waits for the worker's first turn; a later one waits the interval,
+ * for the worker to have reported a further turn, and for the supervisor's
+ * answer to the last one (or twice the interval, if none came).
+ */
+export function progressBriefDue(input: {
+  readonly messages: readonly Pick<ChatMessage, "author" | "body" | "at">[];
+  readonly attempt: number;
+  readonly startedAt: string;
+  readonly turn: number | null;
+  readonly now: string;
+  readonly intervalMs?: number;
+}): boolean {
+  const interval = input.intervalMs ?? PROGRESS_BRIEF_INTERVAL_MS;
+  const now = Date.parse(input.now);
+  if (input.turn === null) return false;
+  let lastIndex = -1;
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    if (progressBriefOf(input.messages[index]!, input.attempt)) {
+      lastIndex = index;
+      break;
+    }
+  }
+  if (lastIndex < 0) return now - Date.parse(input.startedAt) >= FIRST_PROGRESS_BRIEF_AFTER_MS;
+  const last = input.messages[lastIndex]!;
+  const since = now - Date.parse(last.at);
+  if (since < interval) return false;
+  const lastTurn = progressBriefOf(last, input.attempt)?.turn ?? null;
+  if (lastTurn !== null && input.turn <= lastTurn) return false;
+  const answered = input.messages.slice(lastIndex + 1).some((message) => message.author === "agent");
+  return answered || since >= interval * 2;
+}
+
+/**
+ * How fresh the status in view is, against the attempt in view (#695):
+ * interim as of a turn, written on an attempt's record, or written before
+ * the attempt started. The status is the supervisor's latest reply; what
+ * it answers is the "me" message before it.
+ */
+export function statusFreshness(
+  messages: readonly Pick<ChatMessage, "id" | "author" | "body" | "at">[],
+  status: Pick<ChatMessage, "id" | "at">,
+  attempt: Pick<BuildAttempt, "attempt" | "startedAt" | "state"> | null,
+): string | null {
+  const index = messages.findIndex((message) => message.id === status.id);
+  const asked = index > 0 ? [...messages.slice(0, index)].reverse().find((message) => message.author === "me") : undefined;
+  if (asked) {
+    const brief = attempt ? progressBriefOf(asked, attempt.attempt) : null;
+    if (brief) return `interim, as of turn ${brief.turn === null ? "none" : String(brief.turn)} · ${zonedTime(status.at)}`;
+    const recorded = /^Build attempt (\d+) has ended/.exec(asked.body);
+    if (recorded) return `on attempt ${recorded[1]}'s record · ${zonedTime(status.at)}`;
+  }
+  if (attempt?.startedAt && Date.parse(status.at) < Date.parse(attempt.startedAt)) {
+    return `written before attempt ${String(attempt.attempt)} started · ${zonedTime(status.at)}`;
+  }
+  return zonedTime(status.at);
 }
