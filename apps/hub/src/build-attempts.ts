@@ -31,7 +31,7 @@
  * name the attempt the same way.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
 
@@ -93,7 +93,15 @@ export type BuildPromptInput = {
   /** A hash or version naming the approved plan, so the packet names what it was built from. */
   readonly planRef: string;
   readonly continuing: boolean;
+  /** Files written into the workspace before the worker starts (#686): AGENTS.md, the documents, QUESTIONS.md. */
+  readonly files?: readonly { readonly path: string; readonly content: string }[];
 };
+
+/** A workspace-relative file path a seeded file may take: no absolute paths, no `..`, no hidden traversal. */
+export function safeWorkspacePath(path: string): boolean {
+  if (path.length === 0 || path.length > 200 || path.startsWith("/") || path.includes("\\")) return false;
+  return path.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
+}
 
 /**
  * The prompt the worker is handed: the plan says what to do, the
@@ -103,8 +111,12 @@ export type BuildPromptInput = {
  * attempt ran against is immutable and readable afterwards.
  */
 export function assembleBuildPrompt(input: BuildPromptInput): string {
+  const seeded = (input.files ?? []).map((file) => file.path);
   return [
     `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
+    ...(seeded.length > 0
+      ? [``, `The documents are also in the current directory as files: ${seeded.join(", ")}. Read AGENTS.md first; it says which document wins where they disagree, and which acceptance criteria mean done.`]
+      : []),
     ...(input.continuing
       ? [
           ``,
@@ -335,6 +347,14 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   await mkdir(workspace, { recursive: true });
 
   const prompt = assembleBuildPrompt({ ...args.prompt, continuing: continueFrom !== null });
+  // The corpus as files (#ISSUE), written before the worker starts; a path
+  // that could leave the workspace is refused rather than written.
+  for (const file of args.prompt.files ?? []) {
+    if (!safeWorkspacePath(file.path)) throw new HostError("validation_failed", `A seeded file has an unsafe path: ${file.path}`);
+    const target = join(workspace, file.path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, file.content);
+  }
   const startedAt = new Date().toISOString();
   await writeFile(attemptFile(projectId, attempt, ".prompt.txt"), prompt);
   const startedFile = attemptFile(projectId, attempt, ".started.json");

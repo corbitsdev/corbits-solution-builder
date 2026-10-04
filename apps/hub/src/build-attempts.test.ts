@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assembleBuildPrompt, nextAttemptNumber } from "./build-attempts.js";
+import { safeWorkspacePath } from "./build-attempts.js";
 import { CONTINUE_EXCLUDES } from "./corbits-exec.js";
 
 describe("nextAttemptNumber", () => {
@@ -70,5 +71,22 @@ describe("a continued attempt's copy", () => {
     }
     expect(CONTINUE_EXCLUDES.has(".git")).toBe(false);
     expect(CONTINUE_EXCLUDES.has("src")).toBe(false);
+  });
+});
+
+// #686: seeded files stay inside the workspace, and the prompt names them.
+describe("seeded workspace files", () => {
+  test("a relative path is fine; absolute, parent-walking or empty paths are refused", () => {
+    expect(safeWorkspacePath("AGENTS.md")).toBe(true);
+    expect(safeWorkspacePath("docs/design.html")).toBe(true);
+    expect(safeWorkspacePath("/etc/passwd")).toBe(false);
+    expect(safeWorkspacePath("../outside.md")).toBe(false);
+    expect(safeWorkspacePath("a/../../b")).toBe(false);
+    expect(safeWorkspacePath("")).toBe(false);
+  });
+
+  test("the prompt tells the worker to read AGENTS.md first when files are seeded", () => {
+    const prompt = assembleBuildPrompt({ planText: "plan", requirementsText: "", designText: "", stackBlock: "", target: "web", planRef: "a@1", continuing: false, files: [{ path: "AGENTS.md", content: "x" }, { path: "build-plan.md", content: "plan" }] });
+    expect(prompt).toContain("as files: AGENTS.md, build-plan.md. Read AGENTS.md first");
   });
 });

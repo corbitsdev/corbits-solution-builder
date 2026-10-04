@@ -19,6 +19,7 @@
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
@@ -71,7 +72,32 @@ export async function buildPromptMaterial(
     stackBlock: renderStackBlock(freeze) ?? "",
     target: freeze?.target ?? "",
     planRef: plan ? `${plan.artifactId}@${String(plan.version)}` : "",
+    files: workspaceFiles({ planText, requirementsText, designText }),
   };
+}
+
+/**
+ * The corpus a coding agent works from, as files in its workspace (#686):
+ * AGENTS.md first, then the PRD, the plan, the design when it is an HTML
+ * document, and an empty QUESTIONS.md for the decisions it must not make.
+ */
+export function workspaceFiles(texts: { planText: string; requirementsText: string; designText: string }): { path: string; content: string }[] {
+  const files: { path: string; content: string }[] = [];
+  const designIsHtml = /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(texts.designText);
+  if (texts.requirementsText) files.push({ path: "product-requirements.md", content: texts.requirementsText });
+  if (texts.planText) files.push({ path: "build-plan.md", content: texts.planText });
+  if (texts.designText) files.push({ path: designIsHtml ? "design.html" : "design.md", content: texts.designText });
+  if (texts.requirementsText) {
+    files.unshift({
+      path: "AGENTS.md",
+      content: agentsInstructions(
+        { requirements: "product-requirements.md", design: texts.designText ? (designIsHtml ? "design.html" : "design.md") : null, mockups: null, plan: texts.planText ? "build-plan.md" : null },
+        texts.requirementsText,
+      ),
+    });
+    files.push({ path: "QUESTIONS.md", content: QUESTIONS_MD });
+  }
+  return files;
 }
 
 /** Counts up from `since`, or shows nothing until there is one. */

@@ -273,6 +273,8 @@ export type BuildPromptMaterial = {
   stackBlock: string;
   target: string;
   planRef: string;
+  /** Files seeded into the attempt's workspace (#686): AGENTS.md, the documents, QUESTIONS.md. */
+  files?: { path: string; content: string }[];
 };
 
 export class ApiFailure extends Error {
