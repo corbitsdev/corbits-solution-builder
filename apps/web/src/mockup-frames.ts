@@ -16,15 +16,24 @@ export type FrameGeometry = {
   readonly bodyRadius: number;
 };
 
-/** The body around a screen of the given size, in the picture's own pixels (the screen is captured at 2x). */
+/** A phone's screen is this many times taller than wide (the 402 x 874 point screen the designer lays out for). */
+export const PHONE_SCREEN_RATIO = 874 / 402;
+
+/**
+ * The body around a screen of the given size, in the picture's own pixels
+ * (the screen is captured at 2x). A phone's screen is the phone's, not the
+ * page's (#670): its height follows the device, and the capture is
+ * clipped to it, so a long page never stretches the handset.
+ */
 export function frameGeometry(kind: ScreenKind, screenWidth: number, screenHeight: number): FrameGeometry {
   if (kind === "phone") {
     const bezel = Math.round(screenWidth * 0.035) + 10;
+    const height = Math.round(screenWidth * PHONE_SCREEN_RATIO);
     return {
       kind,
       width: screenWidth + bezel * 2,
-      height: screenHeight + bezel * 2,
-      screen: { x: bezel, y: bezel, width: screenWidth, height: screenHeight, radius: Math.round(screenWidth * 0.11) },
+      height: height + bezel * 2,
+      screen: { x: bezel, y: bezel, width: screenWidth, height, radius: Math.round(screenWidth * 0.11) },
       bodyRadius: Math.round(screenWidth * 0.11) + bezel,
     };
   }
@@ -60,6 +69,22 @@ function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, w:
   context.closePath();
 }
 
+/** The colour of a picture's top-left pixel, as CSS, so the rest of a short page's screen matches it; null when it cannot be read. */
+function backgroundOf(image: ImageBitmap): string | null {
+  try {
+    const probe = document.createElement("canvas");
+    probe.width = 1;
+    probe.height = 1;
+    const context = probe.getContext("2d");
+    if (!context) return null;
+    context.drawImage(image, 0, 0, 1, 1, 0, 0, 1, 1);
+    const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+    return a === 0 ? null : `rgb(${String(r)}, ${String(g)}, ${String(b)})`;
+  } catch {
+    return null;
+  }
+}
+
 async function bitmapOf(png: Uint8Array): Promise<ImageBitmap> {
   return createImageBitmap(new Blob([png as BlobPart], { type: "image/png" }));
 }
@@ -93,7 +118,13 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
     context.save();
     roundedRect(context, screen.x, screen.y, screen.width, screen.height, screen.radius);
     context.clip();
-    context.drawImage(image, screen.x, screen.y, screen.width, screen.height);
+    // The page from its top, at the screen's width, clipped to the screen:
+    // a longer page is cut at the bottom, a shorter one sits on its own
+    // background colour read from the capture's first pixel row.
+    context.fillStyle = backgroundOf(image) ?? "#ffffff";
+    context.fillRect(screen.x, screen.y, screen.width, screen.height);
+    const drawnHeight = image.height * (screen.width / image.width);
+    context.drawImage(image, screen.x, screen.y, screen.width, drawnHeight);
     context.restore();
     const islandW = Math.round(screen.width * 0.3);
     const islandH = Math.round(screen.width * 0.085);
