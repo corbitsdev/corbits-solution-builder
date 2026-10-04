@@ -13,6 +13,7 @@ import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton, FailedRead } from "../../components.jsx";
 import { requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
+import { retryAfterReviewError } from "./panel-reviews.tsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -30,6 +31,10 @@ type Stage6RoleState = {
   recorded?: boolean;
   /** Persist failed after the reply landed — body stays visible. */
   persistError?: string | null;
+  /** The error is from a send, not a recovery read — Try again re-sends. */
+  sendFailed?: boolean;
+  /** Body of the last send, so Try again on a send failure re-sends the same ask. */
+  lastBody?: string | null;
 };
 
 const STAGE6_IDLE_ROLE: Stage6RoleState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0 };
@@ -163,7 +168,12 @@ export function Stage6Panel({
           setRequirements((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
         } catch (cause) {
           if (recoveringFor.current === nodeId) recoveringFor.current = null;
-          setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+          setRequirements((prev) => ({
+            ...prev,
+            status: "error",
+            error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+            sendFailed: false,
+          }));
         }
       })();
       return;
@@ -188,7 +198,12 @@ export function Stage6Panel({
         setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
       } catch (cause) {
         if (recoveringFor.current === `thread:${projectId}`) recoveringFor.current = null;
-        setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+        setRequirements((prev) => ({
+          ...prev,
+          status: "error",
+          error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+          sendFailed: false,
+        }));
       }
     })();
   }, [requirements.status, requirementsNode, requirementsMinted, projectId, tenantId]);
@@ -233,7 +248,15 @@ export function Stage6Panel({
           }
         } catch (cause) {
           reviewRecoveringFor.current.delete(mark);
-          setReviews((prev) => ({ ...prev, [role.key]: { ...(prev[role.key] ?? STAGE6_IDLE_ROLE), status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) } }));
+          setReviews((prev) => ({
+            ...prev,
+            [role.key]: {
+              ...(prev[role.key] ?? STAGE6_IDLE_ROLE),
+              status: "error",
+              error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+              sendFailed: false,
+            },
+          }));
         }
       })();
     }
@@ -263,7 +286,7 @@ export function Stage6Panel({
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
-      onUpdate((prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null }));
+      onUpdate((prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null, sendFailed: false, lastBody: body }));
       void (async () => {
         try {
           const deployment = await api.ensureStage6RoleAgent(projectId, roleKey);
@@ -275,6 +298,7 @@ export function Stage6Panel({
             ...prev,
             status: "error",
             error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+            sendFailed: true,
           }));
         }
       })();
@@ -419,18 +443,33 @@ export function Stage6Panel({
 
   const retryPageError = (roleKey: string) => {
     if (roleKey === "requirements") {
-      recoveredFor.current = null;
-      recoveringFor.current = null;
-      requirementsRequestedFor.current = null;
-      setRequirements(STAGE6_IDLE_ROLE);
+      retryAfterReviewError({
+        sendFailed: requirements.sendFailed === true,
+        requestReview: () => {
+          if (requirements.lastBody) runRole(STAGE6_REQUIREMENTS_ROLE_KEY, requirements.lastBody, setRequirements);
+        },
+        reread: () => {
+          recoveredFor.current = null;
+          recoveringFor.current = null;
+          requirementsRequestedFor.current = null;
+          setRequirements(STAGE6_IDLE_ROLE);
+        },
+      });
       return;
     }
+    const state = reviews[roleKey] ?? STAGE6_IDLE_ROLE;
     const role = STAGE6_PANEL_ROLES.find((entry) => entry.key === roleKey);
     const node = role ? (reviewNodes?.get(role.label) ?? null) : null;
     const mark = node ? `node:${node.id}` : `thread:${projectId}:${roleKey}`;
-    reviewRecoveredFor.current.delete(mark);
-    reviewRecoveringFor.current.delete(mark);
-    setReviews((prev) => ({ ...prev, [roleKey]: STAGE6_IDLE_ROLE }));
+    retryAfterReviewError({
+      sendFailed: state.sendFailed === true,
+      requestReview: () => requestReview(roleKey),
+      reread: () => {
+        reviewRecoveredFor.current.delete(mark);
+        reviewRecoveringFor.current.delete(mark);
+        setReviews((prev) => ({ ...prev, [roleKey]: STAGE6_IDLE_ROLE }));
+      },
+    });
   };
 
   const retryPersist = (roleKey: string) => {

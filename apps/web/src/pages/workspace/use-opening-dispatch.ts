@@ -53,9 +53,10 @@ export function openingFailureWhat(kind: OpeningFailureKind): string {
 }
 
 /**
- * Prefer a real send failure only while the thread is still empty (we were
- * actually sending). A nonempty thread already has the opening, so a chain /
- * package / opening read failure is named as a read, never as a send.
+ * Prefer a real send failure while the thread is empty (we were sending the
+ * opening) or when the send-back cue failed. A nonempty thread already has the
+ * opening, so a stale send-opening failure is dropped — that recovery case is
+ * not a cue. A send-back cue failure is not an opening-already-sent case.
  */
 export function openingFailure(args: {
   sendError: string | null;
@@ -63,6 +64,7 @@ export function openingFailure(args: {
   chainError: unknown;
   packageError: unknown;
   threadHasOpening: boolean;
+  sendBackCue: boolean;
 }): { error: string; kind: OpeningFailureKind } | null {
   const read = args.openingError
     ? { error: describeFailure(args.openingError), kind: "opening" as const }
@@ -71,8 +73,9 @@ export function openingFailure(args: {
       : args.packageError
         ? { error: describeFailure(args.packageError), kind: "package" as const }
         : null;
-  if (args.threadHasOpening) return read;
-  if (args.sendError) return { error: args.sendError, kind: "send" };
+  if (args.sendError && (args.sendBackCue || !args.threadHasOpening)) {
+    return { error: args.sendError, kind: "send" };
+  }
   return read;
 }
 
@@ -133,6 +136,7 @@ export function useOpeningDispatch({
   const autoRetriedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sendBackCueFailed, setSendBackCueFailed] = useState(false);
   const [retryAttempt, setRetryAttempt] = useState(0);
 
   // Stage 1's own opening problem statement.
@@ -148,6 +152,7 @@ export function useOpeningDispatch({
   useEffect(() => {
     setPendingOpening(null);
     setError(null);
+    setSendBackCueFailed(false);
     openedRef.current = null;
     inFlightRef.current = null;
     autoRetriedRef.current = null;
@@ -197,7 +202,10 @@ export function useOpeningDispatch({
     // that both load an empty stage N+1 thread never both send its opening.
     const marker = `[opening:${detail.project.id}:${stage}]`;
     const fail = (cause: unknown) => {
-      if (!cancelled) setError(describeFailure(cause));
+      if (!cancelled) {
+        setSendBackCueFailed(false);
+        setError(describeFailure(cause));
+      }
     };
     const dispatchOpening = (opening: string) => {
       if (cancelled || openedRef.current === key || inFlightRef.current === key) return;
@@ -224,11 +232,13 @@ export function useOpeningDispatch({
           // a throw above skips this, so a failed send is retried
           // rather than silently treated as sent.
           openedRef.current = key;
+          setSendBackCueFailed(false);
           setError(null);
           await reloadThread();
         })
         .catch((cause: unknown) => {
           if (cancelled) return;
+          setSendBackCueFailed(false);
           setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
           if (autoRetriedRef.current !== key) {
             autoRetriedRef.current = key;
@@ -338,12 +348,14 @@ export function useOpeningDispatch({
     void api
       .sendStageMail(tenantId, agentAddress, { body: cue.body })
       .then(() => {
+        setSendBackCueFailed(false);
         setError(null);
         return reloadThread();
       })
       .catch((cause: unknown) => {
         // Not marked as sent: the next thread or view change, or Try again, retries.
         cueInFlightRef.current = null;
+        setSendBackCueFailed(true);
         setError(describeFailure(cause));
       });
   }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread, retryAttempt]);
@@ -354,6 +366,7 @@ export function useOpeningDispatch({
     chainError: stage6Chain.error,
     packageError: stage5Package.error,
     threadHasOpening: messages.length > 0,
+    sendBackCue: sendBackCueFailed,
   });
 
   return {
@@ -364,6 +377,7 @@ export function useOpeningDispatch({
       // left to send, so no success would ever clear it. A retry that fails
       // again sets it back.
       setError(null);
+      setSendBackCueFailed(false);
       for (const query of [opening, stage6Chain, stage5Package]) if (query.error) void query.refetch();
       setRetryAttempt((attempt) => attempt + 1);
     },

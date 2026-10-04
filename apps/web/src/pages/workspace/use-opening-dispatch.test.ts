@@ -26,6 +26,7 @@ describe("openingFailure", () => {
       chainError: undefined,
       packageError: undefined,
       threadHasOpening: false,
+      sendBackCue: false,
     });
     expect(result).toEqual({ error: "mailbox refused", kind: "send" });
   });
@@ -37,12 +38,25 @@ describe("openingFailure", () => {
       chainError: readError,
       packageError: undefined,
       threadHasOpening: true,
+      sendBackCue: false,
     });
     expect(result?.kind).toBe("chain");
     expect(result?.error).toBe("the chain could not be read");
   });
 
-  test("a nonempty thread does not keep a send-failure line", () => {
+  test("a send-back cue failure on a nonempty thread still surfaces", () => {
+    const result = openingFailure({
+      sendError: "mailbox refused the send-back cue",
+      openingError: undefined,
+      chainError: undefined,
+      packageError: undefined,
+      threadHasOpening: true,
+      sendBackCue: true,
+    });
+    expect(result).toEqual({ error: "mailbox refused the send-back cue", kind: "send" });
+  });
+
+  test("a send-opening failure on a nonempty thread is dropped", () => {
     expect(
       openingFailure({
         sendError: "mailbox refused",
@@ -50,6 +64,7 @@ describe("openingFailure", () => {
         chainError: undefined,
         packageError: undefined,
         threadHasOpening: true,
+        sendBackCue: false,
       }),
     ).toBeNull();
   });
@@ -61,6 +76,7 @@ describe("openingFailure", () => {
       chainError: undefined,
       packageError: undefined,
       threadHasOpening: false,
+      sendBackCue: false,
     });
     expect(result?.kind).toBe("opening");
   });
@@ -72,6 +88,7 @@ describe("openingFailure", () => {
       chainError: undefined,
       packageError: readError,
       threadHasOpening: true,
+      sendBackCue: false,
     });
     expect(result?.kind).toBe("package");
     expect(openingFailureWhat(result!.kind)).toBe("Couldn't load the package");

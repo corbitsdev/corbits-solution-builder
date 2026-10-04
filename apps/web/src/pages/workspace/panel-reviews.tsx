@@ -33,6 +33,8 @@ export type PanelReviewState = {
   recorded: boolean;
   /** Persist failed after the reply landed — body stays visible. */
   persistError: string | null;
+  /** The error is from a send, not a recovery read — Try again re-sends. */
+  sendFailed: boolean;
 };
 
 const IDLE: PanelReviewState = {
@@ -43,6 +45,7 @@ const IDLE: PanelReviewState = {
   requestedAt: 0,
   recorded: false,
   persistError: null,
+  sendFailed: false,
 };
 
 /** The recorded reviews of a stage, newest unsuperseded version per reviewer. */
@@ -55,6 +58,19 @@ export function reviewNodesOf(nodes: readonly ArtifactNode[], stage: 6 | 8): Rea
     if (!held || node.version > held.version) byReviewer.set(node.variant, node);
   }
   return byReviewer;
+}
+
+/**
+ * Try again after a panel error. A send failure re-sends even if a recorded
+ * node exists. Recovery-retry (re-read) is only for a recovery read failure.
+ */
+export function retryAfterReviewError(args: {
+  sendFailed: boolean;
+  requestReview: () => void;
+  reread: () => void;
+}): void {
+  if (args.sendFailed) args.requestReview();
+  else args.reread();
 }
 
 export function usePanelReviews({
@@ -81,7 +97,7 @@ export function usePanelReviews({
   const requestReview = useCallback(
     (roleKey: string) => {
       if (!reviewInput) return;
-      update(roleKey, (prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null }));
+      update(roleKey, (prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null, sendFailed: false }));
       void (async () => {
         try {
           const deployment = await api.ensureStageRoleAgent(projectId, stage, roleKey);
@@ -89,7 +105,12 @@ export function usePanelReviews({
           update(roleKey, (prev) => ({ ...prev, address: deployment.address, status: "waiting", requestedAt }));
           await api.sendStageMail(tenantId, deployment.address, { body: reviewInput });
         } catch (cause) {
-          update(roleKey, (prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+          update(roleKey, (prev) => ({
+            ...prev,
+            status: "error",
+            error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+            sendFailed: true,
+          }));
         }
       })();
     },
@@ -113,7 +134,12 @@ export function usePanelReviews({
           update(role.key, (prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
         } catch (cause) {
           recoveringFor.current.delete(node.id);
-          update(role.key, (prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+          update(role.key, (prev) => ({
+            ...prev,
+            status: "error",
+            error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+            sendFailed: false,
+          }));
         }
       })();
     }
@@ -178,17 +204,24 @@ export function usePanelReviews({
 
   const retryError = useCallback(
     (roleKey: string) => {
+      const state = reviews[roleKey] ?? IDLE;
       const role = PANEL_ROLES.find((entry) => entry.key === roleKey);
       const node = role ? reviewNodes.get(role.label) : undefined;
-      if (node) {
-        recoveredFor.current.delete(node.id);
-        recoveringFor.current.delete(node.id);
-        update(roleKey, () => IDLE);
-        return;
-      }
-      requestReview(roleKey);
+      retryAfterReviewError({
+        sendFailed: state.sendFailed,
+        requestReview: () => requestReview(roleKey),
+        reread: () => {
+          if (node) {
+            recoveredFor.current.delete(node.id);
+            recoveringFor.current.delete(node.id);
+            update(roleKey, () => IDLE);
+            return;
+          }
+          requestReview(roleKey);
+        },
+      });
     },
-    [reviewNodes, requestReview, update],
+    [reviews, reviewNodes, requestReview, update],
   );
 
   const retryPersist = useCallback(
