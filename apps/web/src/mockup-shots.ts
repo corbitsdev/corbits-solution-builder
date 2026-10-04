@@ -81,6 +81,10 @@ export function captureHeight(width: number, height: number): number {
   return width >= WIDE_SCREEN_MIN_WIDTH ? Math.min(height, Math.round(width * WIDE_SCREEN_HEIGHT_RATIO)) : height;
 }
 
+/** The frame a desktop screen is laid out in, and the one a phone screen is (#668): the two widths the designer is asked to lay out at. */
+export const DESKTOP_FRAME_WIDTH = 1280;
+export const PHONE_FRAME_WIDTH = 402;
+
 /** How wide a screen is drawn, in CSS pixels, before the device pixel ratio. */
 const SHOT_SCALE = 2;
 const LOAD_TIMEOUT_MS = 8_000;
@@ -173,7 +177,7 @@ export async function mockupShots(html: string, max = 8): Promise<MockupShot[]> 
   // Same-origin so the screens can be read; no scripts, since a generated design is untrusted.
   frame.setAttribute("sandbox", "allow-same-origin");
   frame.setAttribute("aria-hidden", "true");
-  frame.style.cssText = "position:fixed;left:-10000px;top:0;width:1280px;height:960px;border:0;visibility:hidden";
+  frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${String(DESKTOP_FRAME_WIDTH)}px;height:960px;border:0;visibility:hidden`;
   frame.srcdoc = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   document.body.appendChild(frame);
   try {
@@ -197,13 +201,20 @@ export async function mockupShots(html: string, max = 8): Promise<MockupShot[]> 
     const styles = [...doc.querySelectorAll("style")].map((style) => style.textContent ?? "").join("\n");
     const shots: MockupShot[] = [];
     for (const [index, target] of targets.entries()) {
+      const natural = target.getBoundingClientRect();
+      if (natural.width < 40 || natural.height < 40) continue;
+      const kind = screenKind(target.getAttribute("data-surface"), target.getAttribute("data-testid"), Math.ceil(natural.width));
+      // A phone screen is captured at phone width (#668): the designer
+      // lays every screen out at 1280px and at 402px, and a handset drawn
+      // around the 1280px layout is a body around a landscape picture.
+      frame.style.width = kind === "phone" ? `${String(PHONE_FRAME_WIDTH)}px` : `${String(DESKTOP_FRAME_WIDTH)}px`;
       const rect = target.getBoundingClientRect();
       if (rect.width < 40 || rect.height < 40) continue;
       const width = Math.ceil(rect.width);
       shots.push({
         name: screenNameOf(target, index),
         png: await rasterise(target, styles, doc),
-        kind: screenKind(target.getAttribute("data-surface"), target.getAttribute("data-testid"), width),
+        kind,
         width,
         height: captureHeight(width, Math.ceil(rect.height)),
       });
