@@ -720,7 +720,7 @@ export function StageWorkspace({
   ) : null;
   const openingFailure =
     agentAddress && openingDispatch.error ? (
-      <FailedRead what="Couldn't send the opening message" detail={openingDispatch.error} onRetry={openingDispatch.retry} />
+      <FailedRead what={openingDispatch.errorWhat} detail={openingDispatch.error} onRetry={openingDispatch.retry} />
     ) : null;
 
   // The strip and conversation are the same on every stage; only the right

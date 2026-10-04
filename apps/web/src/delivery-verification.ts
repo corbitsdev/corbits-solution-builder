@@ -128,3 +128,18 @@ export function parseDeliveryVerification(input: unknown): DeliveryVerification 
     };
   }
 }
+
+/** Artifact body → verification. Never throws: empty or non-JSON is an unreadable/missing record. */
+export function parseDeliveryVerificationJson(content: string): DeliveryVerification {
+  if (content.trim() === "") return parseDeliveryVerification(undefined);
+  try {
+    return parseDeliveryVerification(JSON.parse(content) as unknown);
+  } catch {
+    return parseDeliveryVerification(content);
+  }
+}
+
+/** A loaded record with no rows and a parse problem is missing/malformed, not a passing empty checklist. */
+export function verificationRecordUnreadable(verification: DeliveryVerification | null | undefined): boolean {
+  return Boolean(verification && verification.rows.length === 0 && verification.problems.length > 0);
+}

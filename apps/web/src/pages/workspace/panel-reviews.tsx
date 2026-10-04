@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
-import { Banner, Button, CopyButton, stageName } from "../../components.jsx";
+import { Banner, Button, CopyButton, FailedRead, stageName } from "../../components.jsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { reviewDocument, type StageDocument } from "./document-mentions.ts";
 
@@ -31,9 +31,19 @@ export type PanelReviewState = {
   requestedAt: number;
   /** The reply is the project's recorded document already, not a fresh one to record. */
   recorded: boolean;
+  /** Persist failed after the reply landed — body stays visible. */
+  persistError: string | null;
 };
 
-const IDLE: PanelReviewState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0, recorded: false };
+const IDLE: PanelReviewState = {
+  status: "idle",
+  address: null,
+  reply: null,
+  error: null,
+  requestedAt: 0,
+  recorded: false,
+  persistError: null,
+};
 
 /** The recorded reviews of a stage, newest unsuperseded version per reviewer. */
 export function reviewNodesOf(nodes: readonly ArtifactNode[], stage: 6 | 8): ReadonlyMap<string, ArtifactNode> {
@@ -71,7 +81,7 @@ export function usePanelReviews({
   const requestReview = useCallback(
     (roleKey: string) => {
       if (!reviewInput) return;
-      update(roleKey, (prev) => ({ ...prev, status: "starting", error: null, recorded: false }));
+      update(roleKey, (prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null }));
       void (async () => {
         try {
           const deployment = await api.ensureStageRoleAgent(projectId, stage, roleKey);
@@ -86,19 +96,23 @@ export function usePanelReviews({
     [projectId, stage, tenantId, reviewInput, update],
   );
 
-  // A recorded review is read back on a reload.
+  // A recorded review is read back on a reload. Not marked recovered until
+  // the content lands, so a failed read can Try again.
   const recoveredFor = useRef(new Set<string>());
+  const recoveringFor = useRef(new Set<string>());
   useEffect(() => {
     for (const role of PANEL_ROLES) {
       if ((reviews[role.key] ?? IDLE).status !== "idle") continue;
       const node = reviewNodes.get(role.label);
-      if (!node || recoveredFor.current.has(node.id)) continue;
-      recoveredFor.current.add(node.id);
+      if (!node || recoveredFor.current.has(node.id) || recoveringFor.current.has(node.id)) continue;
+      recoveringFor.current.add(node.id);
       void (async () => {
         try {
           const result = await api.artifactContent(tenantId, node.id);
+          recoveredFor.current.add(node.id);
           update(role.key, (prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
         } catch (cause) {
+          recoveringFor.current.delete(node.id);
           update(role.key, (prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
         }
       })();
@@ -121,8 +135,8 @@ export function usePanelReviews({
           update(role.key, (prev) => (prev.reply === reply ? { ...prev, recorded: true } : prev));
           onDocumentsChanged?.();
         } catch (cause) {
-          const error = `The review could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`;
-          update(role.key, (prev) => ({ ...prev, status: "error", error }));
+          const persistError = cause instanceof ApiFailure ? cause.detail.message : String(cause);
+          update(role.key, (prev) => (prev.reply === reply ? { ...prev, persistError } : prev));
         }
       })();
     }
@@ -162,7 +176,32 @@ export function usePanelReviews({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyWaiting, tenantId]);
 
-  return { reviews, requestReview, stateOf: (roleKey: string) => reviews[roleKey] ?? IDLE };
+  const retryError = useCallback(
+    (roleKey: string) => {
+      const role = PANEL_ROLES.find((entry) => entry.key === roleKey);
+      const node = role ? reviewNodes.get(role.label) : undefined;
+      if (node) {
+        recoveredFor.current.delete(node.id);
+        recoveringFor.current.delete(node.id);
+        update(roleKey, () => IDLE);
+        return;
+      }
+      requestReview(roleKey);
+    },
+    [reviewNodes, requestReview, update],
+  );
+
+  const retryPersist = useCallback(
+    (roleKey: string) => {
+      update(roleKey, (prev) => {
+        if (prev.reply) recordedFor.current.delete(`${roleKey}:${String(prev.requestedAt)}:${String(prev.reply.length)}`);
+        return { ...prev, persistError: null };
+      });
+    },
+    [update],
+  );
+
+  return { reviews, requestReview, retryError, retryPersist, stateOf: (roleKey: string) => reviews[roleKey] ?? IDLE };
 }
 
 /** What the companion says of the chosen review. */
@@ -233,9 +272,16 @@ export function PanelReviewsCompanion({
         ) : null}
       </div>
       {current.status === "error" ? (
-        <Banner tone="error" title="This review could not be completed">
+        <Banner
+          tone="error"
+          title="This review could not be completed"
+          action={{ label: "Try again", onClick: () => panel.retryError(role.key) }}
+        >
           {current.error}
         </Banner>
+      ) : null}
+      {current.persistError ? (
+        <FailedRead what="Couldn't record the review" detail={current.persistError} onRetry={() => panel.retryPersist(role.key)} />
       ) : null}
       {current.status === "done" && current.reply ? (
         <details className="document-fold">

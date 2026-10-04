@@ -26,7 +26,7 @@ import {
   rejectTool,
   type PendingApproval,
 } from "../../pending-approvals.ts";
-import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
+import { parseDeliveryVerification, parseDeliveryVerificationJson, verificationRecordUnreadable, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, FailedRead, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
@@ -226,10 +226,12 @@ function DeliveryDecision({
   const verificationRead = useQuery({
     queryKey: keys.artifact.of(tenantId, verificationNode?.id ?? ""),
     queryFn: verificationNode ? async () => (await api.artifactContent(tenantId, verificationNode.id)).content : skipToken,
-    select: (content) => parseDeliveryVerification(JSON.parse(content)),
+    select: (content) => parseDeliveryVerificationJson(content),
     staleTime: Infinity,
   });
-  const verification = verificationNode ? (verificationRead.data ?? null) : parseDeliveryVerification(null);
+  const loadedVerification = verificationNode ? (verificationRead.data ?? null) : null;
+  const verificationUnreadable = verificationRecordUnreadable(loadedVerification);
+  const verification = verificationNode ? (verificationUnreadable ? null : loadedVerification) : parseDeliveryVerification(null);
 
   if (!loaded) return null;
 
@@ -318,10 +320,10 @@ function DeliveryDecision({
           <h2>{documentName("delivery_verification")}</h2>
           <VerificationList verification={verification} />
         </>
-      ) : verificationRead.error ? (
+      ) : verificationNode && (verificationRead.error || verificationUnreadable) ? (
         <FailedRead
           what="Couldn't load the verification record"
-          detail={verificationRead.error.message}
+          detail={verificationRead.error?.message ?? loadedVerification?.problems.join(" ") ?? "verification could not be read"}
           onRetry={() => void verificationRead.refetch()}
         />
       ) : null}

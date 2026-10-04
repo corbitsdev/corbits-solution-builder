@@ -42,9 +42,45 @@ import { approvedChainQuery } from "./approved-chain.ts";
 import { queryClient } from "../../queries/client.ts";
 import { keys } from "../../queries/keys.ts";
 
+export type OpeningFailureKind = "send" | "opening" | "chain" | "package";
+
+/** FailedRead title for an opening dispatch failure. Send copy only names a send. */
+export function openingFailureWhat(kind: OpeningFailureKind): string {
+  if (kind === "opening") return "Couldn't load the opening";
+  if (kind === "chain") return "Couldn't load the previous stages";
+  if (kind === "package") return "Couldn't load the package";
+  return "Couldn't send the opening message";
+}
+
+/**
+ * Prefer a real send failure only while the thread is still empty (we were
+ * actually sending). A nonempty thread already has the opening, so a chain /
+ * package / opening read failure is named as a read, never as a send.
+ */
+export function openingFailure(args: {
+  sendError: string | null;
+  openingError: unknown;
+  chainError: unknown;
+  packageError: unknown;
+  threadHasOpening: boolean;
+}): { error: string; kind: OpeningFailureKind } | null {
+  const read = args.openingError
+    ? { error: describeFailure(args.openingError), kind: "opening" as const }
+    : args.chainError
+      ? { error: describeFailure(args.chainError), kind: "chain" as const }
+      : args.packageError
+        ? { error: describeFailure(args.packageError), kind: "package" as const }
+        : null;
+  if (args.threadHasOpening) return read;
+  if (args.sendError) return { error: args.sendError, kind: "send" };
+  return read;
+}
+
 export type OpeningDispatch = {
-  /** The opening send failed — surfaced with a retry, never retried forever. */
+  /** Send or read failed — surfaced with a retry, never retried forever. */
   readonly error: string | null;
+  /** FailedRead title: "Couldn't send…" only when a send actually failed. */
+  readonly errorWhat: string;
   readonly retry: () => void;
   /** `approve()` hands the just-approved draft to the next stage's thread. */
   readonly queueOpening: (stage: number, body: string) => void;
@@ -312,11 +348,17 @@ export function useOpeningDispatch({
       });
   }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread, retryAttempt]);
 
-  const failedRead = opening.error ?? stage6Chain.error ?? stage5Package.error;
-  const readFailure = failedRead ? describeFailure(failedRead) : null;
+  const failed = openingFailure({
+    sendError: error,
+    openingError: opening.error,
+    chainError: stage6Chain.error,
+    packageError: stage5Package.error,
+    threadHasOpening: messages.length > 0,
+  });
 
   return {
-    error: error ?? readFailure,
+    error: failed?.error ?? null,
+    errorWhat: failed ? openingFailureWhat(failed.kind) : "Couldn't send the opening message",
     retry: () => {
       // Cleared up front: a thread that already holds its opening has nothing
       // left to send, so no success would ever clear it. A retry that fails

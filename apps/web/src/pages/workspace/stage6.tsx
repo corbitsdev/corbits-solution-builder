@@ -11,7 +11,7 @@ import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY,
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
-import { Banner, Button, CopyButton } from "../../components.jsx";
+import { Banner, Button, CopyButton, FailedRead } from "../../components.jsx";
 import { requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
@@ -28,6 +28,8 @@ type Stage6RoleState = {
   requestedAt: number;
   /** The reply is the project's recorded document already (#328), not a fresh one to record. */
   recorded?: boolean;
+  /** Persist failed after the reply landed — body stays visible. */
+  persistError?: string | null;
 };
 
 const STAGE6_IDLE_ROLE: Stage6RoleState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0 };
@@ -147,34 +149,45 @@ export function Stage6Panel({
   // project that minted its ids before the document was ever recorded, the
   // author's own thread, once, and what it wrote is recorded then.
   const recoveredFor = useRef<string | null>(null);
+  const recoveringFor = useRef<string | null>(null);
   useEffect(() => {
     if (requirements.status !== "idle") return;
     if (requirementsNode) {
-      if (recoveredFor.current === requirementsNode.id) return;
-      recoveredFor.current = requirementsNode.id;
+      if (recoveredFor.current === requirementsNode.id || recoveringFor.current === requirementsNode.id) return;
+      recoveringFor.current = requirementsNode.id;
       const nodeId = requirementsNode.id;
       void (async () => {
         try {
           const result = await api.artifactContent(tenantId, nodeId);
+          recoveredFor.current = nodeId;
           setRequirements((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev));
         } catch (cause) {
+          if (recoveringFor.current === nodeId) recoveringFor.current = null;
           setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
         }
       })();
       return;
     }
     if (!requirementsMinted) return;
-    if (recoveredFor.current === `thread:${projectId}`) return;
-    recoveredFor.current = `thread:${projectId}`;
+    if (recoveredFor.current === `thread:${projectId}` || recoveringFor.current === `thread:${projectId}`) return;
+    recoveringFor.current = `thread:${projectId}`;
     void (async () => {
       try {
         const status = await api.stage6RoleAgentStatus(projectId, STAGE6_REQUIREMENTS_ROLE_KEY);
-        if (!status) return;
+        if (!status) {
+          recoveredFor.current = `thread:${projectId}`;
+          return;
+        }
         const thread = await api.readStageThread(tenantId, [status.address]);
         const reply = [...thread].reverse().find((message) => message.author === "agent");
-        if (!reply) return;
+        if (!reply) {
+          recoveredFor.current = `thread:${projectId}`;
+          return;
+        }
+        recoveredFor.current = `thread:${projectId}`;
         setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
       } catch (cause) {
+        if (recoveringFor.current === `thread:${projectId}`) recoveringFor.current = null;
         setRequirements((prev) => ({ ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
       }
     })();
@@ -184,14 +197,15 @@ export function Stage6Panel({
   // back; a project that reviewed before reviews were recorded has each
   // reviewer's thread read back once; and a review that lands is recorded.
   const reviewRecoveredFor = useRef(new Set<string>());
+  const reviewRecoveringFor = useRef(new Set<string>());
   useEffect(() => {
     for (const role of STAGE6_PANEL_ROLES) {
       const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
       if (state.status !== "idle") continue;
       const node = reviewNodes?.get(role.label) ?? null;
       const mark = node ? `node:${node.id}` : requirementsMinted ? `thread:${projectId}:${role.key}` : null;
-      if (!mark || reviewRecoveredFor.current.has(mark)) continue;
-      reviewRecoveredFor.current.add(mark);
+      if (!mark || reviewRecoveredFor.current.has(mark) || reviewRecoveringFor.current.has(mark)) continue;
+      reviewRecoveringFor.current.add(mark);
       const settle = (reply: string, recorded: boolean, address: string | null) =>
         setReviews((prev) => {
           const held = prev[role.key] ?? STAGE6_IDLE_ROLE;
@@ -201,14 +215,24 @@ export function Stage6Panel({
         try {
           if (node) {
             settle((await api.artifactContent(tenantId, node.id)).content, true, null);
+            reviewRecoveredFor.current.add(mark);
             return;
           }
           const status = await api.stage6RoleAgentStatus(projectId, role.key);
-          if (!status) return;
+          if (!status) {
+            reviewRecoveredFor.current.add(mark);
+            return;
+          }
           const thread = await api.readStageThread(tenantId, [status.address]);
           const reply = [...thread].reverse().find((message) => message.author === "agent");
-          if (reply) settle(reply.body, false, status.address);
+          if (reply) {
+            settle(reply.body, false, status.address);
+            reviewRecoveredFor.current.add(mark);
+          } else {
+            reviewRecoveredFor.current.add(mark);
+          }
         } catch (cause) {
+          reviewRecoveringFor.current.delete(mark);
           setReviews((prev) => ({ ...prev, [role.key]: { ...(prev[role.key] ?? STAGE6_IDLE_ROLE), status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) } }));
         }
       })();
@@ -230,8 +254,8 @@ export function Stage6Panel({
           setReviews((prev) => (prev[role.key]?.reply === reply ? { ...prev, [role.key]: { ...prev[role.key]!, recorded: true } } : prev));
           onDocumentsChanged?.();
         } catch (cause) {
-          const error = `The review could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`;
-          setReviews((prev) => ({ ...prev, [role.key]: { ...prev[role.key]!, status: "error", error } }));
+          const persistError = cause instanceof ApiFailure ? cause.detail.message : String(cause);
+          setReviews((prev) => (prev[role.key]?.reply === reply ? { ...prev, [role.key]: { ...prev[role.key]!, persistError } } : prev));
         }
       })();
     }
@@ -239,7 +263,7 @@ export function Stage6Panel({
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
-      onUpdate((prev) => ({ ...prev, status: "starting", error: null, recorded: false }));
+      onUpdate((prev) => ({ ...prev, status: "starting", error: null, recorded: false, persistError: null }));
       void (async () => {
         try {
           const deployment = await api.ensureStage6RoleAgent(projectId, roleKey);
@@ -393,6 +417,31 @@ export function Stage6Panel({
   const reviewingRole = STAGE6_PANEL_ROLES.find((role) => reviews[role.key]?.status === "starting" || reviews[role.key]?.status === "waiting");
   useBusyWhile(reviewingRole !== undefined, `${reviewingRole?.label ?? "A"} reviewer is reviewing the plan`);
 
+  const retryPageError = (roleKey: string) => {
+    if (roleKey === "requirements") {
+      recoveredFor.current = null;
+      recoveringFor.current = null;
+      requirementsRequestedFor.current = null;
+      setRequirements(STAGE6_IDLE_ROLE);
+      return;
+    }
+    const role = STAGE6_PANEL_ROLES.find((entry) => entry.key === roleKey);
+    const node = role ? (reviewNodes?.get(role.label) ?? null) : null;
+    const mark = node ? `node:${node.id}` : `thread:${projectId}:${roleKey}`;
+    reviewRecoveredFor.current.delete(mark);
+    reviewRecoveringFor.current.delete(mark);
+    setReviews((prev) => ({ ...prev, [roleKey]: STAGE6_IDLE_ROLE }));
+  };
+
+  const retryPersist = (roleKey: string) => {
+    setReviews((prev) => {
+      const held = prev[roleKey];
+      if (!held?.reply) return prev;
+      reviewRecordedFor.current.delete(`${roleKey}:${String(held.requestedAt)}:${String(held.reply.length)}`);
+      return { ...prev, [roleKey]: { ...held, persistError: null } };
+    });
+  };
+
   const current = page === "requirements" ? requirements : (reviews[page] ?? STAGE6_IDLE_ROLE);
   const currentPage = PAGES.find((entry) => entry.key === page) ?? PAGES[0]!;
   const busy = current.status === "starting" || current.status === "waiting";
@@ -426,12 +475,24 @@ export function Stage6Panel({
           : null,
       ),
     ].filter((failure) => failure !== null);
+    const persistFailures = STAGE6_PANEL_ROLES.flatMap((role) => {
+      const persistError = reviews[role.key]?.persistError;
+      return persistError ? [{ key: `persist:${role.key}`, detail: persistError, retry: () => retryPersist(role.key) }] : [];
+    });
     return (
       <>
         {failures.map((failure) => (
-          <Banner key={failure.key} tone="error" title={failure.title}>
+          <Banner
+            key={failure.key}
+            tone="error"
+            title={failure.title}
+            action={{ label: "Try again", onClick: () => retryPageError(failure.key) }}
+          >
             {failure.error}
           </Banner>
+        ))}
+        {persistFailures.map((failure) => (
+          <FailedRead key={failure.key} what="Couldn't record the review" detail={failure.detail} onRetry={failure.retry} />
         ))}
         {planDocument?.(
           <Menu>
@@ -504,9 +565,16 @@ export function Stage6Panel({
             ) : null}
             {busy ? <p className="inline-note">Drafting…</p> : null}
             {current.status === "error" ? (
-              <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}>
+              <Banner
+                tone="error"
+                title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}
+                action={{ label: "Try again", onClick: () => retryPageError(page) }}
+              >
                 {current.error}
               </Banner>
+            ) : null}
+            {current.persistError ? (
+              <FailedRead what="Couldn't record the review" detail={current.persistError} onRetry={() => retryPersist(page)} />
             ) : null}
             {current.status === "done" && current.reply ? <Markdown source={current.reply} /> : null}
           </div>

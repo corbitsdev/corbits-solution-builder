@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGENT_REPORTED_NOTE, parseDeliveryVerification } from "./delivery-verification.ts";
+import { AGENT_REPORTED_NOTE, parseDeliveryVerification, parseDeliveryVerificationJson, verificationRecordUnreadable } from "./delivery-verification.ts";
 
 describe("parseDeliveryVerification", () => {
   test("reads a report's items shape", () => {
@@ -155,5 +155,29 @@ describe("parseDeliveryVerification", () => {
       ],
     });
     expect(result.summary).toEqual({ passed: 0, failed: 1, unverified: 3 });
+  });
+});
+
+describe("parseDeliveryVerificationJson", () => {
+  test("never throws on empty or non-JSON content", () => {
+    expect(() => parseDeliveryVerificationJson("")).not.toThrow();
+    expect(() => parseDeliveryVerificationJson("{")).not.toThrow();
+    expect(() => parseDeliveryVerificationJson("not json")).not.toThrow();
+    expect(parseDeliveryVerificationJson("").problems).toEqual(["verification is missing"]);
+    expect(parseDeliveryVerificationJson("{").problems).toEqual(["verification could not be read"]);
+    expect(verificationRecordUnreadable(parseDeliveryVerificationJson(""))).toBe(true);
+    expect(verificationRecordUnreadable(parseDeliveryVerificationJson("{"))).toBe(true);
+  });
+
+  test("parses a JSON artifact body", () => {
+    const result = parseDeliveryVerificationJson(
+      JSON.stringify({ items: [{ path: "a.ts", status: "verified", checkedBy: "tool" }] }),
+    );
+    expect(result.rows).toEqual([{ path: "a.ts", status: "passed" }]);
+    expect(verificationRecordUnreadable(result)).toBe(false);
+  });
+
+  test("an empty checklist with no problems is not unreadable", () => {
+    expect(verificationRecordUnreadable(parseDeliveryVerification({ items: [] }))).toBe(false);
   });
 });
