@@ -4465,6 +4465,65 @@ button[aria-disabled="true"] {
 .slide-stage {
   container-type: inline-size;
   max-width: 720px;
+  cursor: zoom-in;
+  border-radius: var(--radius-md);
+}
+
+.slide-stage:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 3px;
+}
+
+/* The player (#662): one slide, as large as the window allows, over a
+   dark layer. The stage is a container so the slide's own units scale. */
+.slide-player {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(10, 11, 14, 0.92);
+  color: #fff;
+  outline: none;
+}
+
+.slide-player-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slide-player-count {
+  font-family: var(--wb-font-mono);
+  font-size: 0.8125rem;
+  opacity: 0.8;
+}
+
+.slide-player .iconbtn {
+  color: #fff;
+}
+
+.slide-player-stage {
+  container-type: inline-size;
+  width: min(96vw, calc((100vh - 140px) * 4 / 3));
+  margin: 0 auto;
+  align-self: center;
+}
+
+.slide-player-stage.wide {
+  width: min(96vw, calc((100vh - 140px) * 16 / 9));
+}
+
+.slide-player-stage .slide {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.slide-player-nav {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
 }
 
 .slide {

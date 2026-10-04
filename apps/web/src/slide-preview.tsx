@@ -14,8 +14,9 @@
  * are shown where the renderer puts them; illustrations drawn only at save
  * time with an image credential are not, and the caption says so.
  */
-import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { playerKeyAction, previewKeyAction } from "./slide-keys.ts";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { lookOf, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
@@ -115,6 +116,29 @@ export function SlidePreview({ deck, note }: { deck: Deck; note?: string | null 
   const [current, setCurrent] = useState(0);
   const index = Math.min(current, slides.length - 1);
   const shown = slides[index]!;
+  // The player (#662): the slides large, one at a time, in a layer over
+  // the page. Opened from the strip or the main slide; keys and a click
+  // outside close it.
+  const [playing, setPlaying] = useState(false);
+  const thumbs = useRef<(HTMLButtonElement | null)[]>([]);
+  const playerRef = useRef<HTMLDivElement>(null);
+  const select = (next: number, focusThumb = false) => {
+    setCurrent(next);
+    if (focusThumb) thumbs.current[next]?.focus();
+  };
+  useEffect(() => {
+    if (!playing) return;
+    playerRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      const action = playerKeyAction(event.key, index, slides.length);
+      if (!action) return;
+      event.preventDefault();
+      if (action.kind === "close") setPlaying(false);
+      else if (action.kind === "move") setCurrent(action.index);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playing, index, slides.length]);
 
   return (
     <section className="slide-preview" aria-label="Slides preview">
@@ -144,25 +168,88 @@ export function SlidePreview({ deck, note }: { deck: Deck; note?: string | null 
           </button>
         </div>
       </div>
-      <div className="slide-stage">
+      <div
+        className="slide-stage"
+        role="button"
+        tabIndex={0}
+        aria-label="Play the slides"
+        title="Play the slides"
+        onClick={() => setPlaying(true)}
+        onKeyDown={(event) => {
+          const action = previewKeyAction(event.key, index, slides.length);
+          if (!action) return;
+          event.preventDefault();
+          if (action.kind === "play") setPlaying(true);
+          else if (action.kind === "move") select(action.index);
+        }}
+      >
         <Slide slide={shown} footer={footer} look={look} />
       </div>
-      <div className="slide-strip" role="list" aria-label="All slides">
+      <div
+        className="slide-strip"
+        role="list"
+        aria-label="All slides"
+        onKeyDown={(event) => {
+          // Left and Right change the slide and carry focus with it; Space
+          // or Enter plays. A thumb's own click still selects it.
+          const action = previewKeyAction(event.key, index, slides.length);
+          if (!action) return;
+          event.preventDefault();
+          if (action.kind === "play") setPlaying(true);
+          else if (action.kind === "move") select(action.index, true);
+        }}
+      >
         {slides.map((slide, position) => (
           <button
             key={position}
             type="button"
             role="listitem"
             className="slide-thumb"
+            ref={(element) => {
+              thumbs.current[position] = element;
+            }}
             aria-label={`Slide ${position + 1}: ${slide.title}`}
             aria-current={position === index ? "true" : undefined}
-            onClick={() => setCurrent(position)}
+            onClick={() => select(position)}
           >
             <Slide slide={slide} footer={footer} look={look} />
           </button>
         ))}
       </div>
       {note ? <p className="inline-note">{note}</p> : null}
+      {playing ? (
+        <div
+          ref={playerRef}
+          className="slide-player"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Slides"
+          tabIndex={-1}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setPlaying(false);
+          }}
+        >
+          <div className="slide-player-head">
+            <span className="slide-player-count" aria-live="polite">
+              {index + 1} / {slides.length}
+            </span>
+            <button type="button" className="iconbtn slide-player-close" aria-label="Close the slides" onClick={() => setPlaying(false)}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          <div className={look.wide ? "slide-player-stage wide" : "slide-player-stage"}>
+            <Slide slide={shown} footer={footer} look={look} />
+          </div>
+          <div className="slide-player-nav">
+            <button type="button" className="iconbtn" aria-label="Previous slide" disabled={index === 0} onClick={() => setCurrent(index - 1)}>
+              <ChevronLeft aria-hidden="true" />
+            </button>
+            <button type="button" className="iconbtn" aria-label="Next slide" disabled={index === slides.length - 1} onClick={() => setCurrent(index + 1)}>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

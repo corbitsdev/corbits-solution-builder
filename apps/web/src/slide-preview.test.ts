@@ -58,3 +58,20 @@ describe("the slides preview", () => {
     expect(css).toContain('.slide-thumb[aria-current="true"] {');
   });
 });
+
+// #662: keys on the strip change the slide; Space or a click on the main
+// slide opens the player.
+describe("the strip's keys and the player", () => {
+  test("the strip and the main slide answer keys through the shared rules, and the player is a dialog over the page", async () => {
+    const source = await Bun.file(new URL("./slide-preview.tsx", import.meta.url)).text();
+    expect(source).toContain('className="slide-strip"');
+    expect(source).toMatch(/className="slide-strip"[\s\S]*?onKeyDown=\{[\s\S]*?previewKeyAction\(event\.key, index, slides\.length\)/);
+    expect(source).toMatch(/className="slide-stage"[\s\S]*?role="button"[\s\S]*?onClick=\{\(\) => setPlaying\(true\)\}/);
+    expect(source).toContain('className="slide-player"');
+    expect(source).toContain('role="dialog"');
+    expect(source).toContain("playerKeyAction(event.key, index, slides.length)");
+    const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+    expect(css).toMatch(/\.slide-player \{[^}]*position: fixed;/);
+    expect(css).toMatch(/\.slide-player-stage \{[^}]*container-type: inline-size;/);
+  });
+});
