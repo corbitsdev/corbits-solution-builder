@@ -15,6 +15,7 @@
  * time with an image credential are not, and the caption says so.
  */
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { playerKeyAction, previewKeyAction } from "./slide-keys.ts";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { lookOf, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
@@ -217,7 +218,10 @@ export function SlidePreview({ deck, note }: { deck: Deck; note?: string | null 
         ))}
       </div>
       {note ? <p className="inline-note">{note}</p> : null}
-      {playing ? (
+      {playing && typeof document !== "undefined"
+        ? // Through a portal on the body (#664): the document pane's
+          // containment would otherwise pin this fixed layer to the pane.
+          createPortal(
         <div
           ref={playerRef}
           className="slide-player"
@@ -248,8 +252,10 @@ export function SlidePreview({ deck, note }: { deck: Deck; note?: string | null 
               <ChevronRight aria-hidden="true" />
             </button>
           </div>
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

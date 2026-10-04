@@ -75,3 +75,15 @@ describe("the strip's keys and the player", () => {
     expect(css).toMatch(/\.slide-player-stage \{[^}]*container-type: inline-size;/);
   });
 });
+
+// #664: the player is rendered on the body, outside the pane's containment, and sized from the viewport.
+describe("the player's placement", () => {
+  test("goes through a portal to document.body and sizes its stage from the viewport", async () => {
+    const source = await Bun.file(new URL("./slide-preview.tsx", import.meta.url)).text();
+    expect(source).toContain('import { createPortal } from "react-dom";');
+    expect(source).toMatch(/createPortal\([\s\S]*className="slide-player"[\s\S]*document\.body,/);
+    const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+    expect(css).toMatch(/\.slide-player-stage \{[^}]*width: min\(calc\(100vw - 2 \* var\(--space-4\)\), calc\(\(100dvh - 150px\) \* 4 \/ 3\)\);/);
+    expect(css).toMatch(/\.slide-player \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto;/);
+  });
+});
