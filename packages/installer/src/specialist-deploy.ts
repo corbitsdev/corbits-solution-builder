@@ -21,7 +21,7 @@ import {
   specialistTooling,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
-import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
+import { ensureWorkflowArtifactsCredentialRow, registerWorkflowArtifactsBearer } from "./artifacts-credential.js";
 import { assetsFor, readWorkflowSourceBlob, workflowsFor, type HubAsset, type HubDeployment } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { readStageSwitch, writeStageSwitch } from "./project-tenant.js";
@@ -379,6 +379,8 @@ export async function renderSpecialistSource(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
+  /** The project tenant's artifacts credential, named by the entry's use-grant; required when `artifactTools`. */
+  artifactCredentialId?: string,
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage, roleKey);
   const root = {
@@ -408,7 +410,7 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools }),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools, ...(artifactCredentialId ? { artifactCredentialId } : {}) }),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -462,12 +464,13 @@ export async function specialistEntryIsCurrent(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
+  artifactCredentialId?: string,
 ): Promise<boolean> {
   const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
   if (deployed === null) return true;
   const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
-  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools });
+  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools, ...(artifactCredentialId ? { artifactCredentialId } : {}) });
   return rendered === deployed;
 }
 
@@ -573,6 +576,14 @@ async function ensureSpecialistDeploymentOnce(
     throw new Error("connect a model provider before deploying a stage specialist");
   }
 
+  // CL-8719 / #288: a credential-bound entry names the id of the credential
+  // its run uses, so the row exists before anything renders -- in the tenant
+  // the specialist runs in. Never rotated here; see `registerWorkflowArtifactsBearer`.
+  const credentialIdIn = (specialistTenantId: string) =>
+    artifactTools
+      ? ensureWorkflowArtifactsCredentialRow(transport, specialistTenantId, hubOrigin, role.id, home.legacyTenantId ?? tenantId)
+      : Promise.resolve(undefined);
+
   if (existing) {
     // A live specialist runs the entry it was deployed with, and the kit
     // moves on without it: a revised brief (#103) reached no project whose
@@ -593,6 +604,7 @@ async function ensureSpecialistDeploymentOnce(
       artifactTools,
       roleKey,
       role,
+      await credentialIdIn(existing.tenantId),
     );
     if (current) {
       return {
@@ -640,7 +652,8 @@ async function ensureSpecialistDeploymentOnce(
   // No project read here: a specialist's entry is the same for every
   // project its role serves, and what is the project's (who a stage 5
   // package is for) arrives with the request (#41 step 3).
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role);
+  const artifactCredentialId = await credentialIdIn(tenantId);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, artifactCredentialId);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     tenantId,
@@ -703,11 +716,12 @@ async function ensureSpecialistDeploymentOnce(
     ? deployment
     : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar)) ?? deployment);
 
-  // CL-8719: the credential the winning deployment's `credentialBindings`
-  // names must exist -- and be scoped to the winning anchor run -- before
-  // its first mail trigger launches it. Only reached on an actual (re)deploy,
-  // never the early "already live" returns above: rotating the secret here
-  // would break an in-flight tool call against a still-live prior deployment.
+  // CL-8719: the bearer the winning deployment's credential carries must be
+  // scoped to the winning anchor run before its first mail trigger launches
+  // it. Only reached on an actual (re)deploy, never the early "already live"
+  // returns above: rotating the secret here would break an in-flight tool
+  // call against a still-live prior deployment. The row itself was ensured
+  // before render (`credentialIdIn`), so the entry could name its id (#288).
   // Skipped entirely when `artifactTools` is off -- the rendered source
   // carries no `credentialBindings` to satisfy, so minting one is dead work.
   // CL-8783: untouched by the model-needs verdict -- the hub's credential-push
@@ -716,8 +730,8 @@ async function ensureSpecialistDeploymentOnce(
   // credential story for specialists. See `docs/specialist-model-requirements.md`.
   // The credential is the project's own (#29); the one `sb-workflow-artifacts`
   // provider it names stays on the workspace, resolved through the walk-up.
-  if (artifactTools) {
-    await ensureWorkflowArtifactsCredential(transport, tenantId, hubOrigin, role.id, winner.id, home.legacyTenantId ?? tenantId);
+  if (artifactCredentialId) {
+    await registerWorkflowArtifactsBearer(transport, tenantId, artifactCredentialId, winner.id);
   }
 
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, tenantId };

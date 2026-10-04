@@ -72,39 +72,52 @@ export async function ensureProvider(
 }
 
 /**
- * Ensures the provider + credential a specialist asset's `credentialBindings`
- * name exist, mints a fresh bearer, and registers it with the hub as valid
- * for `anchorRunId` — the deployment id this deploy just produced. Called
- * once per actual (re)deploy, never on the "already live" fast path: rotating
- * the secret would break an in-flight tool call against the still-live prior
- * deployment.
+ * The credential a specialist asset's `credentialBindings` name, created if
+ * absent and otherwise left as it is: its id goes into the rendered entry's
+ * use-grant (#288), so it has to exist before the render and must not rotate
+ * here -- this runs on every "is the entry current" check, and rotating the
+ * secret would break an in-flight tool call against the still-live
+ * deployment. The secret is a placeholder until `registerWorkflowArtifactsBearer`
+ * replaces it for a real deploy.
  */
-export async function ensureWorkflowArtifactsCredential(
+export async function ensureWorkflowArtifactsCredentialRow(
   transport: Transport,
-  /** The tenant the specialist deploys in: the project's own (#29). The
-   *  credential and the token registration land here, where its run is. */
+  /** The tenant the specialist deploys in: the project's own (#29). */
   tenantId: string,
   hubOrigin: string,
-  /** The kit role the deployment runs: what the credential is named for. */
   roleId: string,
-  anchorRunId: string,
   /** The tenant holding the one `sb-workflow-artifacts` provider: the
    *  workspace. A project-owned credential resolves an inherited provider
-   *  through the hub's tenant walk-up, so there is one provider row for
-   *  every project rather than one per tenant. Defaults to `tenantId`. */
+   *  through the hub's tenant walk-up. Defaults to `tenantId`. */
   providerTenantId: string = tenantId,
-): Promise<void> {
+): Promise<string> {
   const catalog = catalogFor(transport, tenantId);
-  const provider = await ensureProvider(catalogFor(transport, providerTenantId), hubOrigin);
-  const token = mintToken();
   const name = workflowArtifactsCredentialName(roleId);
+  const existing = await catalog.resolveCredential(name);
+  if (existing) return existing.id;
+  const provider = await ensureProvider(catalogFor(transport, providerTenantId), hubOrigin);
   try {
-    await catalog.createCredential({ providerId: provider.id, name, type: "other", secret: token });
+    return (await catalog.createCredential({ providerId: provider.id, name, type: "other", secret: mintToken() })).id;
   } catch (cause) {
     if (!(cause instanceof ApiError && cause.status === 409)) throw cause;
-    const existing = await catalog.resolveCredential(name);
-    if (!existing) throw cause;
-    await catalog.patchCredential(existing.id, { secret: token, status: "active" });
+    const raced = await catalog.resolveCredential(name);
+    if (!raced) throw cause;
+    return raced.id;
   }
+}
+
+/**
+ * Mints a fresh bearer into the credential and registers it with the hub as
+ * valid for `anchorRunId` -- the deployment this deploy just produced. Called
+ * once per actual (re)deploy, never on the "already live" fast path.
+ */
+export async function registerWorkflowArtifactsBearer(
+  transport: Transport,
+  tenantId: string,
+  credentialId: string,
+  anchorRunId: string,
+): Promise<void> {
+  const token = mintToken();
+  await catalogFor(transport, tenantId).patchCredential(credentialId, { secret: token, status: "active" });
   await registerWorkflowArtifactToken(transport, tenantId, { token, anchorRunId });
 }

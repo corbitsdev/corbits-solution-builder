@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { ensureProvider, WORKFLOW_ARTIFACTS_PROVIDER_NAME } from "./artifacts-credential.js";
-import type { HubProvider } from "./hub.js";
+import { ApiError, type Transport } from "@intx/hub-client";
+import {
+  ensureProvider,
+  ensureWorkflowArtifactsCredentialRow,
+  registerWorkflowArtifactsBearer,
+  WORKFLOW_ARTIFACTS_PROVIDER_NAME,
+  workflowArtifactsCredentialName,
+} from "./artifacts-credential.js";
+import type { HubCredential, HubProvider } from "./hub.js";
 
 type ProviderCatalog = Parameters<typeof ensureProvider>[0];
 
@@ -76,5 +83,96 @@ describe("ensureProvider", () => {
     expect(provider.id).toBe("provider_existing");
     expect(patches).toHaveLength(0);
     expect(creates).toHaveLength(0);
+  });
+});
+
+const TENANT = "tnt_project";
+const WORKSPACE = "tnt_ws";
+const ROLE = "brainstormer";
+const CREDENTIAL_NAME = workflowArtifactsCredentialName(ROLE);
+
+function credentialRow(id: string): HubCredential {
+  return {
+    id,
+    providerId: "provider_existing",
+    name: CREDENTIAL_NAME,
+    type: "other",
+    status: "active",
+    principalId: null,
+    metadata: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+function fakeCredentialTransport(existing: HubCredential | null) {
+  let credential = existing;
+  const creates: unknown[] = [];
+  const patches: { id: string; input: unknown }[] = [];
+  const tokens: unknown[] = [];
+  const transport = {
+    async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+      const [pathname] = path.split("?");
+      const resolve = /^\/api\/tenants\/([^/]+)\/credentials\/resolve\/(.+)$/.exec(pathname!);
+      if (method === "GET" && resolve) {
+        if (!credential) throw new ApiError(404, "not_found", "no such credential");
+        return credential as T;
+      }
+      if (method === "GET" && pathname?.endsWith("/providers")) {
+        return { data: [row(ORIGIN)], nextCursor: null } as T;
+      }
+      if (method === "POST" && pathname === `/api/tenants/${TENANT}/credentials`) {
+        creates.push(body);
+        credential = credentialRow("crd_created");
+        return credential as T;
+      }
+      const patch = /^\/api\/tenants\/([^/]+)\/credentials\/([^/]+)$/.exec(pathname!);
+      if (method === "PATCH" && patch) {
+        patches.push({ id: patch[2]!, input: body });
+        return { ...(credential ?? credentialRow(patch[2]!)), status: "active" } as T;
+      }
+      if (method === "POST" && pathname === `/api/tenants/${TENANT}/workflow-artifact-tokens`) {
+        tokens.push(body);
+        return undefined as T;
+      }
+      throw new Error(`unexpected ${method} ${path}`);
+    },
+  } as Transport;
+  return { transport, creates, patches, tokens };
+}
+
+describe("ensureWorkflowArtifactsCredentialRow", () => {
+  test("returns an existing row's id and never rotates its secret", async () => {
+    const { transport, creates, patches } = fakeCredentialTransport(credentialRow("crd_existing"));
+    const first = await ensureWorkflowArtifactsCredentialRow(transport, TENANT, ORIGIN, ROLE, WORKSPACE);
+    const second = await ensureWorkflowArtifactsCredentialRow(transport, TENANT, ORIGIN, ROLE, WORKSPACE);
+    expect(first).toBe("crd_existing");
+    expect(second).toBe("crd_existing");
+    expect(creates).toHaveLength(0);
+    expect(patches).toHaveLength(0);
+  });
+
+  test("creates the row when absent, still without a later rotate on re-ensure", async () => {
+    const { transport, creates, patches } = fakeCredentialTransport(null);
+    const id = await ensureWorkflowArtifactsCredentialRow(transport, TENANT, ORIGIN, ROLE, WORKSPACE);
+    expect(id).toBe("crd_created");
+    expect(creates).toHaveLength(1);
+    expect(patches).toHaveLength(0);
+    const again = await ensureWorkflowArtifactsCredentialRow(transport, TENANT, ORIGIN, ROLE, WORKSPACE);
+    expect(again).toBe("crd_created");
+    expect(creates).toHaveLength(1);
+    expect(patches).toHaveLength(0);
+  });
+});
+
+describe("registerWorkflowArtifactsBearer", () => {
+  test("patches the credential secret and registers the same token for the anchor run", async () => {
+    const { transport, patches, tokens } = fakeCredentialTransport(credentialRow("crd_existing"));
+    await registerWorkflowArtifactsBearer(transport, TENANT, "crd_existing", "dep_1");
+    expect(patches).toHaveLength(1);
+    expect(patches[0]!.id).toBe("crd_existing");
+    const input = patches[0]!.input as { secret: string; status: string };
+    expect(input.status).toBe("active");
+    expect(input.secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(tokens).toEqual([{ token: input.secret, anchorRunId: "dep_1" }]);
   });
 });

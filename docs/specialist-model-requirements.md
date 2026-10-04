@@ -42,7 +42,7 @@ a model-pinned instance:
   `vendor/interchange/packages/hub-sessions/src/credential-push.ts` queries
   `anchorRunId IS NULL`, so per-instance `sources.update` pushes never reach
   a specialist's anchor run. A specialist's only credential story stays the
-  per-deployment bearer `ensureWorkflowArtifactsCredential` mints (CL-8719).
+  per-deployment bearer `registerWorkflowArtifactsBearer` mints (CL-8719).
   This slice changes nothing there.
 
 ## Where modelRequirements would land (deferred full slice)

@@ -367,7 +367,7 @@ export function catalogFor(transport: Transport, scope: string) {
 /**
  * Registers a bearer the installer just minted for one specialist deployment
  * with the hub's `workflow_artifact_token` table — the hub-side half of
- * `ensureWorkflowArtifactsCredential`'s `http` credential, which carries the
+ * `ensureWorkflowArtifactsCredentialRow`'s `http` credential, which carries the
  * SAME token as its secret. See `packages/embed-hub/src/workflow-artifact-tokens.ts`.
  */
 export function registerWorkflowArtifactToken(
