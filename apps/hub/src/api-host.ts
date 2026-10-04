@@ -6,6 +6,7 @@ import {
   hostIdentity,
   hostStatus,
   mintOwnerSetCookie,
+  setOwnerPassword,
   readSecretResult,
   secretReference,
   sidecarFacts,
@@ -69,6 +70,21 @@ export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keych
    * for a remote hub — that account flow is the browser's own
    * `/api/auth/*` calls against the real hub.
    */
+  /**
+   * Sets the embedded owner's password (#682): the host changes it on the
+   * hub and keeps the keychain in step. The door's session token is the
+   * proof of who is asking, as it is for every other host route.
+   */
+  api.post("/owner/password", async (context) => {
+    const body = (await context.req.json().catch(() => ({}))) as { password?: unknown };
+    const password = typeof body.password === "string" ? body.password : "";
+    if (password.length < 8) {
+      return context.json({ error: { code: "validation_failed", message: "The password needs at least 8 characters.", correlationId: "-", retryable: false } }, 400);
+    }
+    await setOwnerPassword(password);
+    return context.json({ ok: true });
+  });
+
   api.post("/owner/session", async (context) => {
     for (const cookie of await mintOwnerSetCookie()) {
       context.header("set-cookie", cookie, { append: true });
