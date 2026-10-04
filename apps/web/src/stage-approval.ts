@@ -238,7 +238,9 @@ async function pollUntil(
  * delivery, not that the loop has processed it yet), so opening a review and
  * then reading the view once is a race. Polls (same bounds as `pollUntil`)
  * until the view's open review names exactly `ref`, or a refusal for one of
- * `ourDecisionIds` lands, or the timeout.
+ * `ourDecisionIds` lands, or the timeout. Our open applied while another ref
+ * is open is `superseded`: a later open replaced it, and waiting for ours to
+ * show again would only time out.
  */
 async function pollForOpenReview(
   projectId: string,
@@ -256,6 +258,7 @@ async function pollForOpenReview(
       }
       const refusal = findOurRefusal(view.decisions, ourDecisionIds);
       if (refusal) return { ok: false, reason: refusal.reason ?? "refused" };
+      if (view.decisions.some((d) => d.accepted && ourDecisionIds.has(d.decisionId))) return { ok: false, reason: "superseded" };
     }
     if (Date.now() >= deadline) return { ok: false, reason: "timed_out" };
     await sleep(POLL_INTERVAL_MS);

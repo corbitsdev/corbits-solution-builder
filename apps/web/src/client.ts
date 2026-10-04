@@ -1127,6 +1127,12 @@ async function persistDraftOfKind(
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
     )
     .catch(() => undefined);
+  // The head already holds these exact bytes: a retry, or a second caller
+  // persisting the same reply, names it rather than minting another
+  // artifact that a review opened on the first would then be replaced by.
+  if (previousHead?.contentSha256 && previousHead.contentSha256 === (await digestOf(args.content))) {
+    return { artifactId: previousHead.id, versionId: previousHead.id, contentHash: previousHead.versionId };
+  }
   const artifact = await installerCreateArtifact(transport, projectId, {
     title: args.title,
     content: args.content,

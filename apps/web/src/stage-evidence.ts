@@ -42,6 +42,7 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
   not_audience_stage: "Stakeholder decisions are recorded at Concept approval only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
+  superseded: "Another version was opened for review after this one. Check the open review and approve again.",
 };
 
 /** A refusal code in plain language: a stage rule's from the map above,
@@ -60,14 +61,14 @@ const OPEN_REVIEW_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
 /**
  * What the person is told when `ensureReviewOpen` did not open the review
  * (#169), or null when there is nothing to tell: the view moved on to
- * another stage, or another tab landed the same decision first, and the
- * next look at the workflow settles both. Everything else -- the workflow
+ * another stage, another tab landed the same decision first, or a later
+ * open replaced ours, and the next look at the workflow settles each. Everything else -- the workflow
  * unreadable, a refusal of the `open_review` decision, a review accepted
  * but never applied -- was retried in silence before, leaving a stage with
  * a draft and no approve button and no word why.
  */
 export function openReviewFailureMessage(reason: string): string | null {
-  if (reason === "wrong_stage" || reason === "signal_id_conflict") return null;
+  if (reason === "wrong_stage" || reason === "signal_id_conflict" || reason === "superseded") return null;
   return OPEN_REVIEW_FAILURE_MESSAGES[reason] ?? stageRefusalMessage(reason);
 }
 

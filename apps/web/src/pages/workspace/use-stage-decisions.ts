@@ -75,7 +75,9 @@ export type StageDecisions = {
    *  `failed` marks an open that was tried and did not land (the hub or the
    *  workflow refused it, or threw), as against a precondition not met yet;
    *  the automatic open shows the former in the error banner (#169). */
-  readonly openReviewNow: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly failed?: true }>;
+  readonly openReviewNow: () => Promise<
+    { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly failed?: true; readonly superseded?: true }
+  >;
   readonly approve: () => Promise<void>;
   /** Stage 9's Accept: the tool approval is resolved in the delivery panel;
    *  this sends the workflow's own stage-9 `approve` — without it `done`
@@ -286,6 +288,7 @@ export function useStageDecisions({
         if (!opened.ok) {
           const message = openReviewFailureMessage(opened.reason);
           await refreshWorkflow();
+          if (opened.reason === "superseded") return { ok: false as const, reason: stageRefusalMessage(opened.reason), superseded: true as const };
           return message === null
             ? { ok: false as const, reason: stageRefusalMessage(opened.reason) }
             : { ok: false as const, reason: message, failed: true as const };
@@ -341,6 +344,10 @@ export function useStageDecisions({
         }
         return;
       }
+      // Another open replaced ours after it applied: re-sending the same
+      // material would only replace that one in turn, so the key stays
+      // spent until the material itself changes.
+      if (result.superseded) return;
       // Left as the sentinel on refusal: a later render (a poll, a reply) retries.
       ensuringReviewKeyRef.current = null;
       // A failed open is said, with its reason, rather than retried in
@@ -399,17 +406,10 @@ export function useStageDecisions({
           return;
         }
       }
-      // The normal path reads the ref straight off the already-open review —
-      // resolving it again would persist a second, redundant draft version
-      // every approval. `resolveReviewRef` is the fallback for the rare case
-      // nothing is open yet.
-      const ref = workflowView?.openReview
-        ? {
-            artifactId: workflowView.openReview.artifactId,
-            version: workflowView.openReview.version,
-            sha256: workflowView.openReview.sha256,
-          }
-        : await resolveReviewRef();
+      // The same material the automatic open names, never whatever review
+      // the last poll showed open: two answers for one stage re-open over
+      // each other. Persisting it again reuses the version that holds it.
+      const ref = await resolveReviewRef();
       if (!ref) return;
       const evidence = await stageEvidence(stage, {
         projectId: detail.project.id,
