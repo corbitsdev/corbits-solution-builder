@@ -213,3 +213,32 @@ describe("build reviews in the archive", () => {
     expect(completedDocuments([node({ kind: "build_review", stage: 8, variant: "Quality" }), node({ kind: "build_evidence", stage: 8 })]).map((n) => n.kind)).toEqual(["build_review"]);
   });
 });
+
+// #654: each screen is written inside its body, and the README says which.
+describe("framed mockups in the archive", () => {
+  test("the frame dep draws each picture and a frame that fails leaves the screen bare", async () => {
+    const design = "<!doctype html><html><body><section data-surface=\"phone\">a</section></body></html>";
+    const nodes = [node({ kind: "design_artifact", stage: 4, mediaType: "text/html" })];
+    const shots = [
+      { name: "home", png: Uint8Array.of(1), kind: "phone" as const, width: 402, height: 800 },
+      { name: "gantt", png: Uint8Array.of(2), kind: "desktop" as const, width: 1280, height: 960 },
+    ];
+    const archive = await assembleDocumentsArchive(
+      "P",
+      nodes,
+      async () => design,
+      async () => shots,
+      async (shot) => {
+        if (shot.name === "gantt") throw new Error("no canvas");
+        return Uint8Array.of(9, 9);
+      },
+    );
+    expect(archive.mockups).toEqual(["mockups/01-home.png", "mockups/02-gantt.png"]);
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    expect([...(await zip.file("mockups/01-home.png")!.async("uint8array"))]).toEqual([9, 9]);
+    expect([...(await zip.file("mockups/02-gantt.png")!.async("uint8array"))]).toEqual([2]);
+    const readme = await zip.file("README.md")!.async("string");
+    expect(readme).toContain("- mockups/01-home.png — in a phone body");
+    expect(readme).toContain("- mockups/02-gantt.png — in a browser window");
+  });
+});

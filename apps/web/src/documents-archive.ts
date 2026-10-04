@@ -12,6 +12,7 @@ import JSZip from "jszip";
 import type { ArtifactNode } from "./client.js";
 import { documentName } from "./components.jsx";
 import { mockupShots, type MockupShot, type Shooter } from "./mockup-shots.ts";
+import { frameLabel, frameMockup } from "./mockup-frames.ts";
 
 /** Where the design's screens go, as pictures (#336). */
 export const MOCKUPS_FOLDER = "mockups";
@@ -152,6 +153,8 @@ export async function assembleDocumentsArchive(
   read: (node: ArtifactNode) => Promise<string>,
   /** Draws a design's screens (#336); the browser's rasteriser by default, which draws nothing outside a browser. */
   shoot: Shooter = mockupShots,
+  /** Draws a screen inside its body (#654); the canvas framer by default. A frame that fails leaves the screen bare. */
+  frame: (shot: MockupShot) => Promise<Uint8Array> = frameMockup,
 ): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
   const files: { name: string; node: ArtifactNode }[] = [];
@@ -172,18 +175,19 @@ export async function assembleDocumentsArchive(
       // The screens as pictures, beside the HTML they are drawn from. A
       // design that cannot be drawn leaves the folder out; the HTML stands.
       const shots = await shoot(content, 12).catch((): MockupShot[] => []);
-      shots.forEach((shot, index) => {
+      for (const [index, shot] of shots.entries()) {
         const picture = mockupFileName(index, shot);
-        zip.file(picture, shot.png);
-        mockups.push(picture);
-      });
+        zip.file(picture, await frame(shot).catch(() => shot.png));
+        mockups.push(`${picture} — ${frameLabel(shot.kind)}`);
+      }
     }
   }
   let readme = archiveReadme(projectTitle, files, mockups);
+  const mockupFiles = mockups.map((entry) => entry.split(" — ")[0]!);
   if (skipped.length > 0) readme += `\nNot included, since they could not be read: ${skipped.join("; ")}.\n`;
   zip.file("README.md", readme);
   const blob = await zip.generateAsync({ type: "blob" });
-  return { blob, files: files.map((file) => file.name), skipped, mockups };
+  return { blob, files: files.map((file) => file.name), skipped, mockups: mockupFiles };
 }
 
 export type DocumentsArchiveDeps = {
