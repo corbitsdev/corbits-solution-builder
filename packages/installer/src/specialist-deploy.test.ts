@@ -239,7 +239,7 @@ describe("specialistEntryIsCurrent", () => {
   }
 
   const check = (deployed: string | null) =>
-    specialistEntryIsCurrent(transportWithEntry(deployed), TENANT.id, "ast_1", 4, offering, false, "primary", role);
+    specialistEntryIsCurrent(transportWithEntry(deployed), TENANT.id, "ast_1", 4, offering, false, "primary", role, undefined);
 
   test("current when the deployed entry is what the kit renders today", async () => {
     expect(await check(rendered)).toBe(true);

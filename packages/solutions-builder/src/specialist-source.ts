@@ -307,12 +307,17 @@ export type SpecialistSourceOptions = {
    *  (`specialistAssetName`) so each role gets its own asset. */
   readonly roleKey: string;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
-   *  `credentialBindings` entry and the matching grant requirement, and tell
-   *  the model to call `artifact_create`/`artifact_write`. Default false —
-   *  with it false the rendered source is byte-for-byte what it was before
-   *  #466. Off until a browser-driven deploy of a credential-bound
-   *  specialist is proven; see `ensureStageAgent` in `apps/web/src/client.ts`. */
+   *  `credentialBindings` entry and the `grantRequirements` entry that lets
+   *  the run use the bound credential (#288), and tell the model to call
+   *  `artifact_create`/`artifact_write`. Default false — with it false the
+   *  rendered source is byte-for-byte what it was before #466. Off until a
+   *  browser-driven deploy of a credential-bound specialist is proven; see
+   *  `ensureStageAgent` in `apps/web/src/client.ts`. */
   readonly artifactTools?: boolean;
+  /** The id of the project tenant's `workflowArtifactsCredentialName(role.id)`
+   *  credential, which the entry's use-grant names (#288). Required whenever
+   *  the deployment is credential-bound; the row must exist before render. */
+  readonly artifactCredentialId?: string;
 };
 
 /**
@@ -340,6 +345,26 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
 }
 
 /**
+ * What a credential-bound deployment declares: the `hub` binding, and the
+ * use-grant its run needs on exactly that credential. Interchange delivers
+ * the bound credential's material but mints no `credential:<id>` / `use`
+ * grant (#388), so the requirement is declared here, scoped to the package
+ * the binding is for. The credential row exists before the entry is
+ * rendered (`specialist-deploy.ts` ensures it first), so the entry names its
+ * id: the one thing in a rendered entry that is the project's.
+ */
+export function credentialAccess(pkg: string, credentialName: string, credentialId: string) {
+  return {
+    credentialBindings: [
+      { package: pkg, handle: "hub", provider: WORKFLOW_ARTIFACTS_PROVIDER_NAME, name: credentialName, locator: "tenant" },
+    ],
+    grantRequirements: [
+      { resource: `credential:${credentialId}`, action: "use", source: "creator", conditions: { tool: `tool:${pkg}` } },
+    ],
+  };
+}
+
+/**
  * The entry module a stage specialist's workflow asset ships, as source: a
  * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
  * "wait"` and no `timeout` — the same shape `buildAgentDefinitionJson` in
@@ -349,7 +374,7 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
  * this only renders it.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, role, roleKey, artifactTools = false } = options;
+  const { stage, source, role, roleKey, artifactTools = false, artifactCredentialId } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
 
@@ -385,26 +410,20 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // `source` (not a pinned `tool-packages-manifest.json`), so
   // `workflow-substrate-factory.ts`'s `sourceTools` arm sets
   // `StepToolFactory.packageName` to the bundle's own `defineTool({ id })` --
-  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts`, or (stage
-  // 8) `publishWorkspaceTool`'s own `defineTool({ id })` in
-  // `tools-delivery/publish-workspace.ts` -- not the bare npm package name
-  // `reconcileDeclaredCredentials`/`toolConsumer` would expect from a pinned
-  // closure. Binding against the bare name here builds a
-  // `tool:@corbits/artifacts` (or `tool:@solutions-builder/tools-delivery`)
-  // consumer that never matches the bundle's own consumer identity, so the
-  // capability is never assembled and the tool's `resolve("credentials")`
-  // fails closed.
-  const credentialBindings = spec.credentialPackage
+  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts` -- not the
+  // bare npm package name `reconcileDeclaredCredentials`/`toolConsumer` would
+  // expect from a pinned closure. Binding against the bare name here builds a
+  // `tool:@corbits/artifacts` consumer that never matches the bundle's own
+  // consumer identity, so the capability is never assembled and the tool's
+  // `resolve("credentials")` fails closed.
+  if (spec.credentialPackage && !artifactCredentialId) {
+    throw new Error(`stage ${stage} ${roleKey} is credential-bound: its entry needs the artifacts credential's id`);
+  }
+  const access = spec.credentialPackage && artifactCredentialId ? credentialAccess(spec.credentialPackage, credentialName, artifactCredentialId) : null;
+  const credentialBindings = access
     ? `
-  credentialBindings: [
-    {
-      package: ${JSON.stringify(spec.credentialPackage)},
-      handle: "hub",
-      provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
-      name: ${JSON.stringify(credentialName)},
-      locator: "tenant",
-    },
-  ],`
+  credentialBindings: ${JSON.stringify(access.credentialBindings)},
+  grantRequirements: ${JSON.stringify(access.grantRequirements)},`
     : "";
 
   return `import { defineWorkflow, step } from "@intx/workflow/definition";
