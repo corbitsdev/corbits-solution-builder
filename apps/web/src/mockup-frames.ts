@@ -69,6 +69,86 @@ function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, w:
   context.closePath();
 }
 
+/** The status bar's time, as every phone in a product shot shows it. */
+export const STATUS_BAR_TIME = "9:41";
+
+/** Whether ink on this background should be light: the background is dark by relative luminance. */
+export function lightInkOn(background: string | null): boolean {
+  const match = /rgb\((\d+), (\d+), (\d+)\)/.exec(background ?? "");
+  if (!match) return false;
+  const [r, g, b] = [Number(match[1]), Number(match[2]), Number(match[3])].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.4;
+}
+
+/**
+ * The strip either side of the island (#672): the time on the left;
+ * signal, Wi-Fi and battery on the right. Sized from the screen's width so
+ * it reads the same at any capture scale.
+ */
+function drawStatusBar(context: CanvasRenderingContext2D, screen: { x: number; y: number; width: number }, islandHeight: number, ink: string): void {
+  const w = screen.width;
+  const centreY = screen.y + islandHeight * 0.5 + islandHeight / 2;
+  const margin = Math.round(w * 0.075);
+  const fontSize = Math.round(w * 0.042);
+  context.save();
+  context.fillStyle = ink;
+  context.strokeStyle = ink;
+  context.font = `600 ${String(fontSize)}px -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif`;
+  context.textBaseline = "middle";
+  context.textAlign = "left";
+  context.fillText(STATUS_BAR_TIME, screen.x + margin, centreY);
+
+  // Battery: a rounded shell, its charge, and the nub.
+  const batteryW = Math.round(w * 0.066);
+  const batteryH = Math.round(w * 0.031);
+  const batteryX = screen.x + w - margin - batteryW;
+  const batteryY = centreY - batteryH / 2;
+  context.lineWidth = Math.max(1, w * 0.0035);
+  roundedRect(context, batteryX, batteryY, batteryW, batteryH, batteryH * 0.3);
+  context.globalAlpha = 0.45;
+  context.stroke();
+  context.globalAlpha = 1;
+  roundedRect(context, batteryX + batteryH * 0.18, batteryY + batteryH * 0.18, (batteryW - batteryH * 0.36) * 0.86, batteryH * 0.64, batteryH * 0.16);
+  context.fill();
+  roundedRect(context, batteryX + batteryW + batteryH * 0.1, centreY - batteryH * 0.18, batteryH * 0.14, batteryH * 0.36, batteryH * 0.07);
+  context.globalAlpha = 0.45;
+  context.fill();
+  context.globalAlpha = 1;
+
+  // Wi-Fi: three arcs of a quarter circle fanning out from a point.
+  const wifiR = Math.round(w * 0.03);
+  const wifiX = batteryX - w * 0.022 - wifiR;
+  const wifiY = centreY + wifiR * 0.45;
+  context.lineWidth = Math.max(1.5, w * 0.007);
+  context.lineCap = "round";
+  for (const [i, fraction] of [0.35, 0.68, 1].entries()) {
+    context.beginPath();
+    context.arc(wifiX, wifiY, wifiR * fraction, Math.PI * 1.25, Math.PI * 1.75);
+    if (i === 0) {
+      context.fillStyle = ink;
+      context.beginPath();
+      context.arc(wifiX, wifiY - wifiR * 0.08, context.lineWidth * 0.9, 0, Math.PI * 2);
+      context.fill();
+      continue;
+    }
+    context.stroke();
+  }
+
+  // Signal: four bars rising to the right.
+  const barW = Math.max(2, w * 0.0085);
+  const gap = barW * 0.7;
+  const signalX = wifiX - wifiR - w * 0.022 - (barW * 4 + gap * 3);
+  for (let i = 0; i < 4; i += 1) {
+    const h = fontSize * (0.35 + i * 0.2);
+    roundedRect(context, signalX + i * (barW + gap), centreY + fontSize * 0.42 - h, barW, h, barW * 0.3);
+    context.fill();
+  }
+  context.restore();
+}
+
 /** The colour of a picture's top-left pixel, as CSS, so the rest of a short page's screen matches it; null when it cannot be read. */
 function backgroundOf(image: ImageBitmap): string | null {
   try {
@@ -121,7 +201,8 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
     // The page from its top, at the screen's width, clipped to the screen:
     // a longer page is cut at the bottom, a shorter one sits on its own
     // background colour read from the capture's first pixel row.
-    context.fillStyle = backgroundOf(image) ?? "#ffffff";
+    const background = backgroundOf(image);
+    context.fillStyle = background ?? "#ffffff";
     context.fillRect(screen.x, screen.y, screen.width, screen.height);
     const drawnHeight = image.height * (screen.width / image.width);
     context.drawImage(image, screen.x, screen.y, screen.width, drawnHeight);
@@ -131,6 +212,7 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
     roundedRect(context, screen.x + (screen.width - islandW) / 2, screen.y + islandH * 0.5, islandW, islandH, islandH / 2);
     context.fillStyle = "#0b0c10";
     context.fill();
+    drawStatusBar(context, screen, islandH, lightInkOn(background) ? "#ffffff" : "#111318");
     const barW = Math.round(screen.width * 0.36);
     roundedRect(context, screen.x + (screen.width - barW) / 2, screen.y + screen.height - 5 * unit, barW, 2.5 * unit, 1.25 * unit);
     context.fillStyle = "rgba(0,0,0,0.55)";

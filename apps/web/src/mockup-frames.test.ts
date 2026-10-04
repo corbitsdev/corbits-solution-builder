@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PHONE_SCREEN_RATIO, bodyFor, frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
+import { PHONE_SCREEN_RATIO, STATUS_BAR_TIME, bodyFor, lightInkOn, frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 
 // #654: the body around a screen is sized from the screen.
 describe("frameGeometry", () => {
@@ -63,5 +63,15 @@ describe("bodyFor", () => {
     const source = await Bun.file(new URL("./mockup-shots.ts", import.meta.url)).text();
     expect(source).toContain("export const PHONE_FRAME_WIDTH = 402;");
     expect(source).toMatch(/frame\.style\.width = kind === "phone" \? `\$\{String\(PHONE_FRAME_WIDTH\)\}px`/);
+  });
+});
+
+// #672: the status bar's ink suits the screen's background.
+describe("the status bar", () => {
+  test("shows the product-shot time, in light ink on a dark background and dark ink otherwise", () => {
+    expect(STATUS_BAR_TIME).toBe("9:41");
+    expect(lightInkOn("rgb(17, 19, 24)")).toBe(true);
+    expect(lightInkOn("rgb(248, 250, 252)")).toBe(false);
+    expect(lightInkOn(null)).toBe(false);
   });
 });
