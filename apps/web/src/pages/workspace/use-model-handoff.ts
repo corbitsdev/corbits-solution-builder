@@ -251,10 +251,35 @@ export function handoffPending(args: {
 export type ModelSwitchState = {
   readonly switching: boolean;
   readonly error: string | null;
-  /** The offering last switched to, whether or not it succeeded. */
+  /** The offering last switched to on this project+stage, whether or not it succeeded. */
   readonly target: string | null;
   readonly switchTo: (offeringId: string) => Promise<void>;
 };
+
+/** Always-switch's `target` (and its error/switching flags) belong to one
+ *  project+stage. StageWorkspace keeps the same instance across stage changes
+ *  (`app.tsx` keys only on `project.id`), so a later stage that inherited
+ *  stage N's target — typically the primary, after Always switch already ran
+ *  there — would skip its own auto-switch even when it still has a persisted
+ *  non-primary pick. */
+export type ModelSwitchRecord = {
+  readonly projectId: string;
+  readonly stage: number;
+  readonly switching: boolean;
+  readonly error: string | null;
+  readonly target: string | null;
+};
+
+export function liveSwitchState(
+  projectId: string,
+  stage: number,
+  record: ModelSwitchRecord,
+): Pick<ModelSwitchState, "switching" | "error" | "target"> {
+  if (record.projectId === projectId && record.stage === stage) {
+    return { switching: record.switching, error: record.error, target: record.target };
+  }
+  return { switching: false, error: null, target: null };
+}
 
 /** Deploys the stage's specialist onto `offeringId` (CL-8899). Sends
  *  nothing itself — `useModelHandoff` below notices the live address moved
@@ -266,24 +291,33 @@ export function useModelSwitch(args: {
   readonly projectId: string;
   readonly stage: number;
 }): ModelSwitchState {
-  const [switching, setSwitching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [target, setTarget] = useState<string | null>(null);
+  const [record, setRecord] = useState<ModelSwitchRecord>({
+    projectId: args.projectId,
+    stage: args.stage,
+    switching: false,
+    error: null,
+    target: null,
+  });
+  const live = liveSwitchState(args.projectId, args.stage, record);
 
   const switchTo = async (offeringId: string) => {
-    setTarget(offeringId);
-    setSwitching(true);
-    setError(null);
+    const { projectId, stage } = args;
+    setRecord({ projectId, stage, switching: true, error: null, target: offeringId });
     try {
-      await api.switchStageAgent(args.projectId, args.stage, offeringId);
+      await api.switchStageAgent(projectId, stage, offeringId);
+      setRecord((current) =>
+        current.projectId === projectId && current.stage === stage ? { ...current, switching: false } : current,
+      );
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setSwitching(false);
+      setRecord((current) =>
+        current.projectId === projectId && current.stage === stage
+          ? { ...current, switching: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }
+          : current,
+      );
     }
   };
 
-  return { switching, error, target, switchTo };
+  return { switching: live.switching, error: live.error, target: live.target, switchTo };
 }
 
 /**

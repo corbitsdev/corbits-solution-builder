@@ -14,7 +14,9 @@ import {
   handoffId,
   handoffLanded,
   handoffPending,
+  liveSwitchState,
   switchMarker,
+  type ModelSwitchRecord,
 } from "./use-model-handoff.ts";
 import { withoutSwitchMarker } from "./thread.tsx";
 
@@ -226,5 +228,59 @@ Here is the conversation so far, so you can pick it up without restarting it:
 Person: hi`;
     expect(withoutSwitchMarker({ id: "h", author: "me", body, at })).toBe(HANDOFF_BUBBLE_TEXT);
     expect(withoutSwitchMarker({ id: "p", author: "me", body: "Please resend the plan.", at })).toBe("Please resend the plan.");
+  });
+});
+
+// Always switch's `target` used to live on the StageWorkspace instance, which
+// survives stage changes (`app.tsx` keys only on project.id). After it ran on
+// stage N, `target` was already the primary, so stage M with a persisted pick
+// never auto-switched.
+describe("Always switch is scoped to the live stage", () => {
+  const primary = "off-primary";
+  const afterN: ModelSwitchRecord = {
+    projectId: "proj",
+    stage: 1,
+    switching: true,
+    error: "The inference could not be switched",
+    target: primary,
+  };
+
+  test("target, error, and switching from stage N do not apply to stage M", () => {
+    expect(liveSwitchState("proj", 2, afterN)).toEqual({ switching: false, error: null, target: null });
+    expect(liveSwitchState("proj", 1, afterN)).toEqual({
+      switching: true,
+      error: "The inference could not be switched",
+      target: primary,
+    });
+  });
+
+  test("Always switch on stage N still calls switchStageAgent for a later mismatched stage", async () => {
+    const calls: Array<{ stage: number; offeringId: string }> = [];
+    const switchStageAgent = async (_projectId: string, stage: number, offeringId: string) => {
+      calls.push({ stage, offeringId });
+    };
+    let record: ModelSwitchRecord = { projectId: "proj", stage: 1, switching: false, error: null, target: null };
+
+    const fire = async (stage: number) => {
+      const live = liveSwitchState("proj", stage, record);
+      // index.tsx: autoSwitchTo uses `modelSwitch.target !== defaultOffering?.offeringId`
+      if (live.target === primary) return;
+      await switchStageAgent("proj", stage, primary);
+      record = { projectId: "proj", stage, switching: false, error: null, target: primary };
+    };
+
+    await fire(1);
+    await fire(2);
+    expect(calls).toEqual([
+      { stage: 1, offeringId: primary },
+      { stage: 2, offeringId: primary },
+    ]);
+  });
+
+  test("useModelSwitch reads switch UI through liveSwitchState", () => {
+    const hook = readFileSync(join(import.meta.dir, "use-model-handoff.ts"), "utf8");
+    expect(hook).toContain("liveSwitchState(args.projectId, args.stage, record)");
+    const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
+    expect(index).toContain("modelSwitch.target !== defaultOffering?.offeringId");
   });
 });
