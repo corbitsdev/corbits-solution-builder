@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-namer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Namer: names a project from its opening problem statement.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

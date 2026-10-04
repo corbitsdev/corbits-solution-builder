@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-proposer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Solution proposal brainstormer: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-delivery-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Deliver delivery verifier: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

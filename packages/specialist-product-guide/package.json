@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-product-guide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Product guide: calm orientation across all nine stages.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}
