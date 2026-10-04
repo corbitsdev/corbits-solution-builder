@@ -190,4 +190,36 @@ describe("supervisorStatus", () => {
     const laterReply: ChatMessage = { id: "a2", author: "agent", body: "answering the later question", at };
     expect(supervisorStatus([brief, reply, laterAsk, laterReply], 2)).toEqual({ attempt: 2, reply });
   });
+
+  test("a brief that used sendStageMail's default subject still surfaces the recorded reply", () => {
+    const body = composeSupervisorBrief({
+      attempt: 2,
+      outcome: {
+        bridgeId: "bounded-local-corbits-exec",
+        worker: "corbits-code",
+        command: "corbits",
+        available: true,
+        exitStatus: 0,
+        signal: null,
+        finalText: "done",
+        stderrTail: "",
+        workspace: "/data/builds/p/attempts/2",
+        turnLog: "/data/builds/p/attempts/2.turns.jsonl",
+        turns: 1,
+        toolCalls: 1,
+        startedAt: at,
+        endedAt: at,
+        checkpointRef: null,
+      },
+      archive: { fileName: "build.tar.gz", sha256: "abc", sizeBytes: 1234, fileCount: 1 },
+      verification: { complete: true, failed: [], targets: [] },
+    });
+    const brief: ChatMessage = { id: "m1", author: "me", body, at, subject: body.slice(0, 60) };
+    const reply: ChatMessage = { id: "a1", author: "agent", body: "attempt 2 is recorded", at };
+    expect(brief.subject).not.toBe(appSubject("brief", "2"));
+    expect(brief.subject?.startsWith("Build attempt 2 has ended")).toBe(true);
+    expect(supervisorStatus([brief, reply], 2)).toEqual({ attempt: 2, reply });
+    expect(supervisorStatus([brief, reply], 1)).toBeNull();
+    expect(supervisorStatus([brief], 2)).toEqual({ attempt: 2, reply: null });
+  });
 });

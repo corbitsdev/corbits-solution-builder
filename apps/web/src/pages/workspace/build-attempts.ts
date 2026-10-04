@@ -133,13 +133,22 @@ const FINAL_TEXT_KEEP = 20_000;
  * `attempt`, the newest recorded, or that it has not replied yet. The brief
  * is found by its subject and the reply by its threading, never by either
  * body. Null when no brief for that attempt was sent.
+ *
+ * New recordings use `[app:brief] N`. Recordings from before that subject
+ * used sendStageMail's default (the first 60 characters of
+ * composeSupervisorBrief), which starts `Build attempt N has ended`.
  */
 export function supervisorStatus(
   messages: readonly ChatMessage[],
   attempt: number,
 ): { attempt: number; reply: ChatMessage | null } | null {
   const subject = appSubject("brief", String(attempt));
-  const brief = messages.findLast((message) => message.author === "me" && message.subject === subject);
+  const legacyPrefix = `Build attempt ${String(attempt)} has ended`;
+  const brief = messages.findLast(
+    (message) =>
+      message.author === "me" &&
+      (message.subject === subject || (message.subject?.startsWith(legacyPrefix) ?? false)),
+  );
   if (!brief) return null;
   const { answeredBy } = pairReplies(messages);
   return { attempt, reply: messages.find((message) => message.author === "agent" && answeredBy.get(message.id) === brief.id) ?? null };

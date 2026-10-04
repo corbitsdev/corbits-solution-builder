@@ -203,7 +203,7 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
-  /** What the column says before the thread has a turn; by default, that the specialist is getting ready. */
+  /** What the column says before the thread has a turn; defaults to "No messages yet." Stage 8 passes its own copy. */
   empty?: string;
 }) {
   const opening = pending && !messages.some((message) => message.author === "agent");
@@ -237,7 +237,7 @@ export function StageConversation({
     <div className="stage-conversation">
       {uiMessages.length === 0 ? (
         <div className={CONV_SCROLL_CLASS}>
-          <p className="inline-note">{empty ?? `The ${who.toLowerCase()} is getting ready…`}</p>
+          <p className="inline-note">{empty ?? "No messages yet."}</p>
         </div>
       ) : (
         <div

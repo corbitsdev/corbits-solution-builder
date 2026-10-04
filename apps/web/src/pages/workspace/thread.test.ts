@@ -103,8 +103,10 @@ describe("StageConversation message bodies", () => {
     expect(html).not.toContain("getting ready");
   });
 
-  test("an empty thread without a given copy says the specialist is getting ready", () => {
-    expect(render([])).toContain("The specialist is getting ready");
+  test("an empty thread without a given copy says no messages yet", () => {
+    const html = render([]);
+    expect(html).toContain("No messages yet.");
+    expect(html).not.toContain("getting ready");
   });
 });
 
