@@ -11,8 +11,8 @@
 import JSZip from "jszip";
 import type { ArtifactNode } from "./client.js";
 import { documentName } from "./components.jsx";
-import { mockupShots, type MockupShot, type Shooter } from "./mockup-shots.ts";
-import { frameLabel, frameMockup } from "./mockup-frames.ts";
+import type { MockupShot, Shooter } from "./mockup-shots.ts";
+import { frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 
 /** Where the design's screens go, as pictures (#336). */
 export const MOCKUPS_FOLDER = "mockups";
@@ -152,8 +152,8 @@ export async function assembleDocumentsArchive(
   nodes: readonly ArtifactNode[],
   read: (node: ArtifactNode) => Promise<string>,
   /** Draws a design's screens (#336); the browser's rasteriser by default, which draws nothing outside a browser. */
-  shoot: Shooter = mockupShots,
-  /** Draws a screen inside its body (#654); the canvas framer by default. A frame that fails leaves the screen bare. */
+  shoot: Shooter = framedMockupShots,
+  /** Draws a screen inside its body (#654) when the shooter did not already (`framed`); the canvas framer by default. A frame that fails leaves the screen bare. */
   frame: (shot: MockupShot) => Promise<Uint8Array> = frameMockup,
 ): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
