@@ -23,7 +23,15 @@ import type { Deck } from "@solutions-builder/app/deck";
 /** What a screen is: a phone's, or a desktop's (a browser window), for the body it is drawn in (#654). */
 export type ScreenKind = "phone" | "desktop";
 
-export type MockupShot = { readonly name: string; readonly png: Uint8Array; readonly kind?: ScreenKind; readonly width?: number; readonly height?: number };
+export type MockupShot = {
+  readonly name: string;
+  readonly png: Uint8Array;
+  readonly kind?: ScreenKind;
+  readonly width?: number;
+  readonly height?: number;
+  /** The picture is already inside its body (#666); framing it again would nest one. */
+  readonly framed?: boolean;
+};
 
 /**
  * A screen's kind (#654): the design's `data-surface` mark when it has

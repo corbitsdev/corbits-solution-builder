@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frameGeometry, frameLabel, frameMockup } from "./mockup-frames.ts";
+import { frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 
 // #654: the body around a screen is sized from the screen.
 describe("frameGeometry", () => {
@@ -28,5 +28,22 @@ describe("frameGeometry", () => {
     const png = Uint8Array.of(1, 2, 3);
     expect(await frameMockup({ name: "x", png })).toBe(png);
     expect(await frameMockup({ name: "x", png, kind: "phone", width: 402, height: 800 })).toBe(png);
+  });
+});
+
+// #666: screens are framed at capture, so slides, preview, print and download all draw the body.
+describe("framedMockupShots", () => {
+  test("a framed shot is never framed again, and outside a browser there is nothing to capture", async () => {
+    const png = Uint8Array.of(1);
+    expect(await frameMockup({ name: "x", png, kind: "desktop", width: 1280, height: 960, framed: true })).toBe(png);
+    expect(await framedMockupShots("<!doctype html><html><body><section data-surface=\"phone\">x</section></body></html>")).toEqual([]);
+  });
+
+  test("the slide builders capture through the framer", async () => {
+    for (const file of ["./deck-save.ts", "./pages/audiences.tsx", "./documents-archive.ts"]) {
+      const source = await Bun.file(new URL(file, import.meta.url)).text();
+      expect(source).toContain("framedMockupShots");
+      expect(source).not.toMatch(/[^d]mockupShots\(/);
+    }
   });
 });

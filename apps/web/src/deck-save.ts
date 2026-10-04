@@ -16,7 +16,8 @@
 import { deckFileName, deckFrom, packageOutlineProblem, renderDeck, DECK_MEDIA_TYPE, DECK_THEMES, type DeckDesign, type TemplateTheme } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 import { artDirection, illustration, illustrationPrompt, type ImageCredential } from "./deck-images.ts";
-import { mockupShots, placeMockups, type Shooter } from "./mockup-shots.ts";
+import { placeMockups, type Shooter } from "./mockup-shots.ts";
+import { framedMockupShots } from "./mockup-frames.ts";
 
 export { deckFileName };
 
@@ -72,7 +73,7 @@ export async function buildPackageDeck(args: {
   // whatever the images policy: a pitch shows the thing being pitched (#227).
   if (args.mockup?.html.trim()) {
     try {
-      const shots = await (args.mockup.shoot ?? mockupShots)(args.mockup.html, deck.slides.length + 1);
+      const shots = await (args.mockup.shoot ?? framedMockupShots)(args.mockup.html, deck.slides.length + 1);
       images = placeMockups(images ? { ...deck, images } : deck, shots);
     } catch (cause) {
       const reason = `the design's screens could not be captured (${cause instanceof Error ? cause.message : String(cause)})`;

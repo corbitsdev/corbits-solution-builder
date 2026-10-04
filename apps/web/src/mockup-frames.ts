@@ -5,7 +5,7 @@
  * three dots and an address pill. `frameGeometry` is pure and sized from
  * the screen; `frameMockup` draws it on a canvas, in the browser.
  */
-import type { MockupShot, ScreenKind } from "./mockup-shots.ts";
+import { mockupShots, type MockupShot, type ScreenKind } from "./mockup-shots.ts";
 
 export type FrameGeometry = {
   readonly kind: ScreenKind;
@@ -61,7 +61,7 @@ async function bitmapOf(png: Uint8Array): Promise<ImageBitmap> {
 
 /** The screen's picture inside its body, as PNG bytes; a shot with no kind is returned as it is. */
 export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
-  if (!shot.kind || typeof document === "undefined") return shot.png;
+  if (shot.framed || !shot.kind || typeof document === "undefined") return shot.png;
   const image = await bitmapOf(shot.png);
   const scale = shot.width && shot.width > 0 ? image.width / shot.width : 2;
   const geometry = frameGeometry(shot.kind, image.width, image.height);
@@ -133,4 +133,19 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) return shot.png;
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * The design's screens, each inside its body (#666): what every slide,
+ * preview, print and download draws. A screen whose body cannot be drawn
+ * is kept bare rather than dropped.
+ */
+export async function framedMockupShots(html: string, max?: number): Promise<MockupShot[]> {
+  const shots = await mockupShots(html, max);
+  return Promise.all(
+    shots.map(async (shot) => {
+      const png = await frameMockup(shot).catch(() => shot.png);
+      return { ...shot, png, framed: png !== shot.png || shot.framed === true };
+    }),
+  );
 }
