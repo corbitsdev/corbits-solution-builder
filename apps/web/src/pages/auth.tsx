@@ -27,12 +27,15 @@ export type MintFailure = { reason: string; onRetry: () => void };
 export function Auth({
   onSignedIn,
   mintFailure,
+  onContinueAsOwner,
 }: {
   onSignedIn: () => void;
   mintFailure?: MintFailure;
+  /** Embedded, after a sign-out (#682): signs the computer's owner back in without typing. */
+  onContinueAsOwner?: () => void;
 }) {
   if (mintFailure) return <MintFailureCard failure={mintFailure} />;
-  return <HostedAuth onSignedIn={onSignedIn} />;
+  return <HostedAuth onSignedIn={onSignedIn} {...(onContinueAsOwner ? { onContinueAsOwner } : {})} />;
 }
 
 function MintFailureCard({ failure }: { failure: MintFailure }) {
@@ -60,8 +63,8 @@ function MintFailureCard({ failure }: { failure: MintFailure }) {
   );
 }
 
-function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
-  const [mode, setMode] = useState<Mode>("signup");
+function HostedAuth({ onSignedIn, onContinueAsOwner }: { onSignedIn: () => void; onContinueAsOwner?: () => void }) {
+  const [mode, setMode] = useState<Mode>(onContinueAsOwner ? "login" : "signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -150,6 +153,11 @@ function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
           <Button variant="primary" block type="submit" loading={busy} disabled={!canSubmit}>
             {mode === "signup" ? "Create account" : "Sign in"}
           </Button>
+          {onContinueAsOwner ? (
+            <Button variant="ghost" block onClick={onContinueAsOwner}>
+              Continue as this computer's owner
+            </Button>
+          ) : null}
         </form>
 
         <p className="auth-switch">

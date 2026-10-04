@@ -75,7 +75,7 @@ describe("settings page markup language", () => {
 
   test("mockup sections stay, and the extras the mockup cut are gone", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    for (const title of ["Appearance", "Language", "Inference", "Designer", "Stakeholder decks", "Design documents", "This computer"]) {
+    for (const title of ["Account", "Appearance", "Language", "Inference", "Designer", "Stakeholder decks", "Design documents", "This computer"]) {
       expect(page).toContain(title);
     }
     expect(page).toContain("ProviderList");
@@ -228,5 +228,17 @@ describe("languageOptionLabel", () => {
     expect(languageOptionLabel("en-GB", "British English", true)).toBe("British English");
     expect(languageOptionLabel("fr", "French", true)).toBe("French (not supported yet)");
     expect(languageOptionLabel("fr", "French", false)).toBe("French");
+  });
+});
+
+// #682: the Account section edits the name and the password; embedded goes through the host.
+describe("the Account section", () => {
+  test("saves the name on the hub, sets the owner password through the host when embedded, and offers Sign out", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const account = page.slice(page.indexOf("function Account"), page.indexOf("/* ----------------------------------------------------------------- language"));
+    expect(account).toContain("renameHubUser(name.trim())");
+    expect(account).toContain("if (embedded) await api.setOwnerPassword(next);");
+    expect(account).toContain("else await changeHubPassword({ currentPassword: current, newPassword: next });");
+    expect(account).toContain("Sign out");
   });
 });

@@ -276,6 +276,31 @@ form:has(> div > textarea) textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* The account control (#682): the person's initials in a disc. */
+.account-control .account-initials {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--wb-foreground);
+  color: var(--wb-background);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.account-menu-who {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+}
+
+.account-menu-who span {
+  color: var(--wb-muted-foreground);
+}
+
 .wordmark-menu svg {
   width: 14px;
   height: 14px;
