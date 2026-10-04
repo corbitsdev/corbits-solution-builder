@@ -470,7 +470,9 @@ export function AudiencePackages({
     // project and the theme render_deck should draw with. Best effort — a
     // brief that cannot be read never stops a package being asked for.
     const brief = await api.deckBrief(detail.project.id, audience.role).catch(() => null);
-    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design, brief) });
+    await api.sendStageMail(tenantId, deployment.address, {
+      body: packageRequest(audience, design, brief, { audiences: policy.audiences ?? [], quorum: policy.audienceQuorum ?? 0 }),
+    });
     let reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     // Not every reply is a package (#220): one with no deck outline is
