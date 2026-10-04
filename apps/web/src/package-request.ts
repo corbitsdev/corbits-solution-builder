@@ -52,8 +52,22 @@ export function packageNudge(audience: PackageAudience, problem: string): string
   return `${packageAsk(audience.name)}, the ${roleLabel(audience.role)} — again, as the reply itself.\n\nYour last reply was not the package: ${problem}. Reply with the package: the status line, then the five headed sections in Markdown, with the deck outline as numbered slides, in this reply. Markdown handed to render_deck is not read as the package.`;
 }
 
-export function packageRequest(audience: PackageAudience, design: string | null, brief: DeckBrief | null = null): string {
+/** Everyone the Concept approval decision rests with, and how many of them must proceed. */
+export type PackageRoster = { readonly audiences: readonly PackageAudience[]; readonly quorum: number };
+
+/** The roster as the request states it (#690), so the specialist never takes one reader for the only approver. */
+export function rosterLine(audience: PackageAudience, roster: PackageRoster): string | null {
+  const others = roster.audiences.filter((entry) => entry.name !== audience.name);
+  if (others.length === 0) return null;
+  const everyone = roster.audiences.map((entry) => `${entry.name} (${roleLabel(entry.role)})`).join(", ");
+  const needed = roster.quorum > 0 ? `${String(roster.quorum)} of them must proceed` : "each decides for themselves";
+  return `The decision does not rest with ${audience.name} alone: the stakeholders are ${everyone}; ${needed}. This package is for ${audience.name} only; the others get packages of their own, so write to ${audience.name} and never call them the sole decision-maker.`;
+}
+
+export function packageRequest(audience: PackageAudience, design: string | null, brief: DeckBrief | null = null, roster: PackageRoster | null = null): string {
   const parts = [`${packageAsk(audience.name)}, the ${roleLabel(audience.role)}.`];
+  const who = roster ? rosterLine(audience, roster) : null;
+  if (who) parts.push(who);
   // An HTML mockup goes over as its text, not its markup (#219): mailed
   // verbatim, the model answered with HTML instead of a Markdown package.
   if (design && design.trim()) parts.push(`The approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`);

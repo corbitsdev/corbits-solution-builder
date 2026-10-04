@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { packageAsk, packageNudge, packageReplyProblem, packageRequest } from "./package-request.ts";
+import { rosterLine } from "./package-request.ts";
 
 // #41 step 3: the request names the stakeholder and their role, since the
 // one stage 5 specialist's prompt names nobody. #115: it carries the
@@ -64,5 +65,21 @@ describe("packageRequest", () => {
 
   test("opens with the ask line the reply is found by", () => {
     expect(packageRequest({ name: "You", role: "project_owner" }, null)).toStartWith(packageAsk("You"));
+  });
+});
+
+// #690: the request names everyone on the roster, so no reader is called the sole decision-maker.
+describe("the roster in the request", () => {
+  const roster = { audiences: [{ name: "You", role: "project_owner" }, { name: "Brent Mattson", role: "budget_approver" }, { name: "Brian J. Fox", role: "architect" }], quorum: 2 };
+  test("names the others, the quorum, and that this package is for one reader", () => {
+    const body = packageRequest({ name: "You", role: "project_owner" }, null, null, roster);
+    expect(body).toContain("Write the package for: You, the project owner.");
+    expect(body).toContain("the stakeholders are You (project owner), Brent Mattson (budget approver), Brian J. Fox (architect); 2 of them must proceed");
+    expect(body).toContain("never call them the sole decision-maker");
+  });
+
+  test("a roster of one says nothing extra", () => {
+    expect(rosterLine({ name: "You", role: "project_owner" }, { audiences: [{ name: "You", role: "project_owner" }], quorum: 1 })).toBeNull();
+    expect(packageRequest({ name: "Mr Tech", role: "security_reviewer" }, null)).toBe("Write the package for: Mr Tech, the security reviewer.");
   });
 });
