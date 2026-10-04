@@ -8,7 +8,7 @@ let seq = 0;
 function node(kind: string, stage: number, over: Partial<ArtifactNode> = {}): ArtifactNode {
   seq += 1;
   const id = over.id ?? `n${String(seq)}`;
-  return { id, kind, variant: null, stage, title: kind, version: 1, artifactId: `a-${id}`, contentHash: "", createdAt: at, supersededByNodeId: null, provenance: { producer: "agent" }, ...over } as ArtifactNode;
+  return { id, kind, variant: null, stage, title: kind, version: 1, position: 1, artifactId: `a-${id}`, contentHash: "", createdAt: at, supersededByNodeId: null, provenance: { producer: "agent" }, ...over } as ArtifactNode;
 }
 const PRD = "## Functional requirements\n\n- FR-1: It works.\n\n## Acceptance criteria\n\n- AC-1: It is seen to work.\n";
 function bundle(over: Partial<ProjectBundle> = {}): ProjectBundle {
