@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1020" viewBox="0 0 1500 1020" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1a2b3c"/>
+    </marker>
+  </defs>
+
+  <!-- page + card -->
+  <rect x="0" y="0" width="1500" height="1020" fill="#f5f6f7"/>
+  <rect x="20" y="20" width="1460" height="975" rx="16" fill="#ffffff" stroke="#e5e7eb"/>
+
+  <!-- header -->
+  <path d="M78 58 l9 -14 l6 9 l5 -7 l8 12" fill="none" stroke="#1a2b3c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <text x="114" y="60" font-size="16" font-weight="700" fill="#1a2b3c">Corbits</text>
+  <line x1="196" y1="44" x2="196" y2="62" stroke="#d1d5db" stroke-width="1.5"/>
+  <text x="208" y="60" font-size="14" font-family="SF Mono, Menlo, Consolas, monospace" fill="#3f9e5f">01</text>
+  <text x="238" y="61" font-size="20" font-weight="700" fill="#1a2b3c">Solution Builder Architecture</text>
+
+  <!-- ===== APPS row ===== -->
+  <text x="80" y="112" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="2" fill="#6b7280">APPS</text>
+
+  <rect x="80" y="122" width="220" height="60" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="190" y="147" font-size="15" font-weight="700" fill="#1a2b3c" text-anchor="middle">apps/desktop</text>
+  <text x="190" y="166" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">tauri shell</text>
+
+  <rect x="330" y="122" width="220" height="60" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="440" y="147" font-size="15" font-weight="700" fill="#1a2b3c" text-anchor="middle">apps/web</text>
+  <text x="440" y="166" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">react spa client</text>
+
+  <rect x="580" y="122" width="220" height="60" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="690" y="147" font-size="15" font-weight="700" fill="#1a2b3c" text-anchor="middle">apps/hub</text>
+  <text x="690" y="166" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">host composition</text>
+
+  <!-- arrows apps -> hub host -->
+  <line x1="190" y1="182" x2="190" y2="266" stroke="#1a2b3c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="198" y="228" font-size="12" fill="#1a2b3c">spawns host binary</text>
+
+  <line x1="440" y1="182" x2="440" y2="266" stroke="#1a2b3c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="448" y="220" font-size="12" fill="#1a2b3c">HTTP &#183; hub-client Transport</text>
+  <text x="448" y="236" font-size="12" fill="#1a2b3c">installer &#183; project.decision signal</text>
+
+  <line x1="690" y1="182" x2="690" y2="266" stroke="#1a2b3c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="698" y="228" font-size="12" fill="#1a2b3c">serveHost()</text>
+
+  <!-- ===== HUB HOST container ===== -->
+  <rect x="80" y="270" width="900" height="230" rx="12" fill="#eef3fa" stroke="#2d5a8e" stroke-width="1.5"/>
+  <text x="100" y="296" font-size="12" font-weight="700" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="2" fill="#2d5a8e">HUB HOST &#183; TRUSTED</text>
+  <text x="960" y="296" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="end">session-token door on /api</text>
+
+  <rect x="100" y="312" width="200" height="64" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="200" y="338" font-size="14" font-weight="700" fill="#1a2b3c" text-anchor="middle">Product /api</text>
+  <text x="200" y="357" font-size="10.5" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">build worker &#183; corbits-exec</text>
+
+  <rect x="320" y="312" width="200" height="64" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="420" y="338" font-size="14" font-weight="700" fill="#1a2b3c" text-anchor="middle">embedded-host</text>
+  <text x="420" y="357" font-size="10.5" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">door &#183; keychain &#183; migrations</text>
+
+  <rect x="540" y="312" width="200" height="64" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="640" y="338" font-size="14" font-weight="700" fill="#1a2b3c" text-anchor="middle">embed-hub</text>
+  <text x="640" y="357" font-size="10.5" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">createApp &#183; provisioner</text>
+
+  <rect x="760" y="312" width="200" height="64" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.5"/>
+  <text x="860" y="338" font-size="14" font-weight="700" fill="#1a2b3c" text-anchor="middle">pglite</text>
+  <text x="860" y="357" font-size="10.5" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280" text-anchor="middle">data dir &#183; keychain keys</text>
+
+  <text x="100" y="430" font-size="13" fill="#1a2b3c">Corbits mounts &#183; mounted into the hub</text>
+
+  <rect x="100" y="440" width="92" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="146" y="461" font-size="13" fill="#1f6b3a" text-anchor="middle">Mailbox</text>
+  <rect x="206" y="440" width="98" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="255" y="461" font-size="13" fill="#1f6b3a" text-anchor="middle">Artifacts</text>
+  <rect x="318" y="440" width="80" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="358" y="461" font-size="13" fill="#1f6b3a" text-anchor="middle">OAuth</text>
+  <rect x="412" y="440" width="300" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="562" y="461" font-size="13" fill="#1f6b3a" text-anchor="middle">Workflow Artifacts &#183; self-auth bearer</text>
+
+  <!-- ===== VENDORED PLATFORM column ===== -->
+  <text x="1010" y="296" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="2" fill="#6b7280">VENDORED PLATFORM</text>
+  <text x="1010" y="314" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#6b7280">vendor/interchange &#183; @intx v0.4.0 &#183; unmodified</text>
+
+  <rect x="1010" y="326" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1105" y="351" font-size="13" fill="#1a2b3c" text-anchor="middle">@intx/db</text>
+  <rect x="1218" y="326" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1313" y="351" font-size="13" fill="#1a2b3c" text-anchor="middle">@intx/hub-api</text>
+  <rect x="1010" y="378" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1105" y="403" font-size="13" fill="#1a2b3c" text-anchor="middle">@intx/hub-sessions</text>
+  <rect x="1218" y="378" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1313" y="403" font-size="13" fill="#1a2b3c" text-anchor="middle">@intx/hub-client</text>
+  <rect x="1010" y="430" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1105" y="455" font-size="13" fill="#1a2b3c" text-anchor="middle">@intx/workflow (+host)</text>
+  <rect x="1218" y="430" width="190" height="40" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1313" y="455" font-size="13" fill="#1a2b3c" text-anchor="middle">sidecar-app</text>
+
+  <text x="1010" y="494" font-size="11" fill="#6b7280">internals (db &#183; hub-api &#183; hub-sessions) imported only by</text>
+  <text x="1010" y="509" font-size="11" fill="#6b7280">embedded-host + embed-hub &#183; all others use the Transport</text>
+
+  <!-- hub <-> sidecar arrows -->
+  <line x1="300" y1="568" x2="300" y2="506" stroke="#1a2b3c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="312" y="542" font-size="12" fill="#1a2b3c">WebSocket &#183; sidecar dials host</text>
+  <line x1="660" y1="506" x2="660" y2="564" stroke="#1a2b3c" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="672" y="542" font-size="12" fill="#1a2b3c">spawned by embed-hub provisioner</text>
+
+  <!-- ===== SIDECAR container ===== -->
+  <rect x="80" y="570" width="900" height="170" rx="12" fill="#f6f9fc" stroke="#2d5a8e" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="100" y="596" font-size="12" font-weight="700" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="2" fill="#2d5a8e">SIDECAR &#183; RUNS UNTRUSTED CODE</text>
+
+  <rect x="100" y="608" width="560" height="112" rx="8" fill="#ffffff" stroke="#1a2b3c" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="120" y="634" font-size="14" font-weight="700" fill="#1a2b3c">Child process &#183; @intx/workflow-host + sidecar-app</text>
+  <rect x="120" y="648" width="110" height="28" rx="5" fill="#ffffff" stroke="#1a2b3c"/>
+  <text x="175" y="666" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#1a2b3c" text-anchor="middle">workflow run</text>
+  <rect x="244" y="648" width="170" height="28" rx="5" fill="#ffffff" stroke="#1a2b3c"/>
+  <text x="329" y="666" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#1a2b3c" text-anchor="middle">applyDecision reducer</text>
+  <rect x="428" y="648" width="212" height="28" rx="5" fill="#ffffff" stroke="#1a2b3c"/>
+  <text x="534" y="666" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" fill="#1a2b3c" text-anchor="middle">ProjectState &#183; only writer</text>
+  <text x="120" y="705" font-size="11" fill="#6b7280">artifacts uploaded with a purpose-minted bearer &#8594; /api/workflow-artifacts</text>
+
+  <text x="700" y="620" font-size="10" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="1" fill="#6b7280">WORKFLOW TOOLS</text>
+  <rect x="700" y="630" width="120" height="30" rx="15" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="760" y="650" font-size="13" fill="#1f6b3a" text-anchor="middle">tools-deck</text>
+  <rect x="700" y="670" width="140" height="30" rx="15" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="770" y="690" font-size="13" fill="#1f6b3a" text-anchor="middle">tools-delivery</text>
+
+  <!-- ===== APP-DEFINITION PACKAGES row ===== -->
+  <text x="80" y="790" font-size="11" font-family="SF Mono, Menlo, Consolas, monospace" letter-spacing="2" fill="#6b7280">APP-DEFINITION PACKAGES</text>
+
+  <text x="80" y="818" font-size="13" fill="#1a2b3c">App</text>
+  <rect x="80" y="828" width="170" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="165" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">solution builder</text>
+
+  <text x="290" y="818" font-size="13" fill="#1a2b3c">Install</text>
+  <rect x="290" y="828" width="110" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="345" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">installer</text>
+
+  <text x="440" y="818" font-size="13" fill="#1a2b3c">Shared runtime</text>
+  <rect x="440" y="828" width="170" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="525" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">specialist-runtime</text>
+
+  <text x="650" y="818" font-size="13" fill="#1a2b3c">Sidecar tools</text>
+  <rect x="650" y="828" width="120" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="710" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">tools-deck</text>
+  <rect x="784" y="828" width="140" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="854" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">tools-delivery</text>
+
+  <text x="964" y="818" font-size="13" fill="#1a2b3c">Secrets</text>
+  <rect x="964" y="828" width="110" height="32" rx="16" fill="#e3f3e8" stroke="#3f9e5f"/>
+  <text x="1019" y="849" font-size="13" fill="#1f6b3a" text-anchor="middle">keychain</text>
+
+  <text x="80" y="892" font-size="11" fill="#6b7280">The solution builder app package defines the project workflow &#8212; its applyDecision reducer is the single state machine for ProjectState; the installer writes the project record only, via the Transport.</text>
+
+  <!-- footer caption -->
+  <text x="80" y="938" font-size="13" fill="#6b7280">Blue is the trusted hub host embedding the vendored Interchange platform; only embedded-host and embed-hub touch @intx internals. Dashed means untrusted or</text>
+  <text x="80" y="958" font-size="13" fill="#6b7280">external. Green pills are first-party packages and hub mounts. The web client talks HTTP through the session-token door and never writes persistence.</text>
+</svg>
