@@ -14,11 +14,11 @@
  * are shown where the renderer puts them; illustrations drawn only at save
  * time with an image credential are not, and the caption says so.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { playerKeyAction, previewKeyAction } from "./slide-keys.ts";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { lookOf, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
+import { linesBox, lookOf, textScale, type Deck, type DeckLook, DECISION_SLIDE_TITLE } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
 export type PreviewSlide =
@@ -66,6 +66,14 @@ function slideStyle(look: DeckLook): Record<string, string> {
   };
 }
 
+/** How far an item slide's lines come down to fit (#676): the renderer's own rule, on the renderer's own box. */
+export function previewTextScale(slide: PreviewSlide, look: DeckLook): number {
+  if (slide.kind !== "item") return 1;
+  const W = 10;
+  const H = look.wide ? 5.625 : 7.5;
+  return textScale(slide.lines, linesBox(W, H, slide.image !== undefined));
+}
+
 /** Whether an item slide is its picture: no lines to show beside it, so the picture fills the width (#252). */
 export function isShowcase(slide: PreviewSlide): boolean {
   return slide.kind === "item" && slide.lines.length === 0 && slide.image !== undefined;
@@ -95,7 +103,7 @@ function Slide({ slide, footer, look }: { slide: PreviewSlide; footer: string; l
       <p className="slide-item-title">{slide.title}</p>
       <span className="slide-rule" />
       {slide.image ? <Picture image={slide.image} alt="A screen of the approved design" showcase={isShowcase(slide)} /> : null}
-      <ul className={slide.image ? "slide-lines with-picture" : "slide-lines"}>
+      <ul className={slide.image ? "slide-lines with-picture" : "slide-lines"} style={{ "--slide-text-scale": String(previewTextScale(slide, look)) } as CSSProperties}>
         {slide.lines.map((line, index) => (
           <li key={index}>{line}</li>
         ))}

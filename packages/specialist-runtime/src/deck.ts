@@ -36,6 +36,45 @@ export function screenHintOf(text: string): { readonly screen: string | null; re
   return { screen: match[1]!.trim(), text: text.replace(match[0], "").replace(/\s{2,}/g, " ").trim() };
 }
 
+/** The lines' base size, in points, and their box's height as a share of the slide's: what the three renderers draw. */
+export const SLIDE_TEXT_BASE_PT = 15;
+const SLIDE_TEXT_LINE_HEIGHT = 1.3;
+const SLIDE_TEXT_PARA_PT = 6;
+/** The average glyph is this many em wide in a text face. */
+const GLYPH_EM = 0.5;
+const SMALLEST_TEXT_SCALE = 0.55;
+
+/**
+ * How far the lines' size must come down to fit their box (#676): 1 when
+ * they fit at the base size, else the largest step of 0.05 at which the
+ * estimated height fits, never below 0.55. The estimate wraps each line
+ * at the box's width in average glyphs and stacks the rows with the line
+ * height and the paragraph gap, the same arithmetic in every renderer, so
+ * the PowerPoint, the preview and the print shrink alike.
+ */
+export function textScale(lines: readonly string[], box: { readonly widthIn: number; readonly heightIn: number }): number {
+  if (lines.length === 0) return 1;
+  const heightPt = box.heightIn * 72;
+  const widthPt = box.widthIn * 72;
+  const fits = (scale: number): boolean => {
+    const font = SLIDE_TEXT_BASE_PT * scale;
+    const perRow = Math.max(8, Math.floor(widthPt / (font * GLYPH_EM)));
+    const rows = lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / perRow)), 0);
+    const needed = rows * font * SLIDE_TEXT_LINE_HEIGHT + (lines.length - 1) * SLIDE_TEXT_PARA_PT * scale;
+    return needed <= heightPt;
+  };
+  for (let scale = 1; scale >= SMALLEST_TEXT_SCALE - 1e-9; scale -= 0.05) {
+    if (fits(scale)) return Math.round(scale * 100) / 100;
+  }
+  return SMALLEST_TEXT_SCALE;
+}
+
+/** The lines' box on an item slide, in inches, for a slide `W` by `H` with or without a picture beside the text. */
+export function linesBox(W: number, H: number, withPicture: boolean): { widthIn: number; heightIn: number } {
+  // The bullet indent takes a little of the width.
+  return { widthIn: (withPicture ? W * 0.56 : W - 1) - 0.3, heightIn: H - 2.2 };
+}
+
 /** How much a slide carries: the most bullets an outline item is shown as. */
 export const DECK_DENSITY = { sparse: 3, standard: 5, full: 7 } as const;
 export type DeckDensity = keyof typeof DECK_DENSITY;
@@ -312,9 +351,22 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
       slide.addImage({ data: pngData(image), x: 0.5, y: 1.5, w: W - 1, h: H - 2.2, sizing: { type: "contain", w: W - 1, h: H - 2.2 } });
     } else {
       const textWidth = image ? W * 0.56 : W - 1;
+      // Long lines come down in size until they fit the box (#676), the
+      // same factor the preview and the print apply.
+      const scale = textScale(lines, linesBox(W, H, image !== undefined));
       slide.addText(
         lines.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
-        { x: 0.5, y: 1.5, w: textWidth, h: H - 2.2, fontSize: 15, fontFace: look.bodyFace, color: look.ink, valign: "top", paraSpaceAfter: 6 },
+        {
+          x: 0.5,
+          y: 1.5,
+          w: textWidth,
+          h: H - 2.2,
+          fontSize: Math.round(SLIDE_TEXT_BASE_PT * scale * 2) / 2,
+          fontFace: look.bodyFace,
+          color: look.ink,
+          valign: "top",
+          paraSpaceAfter: Math.round(SLIDE_TEXT_PARA_PT * scale),
+        },
       );
       if (image) {
         slide.addImage({ data: pngData(image), x: W * 0.62, y: 1.5, w: W * 0.34, h: H - 2.2, sizing: { type: "contain", w: W * 0.34, h: H - 2.2 } });

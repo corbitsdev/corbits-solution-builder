@@ -7,7 +7,7 @@
  */
 import { lookOf, type Deck } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
-import { COVER_NOTE, isShowcase, previewSlides } from "./slide-preview.tsx";
+import { COVER_NOTE, isShowcase, previewSlides, previewTextScale } from "./slide-preview.tsx";
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -25,7 +25,7 @@ export function slidesPrintHtml(deck: Deck, title: string): string {
       return `<section class="slide cover"><span class="bar"></span><div class="cover-text${slide.image ? " with-picture" : ""}"><h1>${escapeHtml(slide.title)}</h1><p class="subtitle">${escapeHtml(slide.subtitle)}</p><p class="note">${escapeHtml(COVER_NOTE)}</p></div>${picture(slide.image, "cover")}</section>`;
     }
     const lines = slide.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-    return `<section class="slide item"><h2>${escapeHtml(slide.title)}</h2><span class="rule"></span>${picture(slide.image, isShowcase(slide) ? "showcase" : "item")}<ul class="lines${slide.image ? " with-picture" : ""}">${lines}</ul><p class="footer">${escapeHtml(footer)} · ${String(slide.page)}</p></section>`;
+    return `<section class="slide item"><h2>${escapeHtml(slide.title)}</h2><span class="rule"></span>${picture(slide.image, isShowcase(slide) ? "showcase" : "item")}<ul class="lines${slide.image ? " with-picture" : ""}" style="--slide-text-scale:${String(previewTextScale(slide, look))}">${lines}</ul><p class="footer">${escapeHtml(footer)} · ${String(slide.page)}</p></section>`;
   });
   const css = `
     @page { size: 10in ${String(height)}in; margin: 0; }
@@ -41,9 +41,9 @@ export function slidesPrintHtml(deck: Deck, title: string): string {
     .note { margin: 0.35in 0 0; font-size: 12pt; color: #${look.muted}; }
     h2 { position: absolute; left: 0.5in; top: 0.35in; width: 9in; margin: 0; font: bold 24pt "${look.titleFace}", serif; }
     .rule { position: absolute; left: 0.5in; top: 1.3in; width: 9in; border-top: 1.5pt solid #${look.accent}; }
-    .lines { position: absolute; left: 0.5in; top: 1.5in; width: 9in; height: calc(100% - 2.2in); margin: 0; padding-left: 0.3in; font-size: 15pt; line-height: 1.3; overflow: hidden; }
+    .lines { position: absolute; left: 0.5in; top: 1.5in; width: 9in; height: calc(100% - 2.2in); margin: 0; padding-left: 0.3in; font-size: calc(15pt * var(--slide-text-scale, 1)); line-height: 1.3; overflow: hidden; }
     .lines.with-picture { width: 5.4in; }
-    .lines li { margin-bottom: 6pt; }
+    .lines li { margin-bottom: calc(6pt * var(--slide-text-scale, 1)); }
     .picture { position: absolute; left: 6.2in; top: 1.5in; width: 3.4in; height: calc(100% - 2.2in); object-fit: contain; object-position: center; }
     .cover-picture { left: 5.8in; top: 0.6in; width: 3.8in; height: calc(100% - 1.2in); }
     .picture.showcase { left: 0.5in; width: 9in; }
