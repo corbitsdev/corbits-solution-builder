@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, progressBriefOf, statusFreshness, toolCallsSoFar } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -165,5 +165,96 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("…");
     expect(brief).toContain("END");
     expect(brief.length).toBeLessThan(22_000);
+  });
+});
+
+// #695: the supervisor is briefed while the worker runs, and the status says how fresh it is.
+const LOG = [
+  "── turn 1 · 2 tool calls · 3.0s",
+  "   bash {\"command\":\"ls\"}",
+  "   read_file {\"path\":\"AGENTS.md\"}",
+  "── turn 2 · 1 tool call · 301.1s",
+  "   wait_agents {\"targets\":[\"a\"],\"mode\":\"all\"}",
+  "",
+].join("\n");
+
+describe("latestTurn and toolCallsSoFar", () => {
+  test("read the worker's own turn lines, and say null before the first", () => {
+    expect(latestTurn(LOG)).toBe(2);
+    expect(toolCallsSoFar(LOG)).toBe(3);
+    expect(latestTurn("Waiting…")).toBeNull();
+    expect(toolCallsSoFar("")).toBe(0);
+  });
+});
+
+describe("composeProgressBrief", () => {
+  test("says the attempt is still running, as of which turn, with the last turn lines and no verdict", () => {
+    const brief = composeProgressBrief({ attempt: 1, startedAt: "2026-10-04T19:42:21.000Z", now: "2026-10-04T20:42:21.000Z", log: LOG, worker: "Corbits Code" });
+    expect(brief.startsWith("Build attempt 1 is still running; write an interim build status from this record, as of turn 2 at ")).toBe(true);
+    expect(brief).toContain("Worker: Corbits Code, running since");
+    expect(brief).toContain("(60 minutes)");
+    expect(brief).toContain("2 turns and 3 tool calls reported through its hook");
+    expect(brief).toContain("The attempt has not ended");
+    expect(brief).toContain("wait_agents");
+    expect(brief).toContain("a task it is working on, not one that is done");
+    expect(progressBriefOf({ author: "me", body: brief }, 1)).toEqual({ turn: 2 });
+    expect(progressBriefOf({ author: "me", body: brief }, 2)).toBeNull();
+    expect(progressBriefOf({ author: "agent", body: brief }, 1)).toBeNull();
+  });
+
+  test("says 'none yet' before the first turn", () => {
+    const brief = composeProgressBrief({ attempt: 3, startedAt: "2026-10-04T19:42:21.000Z", now: "2026-10-04T19:43:21.000Z", log: "" });
+    expect(brief).toContain("as of turn none yet at");
+    expect(brief).toContain("No turn has been reported yet.");
+    expect(progressBriefOf({ author: "me", body: brief }, 3)).toEqual({ turn: null });
+  });
+});
+
+describe("progressBriefDue", () => {
+  const startedAt = "2026-10-04T19:00:00.000Z";
+  const at = (minutes: number) => new Date(Date.parse(startedAt) + minutes * 60_000).toISOString();
+  const brief = (turn: number, minutes: number) => ({ author: "me" as const, body: composeProgressBrief({ attempt: 1, startedAt, now: at(minutes), log: `── turn ${String(turn)} · 1 tool call · 1.0s\n` }), at: at(minutes) });
+  const reply = (minutes: number) => ({ author: "agent" as const, body: "## In short\nInterim.", at: at(minutes) });
+
+  test("waits for the worker's first turn and a couple of minutes, then briefs", () => {
+    expect(progressBriefDue({ messages: [], attempt: 1, startedAt, turn: null, now: at(30) })).toBe(false);
+    expect(progressBriefDue({ messages: [], attempt: 1, startedAt, turn: 1, now: at(1) })).toBe(false);
+    expect(progressBriefDue({ messages: [], attempt: 1, startedAt, turn: 1, now: at(2) })).toBe(true);
+  });
+
+  test("briefs again only after the interval, a further turn, and the supervisor's answer", () => {
+    const answered = [brief(5, 2), reply(3)];
+    expect(progressBriefDue({ messages: answered, attempt: 1, startedAt, turn: 9, now: at(11) })).toBe(false);
+    expect(progressBriefDue({ messages: answered, attempt: 1, startedAt, turn: 5, now: at(13) })).toBe(false);
+    expect(progressBriefDue({ messages: answered, attempt: 1, startedAt, turn: 9, now: at(13) })).toBe(true);
+    const unanswered = [brief(5, 2)];
+    expect(progressBriefDue({ messages: unanswered, attempt: 1, startedAt, turn: 9, now: at(13) })).toBe(false);
+    expect(progressBriefDue({ messages: unanswered, attempt: 1, startedAt, turn: 9, now: at(23) })).toBe(true);
+  });
+
+  test("a brief for another attempt does not count", () => {
+    const other = { author: "me" as const, body: composeProgressBrief({ attempt: 2, startedAt, now: at(1), log: "── turn 1 · 1 tool call · 1.0s\n" }), at: at(1) };
+    expect(progressBriefDue({ messages: [other, reply(2)], attempt: 1, startedAt, turn: 1, now: at(2) })).toBe(true);
+  });
+});
+
+describe("statusFreshness", () => {
+  const startedAt = "2026-10-04T19:42:21.000Z";
+  const attempt = { attempt: 1, startedAt, state: "running" as const };
+  test("names an interim status by the turn its brief was as of", () => {
+    const brief = { id: "b", author: "me" as const, body: composeProgressBrief({ attempt: 1, startedAt, now: "2026-10-04T20:00:00.000Z", log: LOG }), at: "2026-10-04T20:00:00.000Z" };
+    const status = { id: "s", author: "agent" as const, body: "## In short", at: "2026-10-04T20:00:30.000Z" };
+    expect(statusFreshness([brief, status], status, attempt)).toMatch(/^interim, as of turn 2 · /);
+  });
+  test("names a status written on a recorded attempt", () => {
+    const record = { id: "r", author: "me" as const, body: "Build attempt 1 has ended and its work is recorded. Write the build status from this record.", at: "2026-10-04T23:00:00.000Z" };
+    const status = { id: "s", author: "agent" as const, body: "## In short", at: "2026-10-04T23:00:30.000Z" };
+    expect(statusFreshness([record, status], status, { ...attempt, state: "ended" })).toMatch(/^on attempt 1's record · /);
+  });
+  test("says when the status predates the attempt in view", () => {
+    const opening = { id: "o", author: "me" as const, body: "Here is the frozen plan.", at: "2026-10-04T19:00:00.000Z" };
+    const status = { id: "s", author: "agent" as const, body: "Build not started", at: "2026-10-04T19:01:00.000Z" };
+    expect(statusFreshness([opening, status], status, attempt)).toMatch(/^written before attempt 1 started · /);
+    expect(statusFreshness([status], status, null)).not.toMatch(/before|interim|record/);
   });
 });

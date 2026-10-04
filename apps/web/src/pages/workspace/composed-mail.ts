@@ -69,6 +69,13 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   }
   const material = materialMailFold(message.body);
   if (material) return material;
+  // The supervisor's briefs (#695): the record of an ended attempt, and the
+  // progress of a running one. The chat shows the line that says which; the
+  // worker's turn lines and the record stay behind the fold.
+  const brief = /^(Build attempt \d+ (?:is still running|has ended)[^\n]*)\n/.exec(message.body);
+  if (brief) {
+    return { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
+  }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);
   if (!isCue && !hasIds) return null;

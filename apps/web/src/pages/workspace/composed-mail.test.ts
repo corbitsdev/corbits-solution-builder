@@ -53,3 +53,15 @@ describe("composedMailFold", () => {
     expect(composedMailFold({ author: "agent", body: mail })).toBeNull();
   });
 });
+
+// #695: the supervisor's briefs fold to the line that says which they are.
+describe("composedMailFold on the supervisor's briefs", () => {
+  test("folds a progress brief and a record brief alike, lead line outside", () => {
+    const progress = composedMailFold({ author: "me", body: "Build attempt 1 is still running; write an interim build status from this record, as of turn 91 at 8:42 PM.\n\n## What the worker has reported so far\n- lines" });
+    expect(progress).toEqual({ summary: "What the supervisor was briefed with", body: "## What the worker has reported so far\n- lines", lead: "Build attempt 1 is still running; write an interim build status from this record, as of turn 91 at 8:42 PM." });
+    const record = composedMailFold({ author: "me", body: "Build attempt 2 has ended and its work is recorded. Write the build status from this record.\n\n## What the worker reported\n- Worker: x" });
+    expect(record?.lead).toBe("Build attempt 2 has ended and its work is recorded. Write the build status from this record.");
+    expect(record?.body).toBe("## What the worker reported\n- Worker: x");
+    expect(composedMailFold({ author: "agent", body: "Build attempt 1 is still running; x\n\nbody" })).toBeNull();
+  });
+});
