@@ -1138,7 +1138,8 @@ async function persistDraftOfKind(
         kind: args.kind,
         stage: args.stage,
         ...(args.variant ? { variant: args.variant } : {}),
-        mediaType: "text/markdown",
+        // A design reply is an HTML document; everything else written here is Markdown.
+        mediaType: /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(args.content) ? "text/html" : "text/markdown",
         sourceVersionIds: args.sourceVersionIds,
         provenance: {
           producer: "agent" as const,

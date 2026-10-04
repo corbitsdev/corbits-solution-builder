@@ -79,7 +79,7 @@ import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
-import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
+import { askKind, delegationTarget, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
@@ -624,6 +624,59 @@ export function StageWorkspace({
       ? `The attached material is saved, and could not be sent to the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}: ${materialDispatch.error}`
       : null);
 
+  // A delegation in flight (#688): who is working, for the busy strip.
+  const [delegating, setDelegating] = useState<string | null>(null);
+  useBusyWhile(delegating !== null, delegating ?? "");
+  const routedLineFor = (text: string) => {
+    const at = new Date().toISOString();
+    setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text, tone: "line" }]);
+  };
+  const delegate = async (targetStage: number, body: string) => {
+    const who = agentFor(targetStage as Stage).title;
+    const kind = STAGE_DRAFT_KIND[targetStage];
+    const docName = kind ? documentName(kind) : stageName(targetStage);
+    routedLineFor(`"${body.trim().slice(0, 80)}" — sent to the ${who}, whose document the ${docName} is; the reply becomes its next version under ${stageName(targetStage)}.`);
+    setDelegating(`${who} is revising the ${docName}`);
+    setError(null);
+    try {
+      const deployment = await api.ensureStageAgent(detail.project.id, targetStage);
+      const current = kind
+        ? detail.nodes
+            .filter((node) => node.kind === kind && node.stage === targetStage && node.variant === null && node.supersededByNodeId === null)
+            .sort((a, b) => b.version - a.version)[0]
+        : undefined;
+      const currentText = current ? (await api.artifactContent(tenantId, current.id)).content : "";
+      const mail = currentText
+        ? `${body.trim()}\n\n---\n\n## Attached: the current ${docName} (revise this; keep everything not asked to change, and reply with the whole revised document)\n\n${currentText}`
+        : body.trim();
+      const before = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
+      const requestedAt = Date.now();
+      await api.sendStageMail(tenantId, deployment.address, { body: mail });
+      const deadline = Date.now() + 15 * 60_000;
+      let reply: ChatMessage | undefined;
+      while (!reply && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        const thread = await api.readStageThread(tenantId, [deployment.address]);
+        reply = thread.find((message) => message.author === "agent" && !before.has(message.id) && Date.parse(message.at) >= requestedAt - 60_000);
+      }
+      if (!reply) throw new Error(`The ${who} has not replied yet; its reply will be under ${stageName(targetStage)} when it does.`);
+      if (kind) {
+        await api.persistStageDraft(detail.project.id, targetStage, reply.body);
+        onChanged();
+        const approvedBefore = targetStage < stage;
+        routedLineFor(
+          `${who} revised the ${docName}; it is recorded as the newest version under ${stageName(targetStage)}.${approvedBefore ? ` The build keeps using the approved version until ${stageName(targetStage)} is approved again (send the project back to it when you are happy with the change).` : ""}`,
+        );
+      } else {
+        routedLineFor(`${who} replied under ${stageName(targetStage)}.`);
+      }
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDelegating(null);
+    }
+  };
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -633,6 +686,14 @@ export function StageWorkspace({
       const at = new Date().toISOString();
       setRequirementsAsk({ body, at: Date.now() });
       setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
+      return;
+    }
+    // Work asked of another stage's specialist by name (#688) goes to that
+    // specialist, with its current document attached; the reply is recorded
+    // as that stage's next version and the chat says where it went.
+    const target = delegationTarget(body, stage);
+    if (target) {
+      void delegate(target.stage, body);
       return;
     }
     setSending(true);

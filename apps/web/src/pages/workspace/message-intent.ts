@@ -33,3 +33,31 @@ export function askKind(body: string | null, hasDraft: boolean): AskKind {
   if (hasDraft && REDRAFT.test(body)) return "redraft";
   return hasDraft ? "redraft" : "draft";
 }
+
+/** The specialists a person may send work to by name (#688), with the stage whose document each revises. */
+const DELEGATES: readonly { readonly stage: number; readonly pattern: RegExp }[] = [
+  { stage: 4, pattern: /\b(?:gui|ui|interface|experience|screen|mockup)\s+(?:builder|designer|design(?:er)?\s+specialist)\b|\bdesigner\b/i },
+  { stage: 6, pattern: /\barchitect\b/i },
+  { stage: 7, pattern: /\bestimator\b/i },
+  { stage: 5, pattern: /\bpresentation\s+creator\b|\b(?:slides?|deck)\s+(?:builder|creator|maker)\b/i },
+  { stage: 2, pattern: /\bconstraints\s+mapper\b/i },
+  { stage: 1, pattern: /\bbrainstormer\b/i },
+];
+const DELEGATION_VERB = /\b(?:have|ask|tell|get|let|make)\s+(?:the\s+)?(?=\w)|\b(?:send|pass|hand)\s+(?:this|it|that)\s+(?:to|on\s+to)\s+(?:the\s+)?(?=\w)/i;
+
+export type DelegationTarget = { readonly stage: number };
+
+/**
+ * Which other stage's specialist a message asks for work from: a
+ * delegation verb ("have the…", "ask the…") followed by a specialist's
+ * name, naming a stage other than the current one. Null otherwise.
+ */
+export function delegationTarget(body: string, currentStage: number): DelegationTarget | null {
+  const verb = DELEGATION_VERB.exec(body);
+  if (!verb) return null;
+  const after = body.slice(verb.index + verb[0].length, verb.index + verb[0].length + 40);
+  for (const delegate of DELEGATES) {
+    if (delegate.pattern.test(after) && delegate.stage !== currentStage) return { stage: delegate.stage };
+  }
+  return null;
+}
