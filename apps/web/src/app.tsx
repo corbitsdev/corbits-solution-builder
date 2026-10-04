@@ -24,10 +24,10 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, downloadArtifact, notify, stageName } from "./components.jsx";
+import { Banner, Button, Mark, notify, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
-import { ProjectMenu } from "./pages/project-menu.jsx";
+import { ProjectMenu, downloadDocuments } from "./pages/project-menu.jsx";
 import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
@@ -40,7 +40,6 @@ import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
-import { assembleBundle, bundleFileName } from "./project-export.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 import { useBusyWhile } from "./use-busy.ts";
@@ -367,8 +366,8 @@ export function AppBar({
           <button
             type="button"
             className="iconbtn"
-            title="Export bundle"
-            aria-label="Export bundle"
+            title="Download Document Package"
+            aria-label="Download Document Package"
             disabled={exporting}
             onClick={onExport}
           >
@@ -655,7 +654,7 @@ export function App() {
   // a project that has not landed yet, and an export in flight. Everything
   // a button does registers itself through `Button`.
   useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");
-  useBusyWhile(exporting, "Exporting the bundle");
+  useBusyWhile(exporting, "Building the document package");
 
   useEffect(() => {
     if (!selected) {
@@ -717,21 +716,16 @@ export function App() {
   };
 
   /**
-   * The bundle is assembled in the browser (`project-export.ts`) and saved as
-   * a download — the same path the projects list's export menu item takes.
+   * The topbar's download (#680): the document package, the same zip the
+   * project menu's "Download documents…" builds. The re-import bundle
+   * stays on the project menu as "Export…".
    */
   const exportProject = async () => {
     if (exporting || !detail) return;
     setExporting(true);
     try {
-      const bundle = await assembleBundle(detail.project.id, {
-        projectView: api.projectView,
-        artifactContent: api.artifactContent,
-        stageAgentAddresses: api.stageAgentAddresses,
-        readStageThread: api.readStageThread,
-    workflowView: api.projectWorkflowView,
-  });
-      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
+      const outcome = await downloadDocuments(detail.project);
+      notify(outcome.message, outcome.complete);
     } catch (cause) {
       toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
