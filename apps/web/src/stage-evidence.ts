@@ -177,6 +177,30 @@ export function stage6StackRemediation(): Remediation {
   return { kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK };
 }
 
+/**
+ * The way out of a plan citing ids the workflow does not hold (#692): the
+ * architect is sent the authoritative block and told to re-issue the plan
+ * citing only those. A stale citation is the architect's memory of an
+ * earlier numbering, not a missing block, so a plain resend would repeat it.
+ */
+export function stage6CitationRemediation(requirementsBlock: string, detail: string): Remediation {
+  return {
+    kind: "ask_specialist",
+    label: "Send the architect the current ids",
+    message: `The requirement ids were re-issued since you last cited them, and the plan now cites ids that do not exist (${detail}). Below is the authoritative list. Re-issue the whole plan, the "## Stack" block included, citing only these ids; where an old citation no longer has an id, cite the requirement that now covers it or say so under "Risks, unknowns and non-goals".\n\n${requirementsBlock}`,
+  };
+}
+
+/** Whether a stack problem is about citations rather than a missing block. */
+export function isCitationProblem(problem: string): boolean {
+  return problem.includes("uncited or unknown requirement ids");
+}
+
+/** The parenthesised detail of a citation problem: which choices cite what. */
+export function citationProblemDetail(problem: string): string {
+  return /requirement ids \((.*)\)\. Ask/s.exec(problem)?.[1] ?? problem;
+}
+
 export function stage6StackProblem(planText: string, requirementIds: ReadonlySet<string>): string | null {
   const stack = parseStackRecord(planText);
   if (!stack) {
