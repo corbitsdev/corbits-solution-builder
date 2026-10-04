@@ -13,6 +13,7 @@ import type { ArtifactNode } from "./client.js";
 import { documentName } from "./components.jsx";
 import type { MockupShot, Shooter } from "./mockup-shots.ts";
 import { frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
+import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 
 /** Where the design's screens go, as pictures (#336). */
 export const MOCKUPS_FOLDER = "mockups";
@@ -125,9 +126,10 @@ function bytesOf(dataUrl: string): Uint8Array {
   return bytes;
 }
 
-export function archiveReadme(projectTitle: string, files: readonly { name: string; node: ArtifactNode }[], mockups: readonly string[] = []): string {
+export function archiveReadme(projectTitle: string, files: readonly { name: string; node: ArtifactNode }[], mockups: readonly string[] = [], withAgents = false): string {
   const lines = files.map(({ name, node }) => `- ${name} — ${documentName(node.kind)}${node.variant ? ` for ${node.variant}` : ""}, version ${String(node.version)}, written ${node.createdAt.slice(0, 10)}`);
   const pictures = mockups.length > 0 ? ["", `The design's screens as pictures, in ${MOCKUPS_FOLDER}/:`, "", ...mockups.map((name) => `- ${name}`)] : [];
+  const agents = withAgents ? ["", "For a coding agent: AGENTS.md says which document wins where they disagree and which acceptance criteria mean done; QUESTIONS.md is where it records product decisions the documents leave open."] : [];
   return [
     `# ${projectTitle} — documents`,
     "",
@@ -135,6 +137,7 @@ export function archiveReadme(projectTitle: string, files: readonly { name: stri
     "",
     ...lines,
     ...pictures,
+    ...agents,
     "",
     "For a PDF of any document, open it in Solution Builder and choose Export → Print or save as PDF.",
     "Slides are PowerPoint files; the Export menu on the slides can also save them as PDF or open them in Google Slides.",
@@ -158,6 +161,7 @@ export async function assembleDocumentsArchive(
 ): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
   const files: { name: string; node: ArtifactNode }[] = [];
+  const contentOf = new Map<string, string>();
   const skipped: string[] = [];
   const mockups: string[] = [];
   for (const node of completedDocuments(nodes)) {
@@ -171,6 +175,7 @@ export async function assembleDocumentsArchive(
     const name = documentFileName(node, content);
     zip.file(name, DATA_URL.test(content) ? bytesOf(content) : content);
     files.push({ name, node });
+    contentOf.set(name, content);
     if (node.kind === "design_artifact" && mockups.length === 0) {
       // The screens as pictures, beside the HTML they are drawn from. A
       // design that cannot be drawn leaves the folder out; the HTML stands.
@@ -182,7 +187,21 @@ export async function assembleDocumentsArchive(
       }
     }
   }
-  let readme = archiveReadme(projectTitle, files, mockups);
+  // The coding agent's instructions (#686), naming the package's own files
+  // and the PRD's acceptance criteria, when the package has a PRD.
+  const requirementsFile = files.find((file) => file.node.kind === "product_requirements");
+  if (requirementsFile) {
+    const named = (kind: string) => files.find((file) => file.node.kind === kind)?.name ?? null;
+    zip.file(
+      "AGENTS.md",
+      agentsInstructions(
+        { requirements: requirementsFile.name, design: named("design_artifact"), mockups: mockups.length > 0 ? `${MOCKUPS_FOLDER}/` : null, plan: named("build_plan") },
+        contentOf.get(requirementsFile.name) ?? "",
+      ),
+    );
+    zip.file("QUESTIONS.md", QUESTIONS_MD);
+  }
+  let readme = archiveReadme(projectTitle, files, mockups, requirementsFile !== undefined);
   const mockupFiles = mockups.map((entry) => entry.split(" — ")[0]!);
   if (skipped.length > 0) readme += `\nNot included, since they could not be read: ${skipped.join("; ")}.\n`;
   zip.file("README.md", readme);

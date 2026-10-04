@@ -93,7 +93,7 @@ describe("assembleDocumentsArchive", () => {
     expect(archive.files).toEqual(["05-slides-joe-filerman.pptx", "06-product-requirements.md"]);
     expect(archive.skipped).toEqual(["Build plan"]);
     const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
-    expect(Object.keys(zip.files).sort()).toEqual(["05-slides-joe-filerman.pptx", "06-product-requirements.md", "README.md"]);
+    expect(Object.keys(zip.files).sort()).toEqual(["05-slides-joe-filerman.pptx", "06-product-requirements.md", "AGENTS.md", "QUESTIONS.md", "README.md"]);
     expect(await zip.file("06-product-requirements.md")!.async("string")).toBe("# Product requirements\n\nFR-1.");
     expect([...(await zip.file("05-slides-joe-filerman.pptx")!.async("uint8array"))]).toEqual([0x50, 0x4b, 0x03, 0x04]);
     const readme = await zip.file("README.md")!.async("string");
@@ -240,5 +240,28 @@ describe("framed mockups in the archive", () => {
     const readme = await zip.file("README.md")!.async("string");
     expect(readme).toContain("- mockups/01-home.png — in a phone body");
     expect(readme).toContain("- mockups/02-gantt.png — in a browser window");
+  });
+});
+
+// #686: the package carries the coding agent's instructions when it has a PRD.
+describe("AGENTS.md in the archive", () => {
+  test("names the package's files and the PRD's criteria, with an empty QUESTIONS.md beside it", async () => {
+    const prd = "## Acceptance criteria\n\n- AC-1: a\n- AC-2: b\n";
+    const nodes = [node({ kind: "product_requirements", stage: 6 }), node({ kind: "build_plan", stage: 6 }), node({ kind: "design_artifact", stage: 4, mediaType: "text/html" })];
+    const archive = await assembleDocumentsArchive("P", nodes, async (n) => (n.kind === "product_requirements" ? prd : n.kind === "design_artifact" ? "<!doctype html>" : "# plan"), async () => []);
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    const agents = await zip.file("AGENTS.md")!.async("string");
+    expect(agents).toContain("Build the application defined by 06-product-requirements.md.");
+    expect(agents).toContain("2. 04-design.html");
+    expect(agents).toContain("3. 06-build-plan.md");
+    expect(agents).toContain("Implementation is complete only when AC-1 through AC-2 pass.");
+    expect(await zip.file("QUESTIONS.md")!.async("string")).toContain("# Open product decisions");
+    expect(await zip.file("README.md")!.async("string")).toContain("AGENTS.md says which document wins");
+  });
+
+  test("a package with no PRD carries no AGENTS.md", async () => {
+    const archive = await assembleDocumentsArchive("P", [node({ kind: "problem_brief", stage: 1 })], async () => "# brief", async () => []);
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    expect(zip.file("AGENTS.md")).toBeNull();
   });
 });
