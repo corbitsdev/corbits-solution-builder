@@ -4,13 +4,16 @@
  * v2/v3 JSON: one create per artifact, then `bundleAdoptionPlan` /
  * `replayAdoption` lands the workflow (#652). v4 zip: every version is
  * written in order (create, then revise), gzip as real bytes, and a zip
- * planner feeds the same replay. Mail history cannot be recreated, so each
- * bundled conversation becomes one read-only text artifact,
- * `sb.kind: "imported_conversation"`.
+ * with a recorded workflow is replayed from those reviews. A zip whose
+ * workflow is missing derives from heads through `bundleAdoptionPlan`,
+ * the same landing a v2 JSON import uses. Mail history cannot be
+ * recreated, so each bundled conversation becomes one read-only text
+ * artifact, `sb.kind: "imported_conversation"`.
  */
 import JSZip from "jszip";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { LAST_ADOPTED_STAGE, type AdoptedReference, type AdoptionPlan, type AdoptionStep, type AudienceVote } from "@solutions-builder/app/legacy-adoption";
+import { bundleAdoptionPlan } from "./bundle-adoption.ts";
 import { toBase64 } from "./base64.ts";
 import { stageName } from "./components.jsx";
 import {
@@ -19,6 +22,7 @@ import {
   type ExportedWorkflow,
   type ProjectBundle,
 } from "./project-export.ts";
+import { digestOf } from "./stage-approval.ts";
 
 export const IMPORTED_CONVERSATION_KIND = "imported_conversation";
 
@@ -33,7 +37,7 @@ export type ArtifactImport = {
   readonly from: string;
   readonly artifactId: string;
   readonly supersedes: string | null;
-  readonly versions: readonly ImportWrite[];
+  readonly versions: readonly (ImportWrite & { readonly version: number })[];
 };
 
 /** Where each bundled version (`versionIdFor`) was written here. */
@@ -108,7 +112,8 @@ export function archiveImportPlan(bundle: ArchiveBundle, newProjectId: string): 
       supersedes: supersedes.get(node.id) ?? null,
       versions: [...versions]
         .sort((a, b) => a.version - b.version)
-        .map(({ content }) => ({
+        .map(({ version, content }) => ({
+          version,
           title: node.title,
           content,
           sb: artifactSb(node, newProjectId),
@@ -138,10 +143,12 @@ export function jsonImportPlan(bundle: ProjectBundle, newProjectId: string): Jso
  * The approvals the exported v4 workflow recorded, as a replay on the new
  * project: each stage's approved review re-pointed at the version written
  * here. It stops where the record does, and at `LAST_ADOPTED_STAGE`.
+ * A zip whose workflow read failed is not planned here — `importArchive`
+ * sends that case through `bundleAdoptionPlan` so it lands from heads the
+ * way a v2 JSON import does.
  */
-export function workflowAdoptionPlan(workflow: ExportedWorkflow | null, newProjectId: string, ids: ImportedVersions): AdoptionPlan {
-  const plan = { projectId: newProjectId, legacyStage: workflow?.stage ?? 1, legacyDone: workflow?.done ?? false };
-  if (!workflow) return { ...plan, steps: [], notes: [] };
+export function workflowAdoptionPlan(workflow: ExportedWorkflow, newProjectId: string, ids: ImportedVersions): AdoptionPlan {
+  const plan = { projectId: newProjectId, legacyStage: workflow.stage, legacyDone: workflow.done };
   const notes: string[] = [];
   const steps: AdoptionStep[] = [];
   const repoint = (ref: AdoptedReference): AdoptedReference | null => {
@@ -188,6 +195,40 @@ export function workflowAdoptionPlan(workflow: ExportedWorkflow | null, newProje
     steps.push({ stage, ref });
   }
   return { ...plan, steps, notes };
+}
+
+/**
+ * Latest content per node as a v2 JSON bundle with no workflow, so
+ * `bundleAdoptionPlan` derives the landing from heads — the same path a
+ * v2 JSON import takes when the export carried no decisions.
+ */
+function jsonBundleFromArchive(bundle: ArchiveBundle): ProjectBundle {
+  return {
+    format: bundle.format,
+    version: 2,
+    exportedAt: bundle.exportedAt,
+    project: bundle.project,
+    artifacts: bundle.artifacts.map(({ node, versions }) => {
+      const latest = [...versions].sort((a, b) => a.version - b.version).at(-1);
+      return { node, content: latest?.content ?? "" };
+    }),
+    conversations: bundle.conversations,
+    notes: "",
+  };
+}
+
+async function archiveHeadsAdoptionPlan(
+  bundle: ArchiveBundle,
+  newProjectId: string,
+  artifactIds: ReadonlyMap<string, string>,
+): Promise<AdoptionPlan> {
+  const json = jsonBundleFromArchive(bundle);
+  const digests = new Map<string, string>();
+  for (const { node, content } of json.artifacts) {
+    if (node.kind === "source_material" || node.kind === "material_reading") continue;
+    digests.set(node.id, await digestOf(content));
+  }
+  return bundleAdoptionPlan(json, newProjectId, artifactIds, digests);
 }
 
 export type JsonImportDeps = {
@@ -267,8 +308,8 @@ export async function importArchive(bundle: ArchiveBundle, deps: ArchiveImportDe
       if (id) ({ version } = await deps.reviseArtifact(id, { ...write, sb }));
       else ({ id, version } = await deps.createArtifact({ ...write, sb }));
       if (version !== index + 1) throw new Error(`the artifact store numbered "${write.title}" version ${String(index + 1)} as ${String(version)}`);
-      ids.set(versionIdFor(artifact.from, version), { artifactId: id, version });
-      ids.set(versionIdFor(artifact.artifactId, version), { artifactId: id, version });
+      ids.set(versionIdFor(artifact.from, write.version), { artifactId: id, version });
+      ids.set(versionIdFor(artifact.artifactId, write.version), { artifactId: id, version });
       step();
     }
     if (id) artifactIds.set(artifact.from, id);
@@ -277,12 +318,15 @@ export async function importArchive(bundle: ArchiveBundle, deps: ArchiveImportDe
     await deps.createArtifact(write);
     step();
   }
+  const adoption = bundle.workflow
+    ? workflowAdoptionPlan(bundle.workflow, projectId, ids)
+    : await archiveHeadsAdoptionPlan(bundle, projectId, artifactIds);
   return {
     projectId,
     artifacts: plan.artifacts.length,
     versions,
     conversations: plan.conversations.length,
-    plan: workflowAdoptionPlan(bundle.workflow, projectId, ids),
+    plan: adoption,
   };
 }
 

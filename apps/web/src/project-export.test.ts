@@ -75,6 +75,28 @@ describe("assembleBundle", () => {
     ]);
   });
 
+  test("omits an unreadable older blob version without substituting current bytes or aborting the zip", async () => {
+    const asked: string[] = [];
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectView: async () => ({
+          project: { id: "proj_1", title: "Renew the lease", policy: {} },
+          tenantId: "tenant_1",
+          nodes: [node({ version: 2 })],
+        }),
+        artifactContent: async (_tenantId, nodeId) => {
+          asked.push(nodeId);
+          if (nodeId.endsWith("@1")) throw new Error("Uploaded file content is not versioned");
+          return { content: "current blob" };
+        },
+      }),
+    );
+    expect(asked).toEqual(["node_1@1", "node_1@2"]);
+    expect(bundle.artifacts[0]?.versions).toEqual([{ version: 2, content: "current blob" }]);
+    expect(bundle.artifacts[0]?.versions.some((entry) => entry.version === 1)).toBe(false);
+  });
+
   test("skips stages with no deployed specialist and stages with an empty thread", async () => {
     const bundle = await assembleBundle(
       "proj_1",

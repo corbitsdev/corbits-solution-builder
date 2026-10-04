@@ -75,16 +75,43 @@ describe("artifactContent download-path selection", () => {
             source: { origin: "imported", upload: { id: "up-old", filename: "report.pdf", mimeType: "application/pdf", size: 3 } },
           },
         }),
-      "GET /api/tenants/tnt/artifacts/art-1/versions/1/download": () =>
+      // Real hub route. The `/versions/:version/download` path is not mounted;
+      // a mock that served it would hide a client that still called it.
+      "GET /api/tenants/tnt/artifacts/art-1/versions/1/download": () => json({ error: { code: "not_found", message: "not mounted" } }, 404),
+      "GET /api/tenants/tnt/artifacts/art-1/download?version=1": () =>
         new Response(new Uint8Array([9, 8, 7]), { status: 200, headers: { "content-type": "application/pdf" } }),
       "GET /api/tenants/tnt/artifacts/art-1/download": () =>
         new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "application/pdf" } }),
     });
     const result = await api.artifactContent("tnt", "art-1@1");
     expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/versions/1", method: "GET" });
-    expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/versions/1/download", method: "GET" });
+    expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/download?version=1", method: "GET" });
+    expect(calls.some((call) => call.url === "/api/tenants/tnt/artifacts/art-1/versions/1/download")).toBe(false);
     expect(calls.some((call) => call.url === "/api/tenants/tnt/artifacts/art-1/download")).toBe(false);
-    expect(result.content.startsWith("data:application/pdf;base64,")).toBe(true);
+    expect(result.content).toBe(`data:application/pdf;base64,${btoa(String.fromCharCode(9, 8, 7))}`);
+  });
+
+  test("a pinned non-current blob version does not fall back to the current blob", async () => {
+    const calls = mockHub({
+      "GET /api/tenants/tnt/artifacts/art-1/versions/1": () =>
+        json({
+          artifact: {
+            id: "art-1",
+            kind: "file",
+            title: "report.pdf",
+            content: "",
+            version: 1,
+            source: { origin: "imported", upload: { id: "up-old", filename: "report.pdf", mimeType: "application/pdf", size: 3 } },
+          },
+        }),
+      "GET /api/tenants/tnt/artifacts/art-1/versions/1/download": () => json({ error: { code: "not_found", message: "not mounted" } }, 404),
+      "GET /api/tenants/tnt/artifacts/art-1/download?version=1": () => json({ error: "Uploaded file content is not versioned" }, 400),
+      "GET /api/tenants/tnt/artifacts/art-1/download": () =>
+        new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "application/pdf" } }),
+    });
+    await expect(api.artifactContent("tnt", "art-1@1")).rejects.toThrow(/400/);
+    expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/download?version=1", method: "GET" });
+    expect(calls.some((call) => call.url === "/api/tenants/tnt/artifacts/art-1/download")).toBe(false);
   });
 
   test("a pinned version whose record already has content does not hit the current download", async () => {

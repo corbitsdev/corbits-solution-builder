@@ -235,12 +235,22 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
   const artifacts: ExportedArtifact[] = await Promise.all(
     detail.nodes.map(async (node) => ({
       node: pickNode(node),
-      versions: await Promise.all(
-        Array.from({ length: node.version }, async (_, at) => ({
-          version: at + 1,
-          content: (await deps.artifactContent(detail.tenantId, versionIdFor(node.id, at + 1))).content,
-        })),
-      ),
+      versions: (
+        await Promise.all(
+          Array.from({ length: node.version }, async (_, at) => {
+            const version = at + 1;
+            try {
+              return { version, content: (await deps.artifactContent(detail.tenantId, versionIdFor(node.id, version))).content };
+            } catch {
+              // A blob-backed upload has no per-version bytes; the hub 400s
+              // older pins rather than serving today's file as that version.
+              // Drop the unreadable pin. Do not substitute current bytes, and
+              // do not fail the rest of the zip.
+              return null;
+            }
+          }),
+        )
+      ).filter((entry): entry is ExportedVersion => entry !== null),
     })),
   );
 

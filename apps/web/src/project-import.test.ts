@@ -212,6 +212,75 @@ describe("importArchive", () => {
     expect(revised).toEqual(["second"]);
     expect(result.versions).toBe(2);
   });
+
+  test("a zip with no workflow still plans from heads, the way JSON does", async () => {
+    const result = await importArchive(
+      archive({
+        artifacts: [
+          { node: node({ id: "brief", kind: "problem_brief", stage: 1, artifactId: "art_brief" }), versions: [{ version: 1, content: "the brief" }] },
+          {
+            node: node({
+              id: "cons",
+              kind: "solution_constraints",
+              stage: 2,
+              title: "Constraints",
+              artifactId: "art_cons",
+              createdAt: "2026-01-02T00:00:00.000Z",
+            }),
+            versions: [{ version: 1, content: "the constraints" }],
+          },
+        ],
+        conversations: [],
+        workflow: null,
+      }),
+      archiveDeps({
+        createProject: async () => ({ projectId: "proj_new" }),
+        createArtifact: async (write) => ({ id: `new:${write.title}`, version: 1 }),
+      }),
+    );
+    expect(result.plan.legacyStage).toBe(2);
+    expect(result.plan.steps.map((step) => step.stage)).toEqual([1]);
+    expect(result.plan.steps[0]!.ref.artifactId).toBe("new:Problem discovery draft");
+    expect(result.plan.steps[0]!.ref.version).toBe(1);
+  });
+
+  test("a zip with a recorded workflow replays that record, not heads", async () => {
+    const result = await importArchive(
+      archive({
+        artifacts: [
+          { node: node({ id: "brief", kind: "problem_brief", stage: 1, artifactId: "art_brief" }), versions: [{ version: 1, content: "the brief" }] },
+          {
+            node: node({
+              id: "cons",
+              kind: "solution_constraints",
+              stage: 2,
+              title: "Constraints",
+              artifactId: "art_cons",
+              createdAt: "2026-01-02T00:00:00.000Z",
+            }),
+            versions: [{ version: 1, content: "the constraints" }],
+          },
+        ],
+        conversations: [],
+        workflow: {
+          stage: 1,
+          done: false,
+          reviews: {},
+          decisions: [],
+          votes: {},
+          freeze: null,
+          audiencePackages: {},
+          requirements: [],
+        },
+      }),
+      archiveDeps({
+        createProject: async () => ({ projectId: "proj_new" }),
+        createArtifact: async (write) => ({ id: `new:${write.title}`, version: 1 }),
+      }),
+    );
+    expect(result.plan.legacyStage).toBe(1);
+    expect(result.plan.steps).toEqual([]);
+  });
 });
 
 describe("a main v3 JSON bundle", () => {

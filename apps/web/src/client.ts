@@ -837,7 +837,8 @@ async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: s
 
 /** The blob-backed artifact's raw bytes, over the package's own download route. */
 async function downloadArtifactBytes(tenantId: string, artifactId: string, version?: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
-  const rest = version === undefined ? `/artifacts/${encodeURIComponent(artifactId)}/download` : `/artifacts/${encodeURIComponent(artifactId)}/versions/${String(version)}/download`;
+  const path = `/artifacts/${encodeURIComponent(artifactId)}/download`;
+  const rest = version === undefined ? path : `${path}?version=${String(version)}`;
   const response = await fetch(`${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}${rest}`, { credentials: hubCredentials() });
   if (response.status === 404) {
     // A project's older upload can still sit in the workspace tenant (#29);
