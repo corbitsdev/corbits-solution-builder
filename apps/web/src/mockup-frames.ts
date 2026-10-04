@@ -39,6 +39,11 @@ export function frameGeometry(kind: ScreenKind, screenWidth: number, screenHeigh
   };
 }
 
+/** The body a picture of this shape gets: a handset only for a portrait picture; anything landscape is a browser window. */
+export function bodyFor(kind: ScreenKind, width: number, height: number): ScreenKind {
+  return kind === "phone" && width > height ? "desktop" : kind;
+}
+
 /** How a framed picture is named in the README: the body it was drawn in. */
 export function frameLabel(kind: ScreenKind | undefined): string {
   return kind === "phone" ? "in a phone body" : kind === "desktop" ? "in a browser window" : "as captured";
@@ -64,7 +69,10 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
   if (shot.framed || !shot.kind || typeof document === "undefined") return shot.png;
   const image = await bitmapOf(shot.png);
   const scale = shot.width && shot.width > 0 ? image.width / shot.width : 2;
-  const geometry = frameGeometry(shot.kind, image.width, image.height);
+  // A handset is never drawn around a landscape picture (#668): a screen
+  // marked a phone's that was still captured wide gets the browser window.
+  const kind = bodyFor(shot.kind, image.width, image.height);
+  const geometry = frameGeometry(kind, image.width, image.height);
   const canvas = document.createElement("canvas");
   canvas.width = geometry.width;
   canvas.height = geometry.height;
@@ -73,7 +81,7 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
   const unit = Math.max(1, scale);
   const { screen } = geometry;
 
-  if (shot.kind === "phone") {
+  if (kind === "phone") {
     // The handset: a dark body with a thin highlight, the screen clipped to
     // its own corners, the island and the home indicator over it.
     roundedRect(context, 0, 0, geometry.width, geometry.height, geometry.bodyRadius);

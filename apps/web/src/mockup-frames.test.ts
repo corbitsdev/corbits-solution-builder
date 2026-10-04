@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
+import { bodyFor, frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 
 // #654: the body around a screen is sized from the screen.
 describe("frameGeometry", () => {
@@ -45,5 +45,20 @@ describe("framedMockupShots", () => {
       expect(source).toContain("framedMockupShots");
       expect(source).not.toMatch(/[^d]mockupShots\(/);
     }
+  });
+});
+
+// #668: a handset only around a portrait picture.
+describe("bodyFor", () => {
+  test("a landscape picture marked as a phone's gets the browser window; a portrait one keeps the handset", () => {
+    expect(bodyFor("phone", 2560, 1920)).toBe("desktop");
+    expect(bodyFor("phone", 804, 1740)).toBe("phone");
+    expect(bodyFor("desktop", 804, 1740)).toBe("desktop");
+  });
+
+  test("the capture lays a phone screen out at phone width", async () => {
+    const source = await Bun.file(new URL("./mockup-shots.ts", import.meta.url)).text();
+    expect(source).toContain("export const PHONE_FRAME_WIDTH = 402;");
+    expect(source).toMatch(/frame\.style\.width = kind === "phone" \? `\$\{String\(PHONE_FRAME_WIDTH\)\}px`/);
   });
 });
