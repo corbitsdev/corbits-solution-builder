@@ -54,6 +54,7 @@ const StartBody = type({
     stackBlock: "string",
     target: "string",
     planRef: "string",
+    "files?": [{ path: "string", content: "string" }, "[]"],
   },
   "continueFrom?": "number",
 });
