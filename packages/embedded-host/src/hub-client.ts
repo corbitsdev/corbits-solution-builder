@@ -170,7 +170,46 @@ type AuthApi = {
       headers: Headers;
     }) => Promise<unknown>;
   };
+  /** better-auth's own context: the internal adapter and the password hasher, for the owner repair (#684). */
+  $context: Promise<{
+    internalAdapter: {
+      findUserByEmail: (email: string) => Promise<{ user: { id: string } } | null>;
+      updatePassword: (userId: string, hashedPassword: string) => Promise<unknown>;
+    };
+    password: { hash: (plain: string) => Promise<string> };
+  }>;
 };
+
+/** A fresh random owner password, the shape the first run mints. */
+function mintPassword(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(24)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Heals an owner whose keychain password the hub refuses (#684): the
+ * keychain is per machine while a hub's credential row is per data
+ * directory, so a second host against another directory leaves the two
+ * apart, and the launch sign-in then fails for good. The host is the
+ * authority for this machine's owner, so it mints a fresh password, writes
+ * its hash straight onto the credential row, keeps it in the keychain, and
+ * reports the new password. Null when there is no owner account to heal.
+ */
+export async function repairOwnerPassword(
+  auth: Pick<AuthApi, "$context">,
+  email: string,
+  store: (password: string) => Promise<unknown> = (password) => storeSecret(OWNER_PASSWORD_ACCOUNT, password),
+  mint: () => string = mintPassword,
+): Promise<string | null> {
+  const context = await auth.$context;
+  const found = await context.internalAdapter.findUserByEmail(email);
+  if (!found) return null;
+  const fresh = mint();
+  await context.internalAdapter.updatePassword(found.user.id, await context.password.hash(fresh));
+  await store(fresh);
+  return fresh;
+}
 
 function captureSession(response: Response): string | null {
   const pair = sessionPairFromSetCookieHeaders(response.headers);
@@ -228,9 +267,7 @@ async function ownerPassword(mintIfMissing: boolean): Promise<string | null> {
     );
   }
   if (!mintIfMissing) return null;
-  const minted = Array.from(crypto.getRandomValues(new Uint8Array(24)))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const minted = mintPassword();
   await storeSecret(OWNER_PASSWORD_ACCOUNT, minted);
   return minted;
 }
@@ -265,8 +302,11 @@ export async function mintOwnerSetCookie(): Promise<string[]> {
 
   let response = await auth.api.signInEmail({ body: { email: ownerEmail, password }, asResponse: true });
   if (!response.ok) {
-    await auth.api.signUpEmail({ body: { email: ownerEmail, password, name: ownerName } });
-    response = await auth.api.signInEmail({ body: { email: ownerEmail, password }, asResponse: true });
+    // An owner that exists but refuses the keychain's password is healed
+    // (#684); one that does not exist yet is created.
+    const repaired = await repairOwnerPassword(auth, ownerEmail);
+    if (repaired === null) await auth.api.signUpEmail({ body: { email: ownerEmail, password, name: ownerName } });
+    response = await auth.api.signInEmail({ body: { email: ownerEmail, password: repaired ?? password }, asResponse: true });
   }
 
   const cookies = rawSetCookieHeaders(response.headers);
@@ -290,11 +330,18 @@ export async function setOwnerPassword(next: string): Promise<void> {
     throw new HostError("provider_unavailable", "The owner's password is set here only for an embedded hub; a hosted hub changes it through its own account flow.");
   }
   if (!hubIsMounted()) await mountHub();
-  const current = (await ownerPassword(true))!;
+  let current = (await ownerPassword(true))!;
   const { ownerEmail } = hostIdentity();
   const auth = hub().auth as unknown as AuthApi;
-  const signedIn = await auth.api.signInEmail({ body: { email: ownerEmail, password: current }, asResponse: true });
-  if (!signedIn.ok) throw new HostError("internal_error", "The hub would not sign the workspace owner in to change the password.");
+  let signedIn = await auth.api.signInEmail({ body: { email: ownerEmail, password: current }, asResponse: true });
+  if (!signedIn.ok) {
+    // The keychain and the hub disagree (#684): heal first, then change.
+    const repaired = await repairOwnerPassword(auth, ownerEmail);
+    if (repaired === null) throw new HostError("internal_error", "The hub would not sign the workspace owner in to change the password.");
+    current = repaired;
+    signedIn = await auth.api.signInEmail({ body: { email: ownerEmail, password: current }, asResponse: true });
+    if (!signedIn.ok) throw new HostError("internal_error", "The hub would not sign the workspace owner in to change the password.");
+  }
   const cookie = rawSetCookieHeaders(signedIn.headers)
     .map((header) => header.split(";")[0]!.trim())
     .join("; ");
