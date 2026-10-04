@@ -36,9 +36,8 @@ export type WorkflowViewState = {
   /** The quiet re-read: polls and nudges go through this, no busy flag. */
   readonly reload: () => Promise<ProjectWorkflowView | null>;
   /** Optimistically land a stage the workflow just confirmed (approve /
-   *  send-back) ahead of the re-read, so the view never flashes backwards;
-   *  `done` when that approve finished the project. */
-  readonly markStage: (stage: number, done?: boolean) => void;
+   *  send-back) ahead of the re-read, so the view never flashes backwards. */
+  readonly markStage: (stage: number) => void;
 };
 
 // Re-entering a project this session already has a workflow view for: a
@@ -57,12 +56,9 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
-  // A run that has not written its first state (stage 0) never replaces a
-  // view already held, nor does any read replace a finished one: delivery is
-  // terminal, and a read racing the run's end must not reopen the stage.
   const reload = useCallback(async () => {
     const next = await api.projectWorkflowView(projectId).catch(() => null);
-    if (next && next.stage >= 1 && (next.done || !viewSnapshots.get(projectId)?.done)) {
+    if (next && next.stage >= 1) {
       setView(next);
       viewSnapshots.set(projectId, next);
     }
@@ -85,14 +81,9 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setAttempt((value) => value + 1);
   }, []);
 
-  const markStage = useCallback(
-    (stage: number, done?: boolean) => {
-      const held = viewSnapshots.get(projectId);
-      if (held) viewSnapshots.set(projectId, { ...held, stage, done: done ?? held.done });
-      setView((current) => (current ? { ...current, stage, done: done ?? current.done } : current));
-    },
-    [projectId],
-  );
+  const markStage = useCallback((stage: number) => {
+    setView((current) => (current ? { ...current, stage } : current));
+  }, []);
 
   // Re-entering a project whose workflow is already live: paint it
   // immediately with the same non-deploying read `reload` uses

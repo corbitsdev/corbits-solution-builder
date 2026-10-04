@@ -118,7 +118,6 @@ export function useRecordedDeck(args: {
         setBuilt({ forId: nodeId, deck: null, note: "No slides to show: the package's deck outline has no slides." });
         return;
       }
-      // Slides still draw without the screens; the note below says they could not be captured.
       const shots = designHtml ? await mockupShots(designHtml).catch(() => [] as MockupShot[]) : [];
       if (cancelled) return;
       const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;

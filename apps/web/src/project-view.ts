@@ -124,7 +124,7 @@ function toArtifactNode(node: GraphNode): Omit<ArtifactNode, "position"> {
  * at 1 and `done` at false until `StageWorkspace` ensures and triggers it.
  */
 async function workflowStage(transport: Transport, projectId: string): Promise<{ stage: number; done: boolean }> {
-  const ref = await resolveProjectWorkflowRef(transport, projectId);
+  const ref = await resolveProjectWorkflowRef(transport, projectId).catch(() => null);
   if (!ref) return { stage: 1, done: false };
   const view = await loadProjectWorkflowView(transport, ref);
   return { stage: view.done ? LAST_STAGE : view.stage, done: view.done };

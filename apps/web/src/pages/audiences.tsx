@@ -436,7 +436,6 @@ export function AudiencePackages({
   const shotsRef = useRef<{ key: string; shots: Promise<MockupShot[]> } | null>(null);
   const designShots = (): Promise<MockupShot[]> => {
     if (!designHtml || !designRef) return Promise.resolve([]);
-    // Slides still draw without the screens; the preview note says they could not be captured.
     if (shotsRef.current?.key !== designRef) shotsRef.current = { key: designRef, shots: mockupShots(designHtml).catch(() => []) };
     return shotsRef.current.shots;
   };

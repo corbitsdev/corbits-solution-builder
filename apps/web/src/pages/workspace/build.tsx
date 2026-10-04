@@ -126,9 +126,6 @@ function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" |
 export function BuildPanel({
   detail,
   tenantId,
-  address,
-  messages,
-  reloadThread,
   freeze,
   attempts,
   refreshAttempts,
@@ -144,17 +141,10 @@ export function BuildPanel({
   popover = null,
   onAttach,
   attachNote = null,
-  notice = null,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  /** The build supervisor's live address and its thread across every address
-   *  it has run at (`useStageAgent`, `useStageThread`), read through the
-   *  workspace's query cache so a reopened project shows what was sent. */
-  address: string;
-  messages: readonly ChatMessage[];
-  reloadThread: () => Promise<void>;
   /** Stage 7's freeze: the target, the frozen references and the stack. */
   freeze: Freeze | null;
   /** The host's attempts for this project (`useBuildAttempts`). */
@@ -177,9 +167,9 @@ export function BuildPanel({
   /** The paperclip: files join the project as material. */
   onAttach?: (files: FileList) => void;
   attachNote?: string | null;
-  /** A failure, said in the conversation where the next turn would appear. */
-  notice?: ReactNode;
 }) {
+  const [address, setAddress] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
@@ -189,6 +179,21 @@ export function BuildPanel({
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .ensureStageAgent(detail.project.id, 8)
+      .then((deployment) => {
+        if (!cancelled) setAddress(deployment.address);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id]);
+
   // The worker's presence is the host's word, asked for on open and again
   // whenever the window regains focus: a person installs the tool in a
   // terminal, or changes it in Settings, and comes back expecting the
@@ -196,8 +201,8 @@ export function BuildPanel({
   const checkWorker = useCallback(async () => {
     try {
       setWorker(await api.buildWorker());
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } catch {
+      // The banner keeps the last answer; the next check says.
     }
   }, []);
   useEffect(() => {
@@ -206,6 +211,22 @@ export function BuildPanel({
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [checkWorker]);
+
+  const load = useCallback(async () => {
+    if (!address) return;
+    try {
+      setMessages(await api.readStageThread(tenantId, [address]));
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  }, [address, tenantId]);
+
+  useEffect(() => {
+    if (!address) return;
+    void load();
+    const timer = setInterval(() => void load(), 3_000);
+    return () => clearInterval(timer);
+  }, [address, load]);
 
   // The project detail (and so `detail.nodes`) follows this stage's thread:
   // a supervisor reply is the only cue that the status document changed.
@@ -285,7 +306,7 @@ export function BuildPanel({
   // review opens on; the brief is what the status is written from.
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
-      if (!attempt.outcome) return;
+      if (!address || !attempt.outcome) return;
       // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
       const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
@@ -310,7 +331,7 @@ export function BuildPanel({
           verification: packaged.verification,
         }),
       });
-      await Promise.all([reloadThread(), refreshAttempts()]);
+      await Promise.all([load(), refreshAttempts()]);
       onChanged();
     });
 
@@ -332,10 +353,14 @@ export function BuildPanel({
               {error}
             </Banner>
           ) : null}
+          {!address ? (
+            <div className="think" role="status">
+              <span className="who conv-who">Opening…</span>
+            </div>
+          ) : null}
           <StageConversation
             stage={8}
             rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
-            notice={notice}
             messages={messages}
             value={composer}
             onValueChange={setComposer}
@@ -343,11 +368,13 @@ export function BuildPanel({
               const body = composer;
               setComposer("");
               void run("message", async () => {
+                if (!address) return;
                 await api.sendStageMail(tenantId, address, { body });
-                await reloadThread();
+                await load();
               });
             }}
             working={busy !== null}
+            disabled={!address}
             events={stageEvents}
             who={agentFor(8).title}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
@@ -399,7 +426,7 @@ export function BuildPanel({
               <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
                 Cancel the build attempt
               </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove} onClick={onApprove}>
+              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
                 Approve and continue
               </Button>
             </div>
@@ -462,7 +489,7 @@ export function BuildPanel({
                       onChange={(event) => setPort(event.target.value)}
                       style={{ maxWidth: "6rem" }}
                     />
-                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null} onClick={() => void record(current)}>
+                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null || !address} onClick={() => void record(current)}>
                       Record attempt {String(current.attempt)} and brief the supervisor
                     </Button>
                   </div>

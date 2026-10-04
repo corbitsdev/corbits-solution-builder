@@ -160,7 +160,6 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
         stop: () => void invoke("dictation_stop").catch((cause) => end(String(cause))),
         abort: () => {
           end("stopped");
-          // The session has already ended; a failed stop has nothing left to report to.
           void invoke("dictation_stop").catch(() => undefined);
         },
       };
@@ -175,7 +174,6 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
       // a reasonable time, say so rather than sit on "starting" for good.
       window.setTimeout(() => {
         if (!over && !heardLevel) {
-          // `end` reports the failure that matters; the stop is cleanup.
           void invoke("dictation_stop").catch(() => undefined);
           end("The microphone opened but no sound reached the app.");
         }

@@ -45,7 +45,7 @@ async function pollView(
   const deadline = Date.now() + timeoutMs;
   let latest: ProjectWorkflowView | null = null;
   for (;;) {
-    latest = await view();
+    latest = await view().catch(() => null);
     if (latest && until(latest)) return latest;
     if (Date.now() >= deadline) return latest;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

@@ -50,11 +50,11 @@ function domainOfAddress(address: string): string {
 export async function mailTenantFor(transport: Transport, tenantId: string, address: string): Promise<string> {
   const domain = domainOfAddress(address);
   if (!domain) return tenantId;
-  const own = await tenantRow(transport, tenantId);
+  const own = await tenantRow(transport, tenantId).catch(() => null);
   if (own?.domain?.toLowerCase() === domain) return tenantId;
   const parentId = own?.parentId ?? null;
   if (!parentId) return tenantId;
-  const parent = await tenantRow(transport, parentId);
+  const parent = await tenantRow(transport, parentId).catch(() => null);
   return parent?.domain?.toLowerCase() === domain ? parentId : tenantId;
 }
 

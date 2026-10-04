@@ -408,8 +408,8 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
       `The provider rejected this key (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : "."}`,
     );
   }
-  const body = (await response.json()) as { data?: { id?: string }[] };
-  const ids = (body.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
+  const body = (await response.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+  const ids = (body?.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
   const serving = servableModels(ids, plugin);
   if (serving.length === 0) {
     throw new Error("This key works, but the provider did not list any model this product can use.");

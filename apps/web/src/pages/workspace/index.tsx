@@ -1164,9 +1164,6 @@ export function StageWorkspace({
         <BuildPanel
           detail={detail}
           tenantId={tenantId}
-          address={agentAddress}
-          messages={thread.messages}
-          reloadThread={loadThread}
           freeze={workflowView?.freeze ?? null}
           attempts={builds.attempts}
           refreshAttempts={builds.refresh}
@@ -1182,7 +1179,6 @@ export function StageWorkspace({
           popover={sendBackPopover}
           onAttach={(files) => void addMaterial([...files])}
           attachNote={attachNote}
-          notice={openingFailure}
         />
       ) : null}
 
@@ -1460,7 +1456,6 @@ export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; t
     let cancelled = false;
     void Promise.all(
       live.map(async (node) => {
-        // An unreadable review says so on itself, as the design history does.
         const result = await api.artifactContent(tenantId, node.id).catch(() => null);
         return [node.id, result?.content ?? UNREADABLE] as const;
       }),

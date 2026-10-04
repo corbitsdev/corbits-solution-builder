@@ -30,7 +30,6 @@ export function readStripHeight(): number | null {
     const parsed = raw === null ? Number.NaN : Number(raw);
     return Number.isFinite(parsed) && parsed >= STRIP_MIN_HEIGHT ? parsed : null;
   } catch {
-    // Blocked storage: nothing remembered, so the default height applies.
     return null;
   }
 }

@@ -40,7 +40,6 @@ function readStored(): number | null {
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? clamp(parsed) : null;
   } catch {
-    // Blocked storage: nothing remembered, so the default width applies.
     return null;
   }
 }
