@@ -17,7 +17,7 @@ import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
@@ -278,8 +278,18 @@ function Stakeholders({
   return (
     <div>
       {error ? <Banner tone="error" title={error} /> : null}
+      <div className="button-row">
+        <p className="inline-note">
+          {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
+        </p>
+        {/* A disclosure (#678): the same control opens and closes the panel. */}
+        <button type="button" className="disclosure" aria-expanded={editing} aria-controls="stakeholder-panel" onClick={() => setEditing(!editing)}>
+          <ChevronRight className="disclosure-chevron" aria-hidden="true" />
+          Manage stakeholders
+        </button>
+      </div>
       {editing ? (
-        <div className="stakeholder-editor">
+        <div className="stakeholder-editor" id="stakeholder-panel">
           {rows.map((row, index) => (
             <div key={index} className="stakeholder-row">
               <Dictated
@@ -333,16 +343,7 @@ function Stakeholders({
             </Button>
           </div>
         </div>
-      ) : (
-        <div className="button-row">
-          <p className="inline-note">
-            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
-          </p>
-          <Button variant="ghost" onClick={() => setEditing(true)}>
-            Manage stakeholders
-          </Button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
