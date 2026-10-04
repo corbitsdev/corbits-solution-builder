@@ -72,7 +72,7 @@ export const TRIGGER_FLAG_PREFIX = "sb-trigger:";
 /**
  * Records the hub's trigger Message-ID on the Sent copy, found by its own
  * Message-ID. Best-effort: a copy that cannot be found or flagged leaves the
- * send accepted and that turn without a reply the client can pair.
+ * send accepted and that turn's pairing to fall back on order.
  */
 export async function recordTriggerId(
   db: MailboxDb,

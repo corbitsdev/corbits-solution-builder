@@ -213,14 +213,19 @@ export async function readStageThread(
 }
 
 /**
- * The run's thread root: the trigger id of the first mail it was sent. Named
- * in `In-Reply-To`, it lands in `References`, on which the run's connector
- * continues its thread whatever its last Message-ID is by the time it takes
- * the mail, so a turn sent while another is still being answered is paired
- * by id too (#62).
+ * The run's thread root: the trigger id of the first person turn that has
+ * one. Named in `In-Reply-To`, it lands in `References`, on which the run's
+ * connector continues its thread whatever its last Message-ID is by the time
+ * it takes the mail, so a turn sent while another is still being answered is
+ * paired by id too (#62).
+ *
+ * The opening is often a person turn with no `sb-trigger:` flag (a send the
+ * hub did not record as a trigger). That turn has no `triggerMessageId`, so
+ * the first me-turn is not enough: every later send would stay unthreaded.
  */
 function threadRoot(thread: readonly ChatMessage[]): string | undefined {
-  return thread.find((message) => message.author === "me")?.triggerMessageId;
+  return thread.find((message) => message.author === "me" && message.triggerMessageId !== undefined)
+    ?.triggerMessageId;
 }
 
 /** Sends (or replies in) a stage conversation: the same send seam a

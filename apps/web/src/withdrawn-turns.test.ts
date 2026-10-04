@@ -30,7 +30,7 @@ const reply = (id: string, offset: number, inReplyTo: string): ChatMessage => ({
 
 describe("pairReplies", () => {
   // #62: the hub's trigger Message-ID on the Sent row, named by the reply's
-  // In-Reply-To, is the only thing that pairs them.
+  // In-Reply-To, is what pairs them; order is only the fallback.
   test("pairs a reply with the turn its In-Reply-To names, not the oldest queued one", () => {
     const messages = [
       trigger("m1", 0, "<t1@hub>"),
@@ -52,16 +52,28 @@ describe("pairReplies", () => {
     expect(queue).toEqual([]);
   });
 
-  test("a reply whose In-Reply-To names nothing in the thread answers nothing", () => {
-    // A thread sent before sends were threaded: the run's second reply names
-    // its first reply, not the turn it answers.
-    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), trigger("m2", 2, "<t2@hub>"), reply("a2", 3, "<a1@run>")];
+  test("turns sent before the trigger id was recorded still pair by order, around the id-paired ones", () => {
+    const messages = [
+      person("old1", 0),
+      trigger("m2", 1, "<t2@hub>"),
+      agent("legacy1", 2),
+      reply("a2", 3, "<t2@hub>"),
+      person("old3", 4),
+      agent("legacy3", 5),
+    ];
     const { answeredBy, queue } = pairReplies(messages);
-    expect(answeredBy.has("a2")).toBe(false);
-    expect(queue.map((message) => message.id)).toEqual(["m2"]);
+    expect(answeredBy.get("legacy1")).toBe("old1");
+    expect(answeredBy.get("a2")).toBe("m2");
+    expect(answeredBy.get("legacy3")).toBe("old3");
+    expect(queue).toEqual([]);
   });
 
-  test("a second reply to the same trigger answers nothing", () => {
+  test("a reply whose In-Reply-To names nothing in the thread falls back on order", () => {
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<elsewhere@hub>")];
+    expect(pairReplies(messages).answeredBy.get("a1")).toBe("m1");
+  });
+
+  test("a second reply to the same trigger answers nothing by id and falls back on order", () => {
     const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), reply("a1b", 2, "<t1@hub>")];
     const { answeredBy } = pairReplies(messages);
     expect(answeredBy.get("a1")).toBe("m1");

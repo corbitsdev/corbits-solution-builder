@@ -38,25 +38,32 @@ export type ReplyPairing = {
 };
 
 /**
- * Pairs each agent reply with the person turn it answers, by id only (#62):
- * the hub mints a Message-ID for the mail it delivers to the run and records
- * it on the person's Sent copy (`triggerMessageId`), and every send threads
- * onto the run's thread (`sendStageMail`), so the run's reply names
- * that trigger id in `inReplyTo`. `ChatMessage.id` is a folder position
- * (`"Sent:<uid>"`), never what `inReplyTo` names, so it plays no part.
+ * Pairs each agent reply with the person turn it answers.
  *
- * A reply naming no trigger in `messages` answers nothing: the stage's
- * opening, an unsolicited message, or a reply on a thread sent before sends
- * were threaded, which names the run's previous reply instead.
+ * By id first (#62): the hub mints a Message-ID for the mail it delivers to
+ * the run and records it on the person's Sent copy (`triggerMessageId`), and
+ * every send threads onto the run's thread (`sendStageMail`), so the run's
+ * reply names that trigger id in `inReplyTo`. A reply whose `inReplyTo`
+ * names a turn in `messages` is that turn's answer, wherever either sits.
+ * `ChatMessage.id` itself is a folder position (`"Sent:<uid>"`), never what
+ * `inReplyTo` names, so it plays no part.
+ *
+ * By order for the rest: one mail-triggered step at a time, draining the
+ * specialist's inbox in the order it arrived, over the turns and replies the
+ * id pass left unpaired. That is what a turn sent before the trigger id was
+ * recorded, or a reply carrying no usable `inReplyTo`, falls back on.
+ *
+ * An agent message that arrives with nothing queued (the stage's opening
+ * reply, or an unsolicited message) answers nothing and is never paired.
  */
 export function pairReplies(messages: readonly ChatMessage[]): ReplyPairing {
+  const answeredBy = new Map<string, string>();
   const byTriggerId = new Map<string, ChatMessage>();
   for (const message of messages) {
     if (message.author === "me" && message.triggerMessageId !== undefined) {
       byTriggerId.set(message.triggerMessageId, message);
     }
   }
-  const answeredBy = new Map<string, string>();
   const answered = new Set<string>();
   for (const message of messages) {
     if (message.author !== "agent" || message.inReplyTo === undefined) continue;
@@ -65,7 +72,16 @@ export function pairReplies(messages: readonly ChatMessage[]): ReplyPairing {
     answeredBy.set(message.id, request.id);
     answered.add(request.id);
   }
-  const queue = messages.filter((message) => message.author === "me" && !answered.has(message.id));
+  const queue: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.author === "me") {
+      if (!answered.has(message.id)) queue.push(message);
+      continue;
+    }
+    if (answeredBy.has(message.id)) continue;
+    const head = queue.shift();
+    if (head) answeredBy.set(message.id, head.id);
+  }
   return { answeredBy, queue };
 }
 

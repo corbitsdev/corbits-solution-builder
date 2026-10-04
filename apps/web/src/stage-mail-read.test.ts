@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readStageThread, TRIGGER_FLAG_PREFIX } from "./stage-mail.ts";
+import { readStageThread, sendStageMail, TRIGGER_FLAG_PREFIX } from "./stage-mail.ts";
 
 const AGENT = "run_a1b2c3d4e5f60718293a4b5c6d7e8f90@sb-project.localhost";
 const ME = "owner@ws.localhost";
@@ -82,5 +82,44 @@ describe("readStageThread", () => {
       ["Sent:2", undefined, undefined],
       ["INBOX:3", undefined, "<t1@hub>"],
     ]);
+  });
+});
+
+describe("sendStageMail", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+  });
+
+  function captureSend(folders: Record<string, Row[]>): unknown[] {
+    mockMailbox(folders);
+    const list = globalThis.fetch;
+    const posts: unknown[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") {
+        posts.push(JSON.parse(String(init?.body)));
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return list(url, init);
+    }) as typeof fetch;
+    return posts;
+  }
+
+  test("threads onto the first person turn that has a trigger id, skipping an unflagged opening", async () => {
+    const posts = captureSend({ Sent: [sentRow(1), sentRow(2, "<t2@hub>")], INBOX: [] });
+    await sendStageMail("tnt_ws", AGENT, { body: "next" });
+    expect(posts).toEqual([{ to: [AGENT], subject: "next", body: "next", inReplyTo: "<t2@hub>" }]);
+  });
+
+  test("keeps the first trigger id even when a later person turn has a newer one", async () => {
+    const posts = captureSend({ Sent: [sentRow(1, "<t1@hub>"), sentRow(2, "<t2@hub>")], INBOX: [] });
+    await sendStageMail("tnt_ws", AGENT, { body: "next" });
+    expect(posts).toEqual([{ to: [AGENT], subject: "next", body: "next", inReplyTo: "<t1@hub>" }]);
+  });
+
+  test("sends unthreaded when no person turn has a trigger id", async () => {
+    const posts = captureSend({ Sent: [sentRow(1)], INBOX: [] });
+    await sendStageMail("tnt_ws", AGENT, { body: "next" });
+    expect(posts).toEqual([{ to: [AGENT], subject: "next", body: "next" }]);
   });
 });

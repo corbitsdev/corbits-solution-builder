@@ -302,6 +302,12 @@ subject-less and threading-less as before.
 **Upstream-able.** Yes; the headers are already part of `MessageHeaders`
 and already forwarded by the step invoker, only the route dropped them.
 
+**Removal.** When a vendored Interchange release stamps the caller's
+subject and thread headers on a run trigger, drop the hunk and this
+section.
+
+**Kill date.** 2026-10-30.
+
 ## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
 
 **Why.** The catalog restricted `model_provider.plugin` to the four built-in

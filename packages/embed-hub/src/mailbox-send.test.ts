@@ -124,6 +124,56 @@ describe("createMailboxDeliver", () => {
     expect([...sent.messages[0]!.flags]).toEqual([]);
   });
 
+  test("forwards subject, In-Reply-To and References from the mailbox frame onto the trigger POST", async () => {
+    const messageId = "<reply@ws.localhost>";
+    const raw = buildMailFrame({
+      from: "owner@ws.localhost",
+      to: RUN_ADDRESS,
+      subject: "Re: Draft",
+      body: "Please review.",
+      messageId,
+      inReplyTo: "<root@hub.localhost>",
+      references: ["<root@hub.localhost>"],
+    });
+    const sent = await openNativeMailboxStore(db, { ...SCOPE, folder: "Sent" });
+    sent.append(
+      raw,
+      {
+        messageId,
+        from: "owner@ws.localhost",
+        to: [RUN_ADDRESS],
+        subject: "Re: Draft",
+        date: new Date(),
+        inReplyTo: "<root@hub.localhost>",
+        references: ["<root@hub.localhost>"],
+        interchangeType: undefined,
+        interchangeCorrelationId: undefined,
+      },
+      [],
+    );
+    await sent.settled;
+    const posts: unknown[] = [];
+    const deliver = createMailboxDeliver({
+      app: {
+        request: async (_path: string, init?: RequestInit) => {
+          posts.push(JSON.parse(String(init?.body)));
+          return new Response(JSON.stringify({ runId: RUN }), { status: 202 });
+        },
+      },
+      persistMail: async () => [],
+      db,
+    });
+    expect(await deliverUnderRequest(deliver, { raw, from: "owner@ws.localhost", to: [RUN_ADDRESS], messageId })).toBeNull();
+    expect(posts).toEqual([
+      {
+        content: "Please review.",
+        subject: "Re: Draft",
+        inReplyTo: "<root@hub.localhost>",
+        references: ["<root@hub.localhost>"],
+      },
+    ]);
+  });
+
   test("recording a trigger id on a copy that is not in Sent is a no-op", async () => {
     expect(await recordTriggerId(db, SCOPE, "<never-sent@ws.localhost>", "<t@hub.localhost>")).toBe(false);
   });
