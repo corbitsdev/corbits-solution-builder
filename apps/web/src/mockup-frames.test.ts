@@ -75,3 +75,12 @@ describe("the status bar", () => {
     expect(lightInkOn(null)).toBe(false);
   });
 });
+
+// #674: the page starts below the status bar.
+describe("the phone's safe area", () => {
+  test("the page is drawn below the island, not under it", async () => {
+    const source = await Bun.file(new URL("./mockup-frames.ts", import.meta.url)).text();
+    expect(source).toMatch(/const safeTop = Math\.round\(islandH \* 0\.5 \+ islandH \+ screen\.width \* 0\.03\);/);
+    expect(source).toContain("context.drawImage(image, screen.x, screen.y + safeTop, screen.width, drawnHeight);");
+  });
+});

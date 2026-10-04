@@ -204,11 +204,14 @@ export async function frameMockup(shot: MockupShot): Promise<Uint8Array> {
     const background = backgroundOf(image);
     context.fillStyle = background ?? "#ffffff";
     context.fillRect(screen.x, screen.y, screen.width, screen.height);
-    const drawnHeight = image.height * (screen.width / image.width);
-    context.drawImage(image, screen.x, screen.y, screen.width, drawnHeight);
-    context.restore();
+    // The page sits below the status bar (#ISSUE), in the screen's safe
+    // area: the island's own height, its offset from the top, and a gap.
     const islandW = Math.round(screen.width * 0.3);
     const islandH = Math.round(screen.width * 0.085);
+    const safeTop = Math.round(islandH * 0.5 + islandH + screen.width * 0.03);
+    const drawnHeight = image.height * (screen.width / image.width);
+    context.drawImage(image, screen.x, screen.y + safeTop, screen.width, drawnHeight);
+    context.restore();
     roundedRect(context, screen.x + (screen.width - islandW) / 2, screen.y + islandH * 0.5, islandW, islandH, islandH / 2);
     context.fillStyle = "#0b0c10";
     context.fill();
