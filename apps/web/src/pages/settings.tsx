@@ -406,10 +406,7 @@ function Inference({
     <Section title="Inference" lead="Where the specialists think. Keys live in this machine's keychain.">
       <div id="connections" className="section-body">
         {activeModel ? (
-          <Row
-            label="Primary model"
-            hint="What new projects and stages start on. Make primary on a provider and pick its model to change it; a running stage, or one you picked a model for, keeps its own."
-          >
+          <Row label="Default model" hint="The top row below: the provider and model tried first. Each row under it is tried, in order, if the one above fails. Drag rows to change the order.">
             <span className="v">
               {activeModel.providerLabel} · {activeModel.canonicalName}
             </span>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
+import { leadingOffering, pickedOfferingId, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import { sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
@@ -208,6 +208,21 @@ describe("leadingOffering", () => {
 
   test("none once its provider is removed: never the primary in its place", () => {
     expect(leadingOffering(null, "dep_1", offerings, () => false)).toBeUndefined();
+  });
+});
+
+describe("pickedOfferingId", () => {
+  test("a picked record with a dead deploymentId leads the next ensureSpecialistDeployment onto that offering", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
+    expect(source).toContain("const leadId = switchToOfferingId ?? pickedOfferingId(recordedPick)");
+    expect(pickedOfferingId({ offeringId: "off_switched", picked: true })).toBe("off_switched");
+  });
+
+  test("a pre-PR record with an offeringId and no picked still leads, so an upgrade does not drop the pick", () => {
+    expect(pickedOfferingId({ offeringId: "off_switched" })).toBe("off_switched");
+    expect(pickedOfferingId({ offeringId: "off_primary", picked: false })).toBeUndefined();
+    expect(pickedOfferingId(null)).toBeUndefined();
   });
 });
 

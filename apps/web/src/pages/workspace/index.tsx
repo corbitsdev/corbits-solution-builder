@@ -1296,13 +1296,13 @@ export function StageWorkspace({
   );
 }
 
-/** Loads the stage-4 design history and its feedback, then renders the flow. */
 /** Carries out, after render, a decision the render made. */
 function OnMount({ action }: { action: () => void }) {
   useMountEffect(action);
   return null;
 }
 
+/** Loads the stage-4 design history and its feedback, then renders the flow. */
 function DesignPanel({
   detail,
   tenantId,

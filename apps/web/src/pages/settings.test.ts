@@ -170,21 +170,40 @@ describe("provider and catalog row language", () => {
     expect(source).toContain("refreshProviderModels");
     expect(source).toContain('manage && row.kind !== "oauth"');
     expect(source).toContain("{connected ? \"Reconnect\" : \"Connect\"}");
+    expect(source).not.toContain("Disconnect");
     expect(source).not.toContain("StateLabel");
     expect(source).not.toContain("variant=\"primary\"");
     expect(source).not.toContain("provider-row");
   });
 
-  test("connected providers are one list, head marked as the primary, unconnected set off beneath", async () => {
+  test("connected providers are one draggable list, head marked as the default, unconnected set off beneath", async () => {
     const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    expect(source).toContain('className="drag-handle"');
+    expect(source).toContain("draggable");
+    expect(source).toContain('aria-label={`Reorder ${row.name}`}');
     expect(source).toContain('className="row row-divider"');
-    expect(source).not.toContain("draggable");
+    // One default: the head of the order, said as such; the rows below say when they are tried.
+    expect(source).toContain("rankLabel(order.indexOf(connected.id), connected.selectedModel !== null)");
+    expect(source).not.toContain("Use as default");
     expect(source).not.toContain("Any (fail over)");
+    // Every way of ordering reduces to the same persisted order: drag and keys.
+    expect(source).toContain("persistOrder(dropOn(order, dragging, connected.id))");
+    expect(source).toContain("persistOrder(moveBy(order, connected.id, -1))");
     expect(source).toContain("persistOrder(moveTo(order, connected.id, 0))");
     expect(source).toContain("api.reorderProviders(next)");
     // Viewing the page writes nothing: legacy repairs run once at app start (`settleProviderCatalog`).
     expect(source).not.toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
     expect(source).not.toContain("repairProviderBases");
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    expect(page).toContain("tried first");
+  });
+
+  test("a mismatch with the primary is Ask / Always switch / Always keep", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    expect(page).toContain("When a project uses a different model than the primary");
+    expect(page).toContain('<option value="ask">Ask</option>');
+    expect(page).toContain('<option value="switch">Always switch</option>');
+    expect(page).toContain('<option value="keep">Always keep</option>');
   });
 
   test("catalog keeps its actions as row .v links off this page", async () => {

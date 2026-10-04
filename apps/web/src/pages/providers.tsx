@@ -20,9 +20,10 @@
  * models, and catalog actions are quiet links in `.v`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
-import { moveTo, PRIMARY, rankLabel, sameOrder } from "./provider-order.ts";
+import { dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
 import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -127,20 +128,18 @@ export function ProviderList({
 
   const connectedFor = (row: Row) => providers.find((provider) => provider.providerId === row.id);
 
-  // Settings: the connected providers are one list, most preferred first;
-  // "Make primary" moves a row to the head, which is where a newly deployed
-  // specialist's model comes from, since a saved order re-bases every
-  // provider's offering priorities behind it. The unconnected ones wait below.
+  // Settings: the connected providers are one list, most preferred first,
+  // that the person orders by dragging a row's handle (or with the arrow
+  // keys on it); the head is where the default model comes from, since a
+  // saved order re-bases every provider's offering priorities behind it.
+  // The unconnected ones wait below. Onboarding keeps the catalog's order.
   const [order, setOrder] = useState<string[]>(() => providers.map((provider) => provider.id));
   useEffect(() => {
     const fresh = providers.map((provider) => provider.id);
     setOrder((current) => (sameOrder(current, fresh) ? current : fresh));
   }, [providers]);
-  const [removing, setRemoving] = useState<string | null>(null);
-  // A provider that is not ready or has no model enabled is skipped, so rank counts only the rest.
-  const ranked = order.filter((id) =>
-    providers.some((provider) => provider.id === id && provider.status === "ready" && provider.selectedModel !== null),
-  );
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const connectedRows = manage
     ? order.map((id) => rows.find((row) => connectedFor(row)?.id === id)).filter((row): row is Row => row !== undefined)
     : [];
@@ -172,13 +171,8 @@ export function ProviderList({
     void act(
       "order",
       () => api.reorderProviders(next),
-      head ? `${head.name} is primary now. New projects and stages start on it; a running stage keeps its model.` : "Order saved.",
+      head ? `${head.name} is tried first now. Applies to stages that start from now on.` : "Order saved.",
     );
-  };
-
-  const remove = (row: Row, modelProviderId: string) => {
-    setRemoving(null);
-    void act(row.id, () => api.disconnectProvider(modelProviderId), `${row.name} removed.`);
   };
 
   const connect = (row: Row) =>
@@ -241,23 +235,14 @@ export function ProviderList({
         const asking = chosen === row.id;
         const waiting = busy === row.id && row.kind === "oauth";
         const sortable = manage && connected !== undefined && ready;
-        const rank = sortable ? rankLabel(ranked.indexOf(connected.id), connected.selectedModel !== null) : null;
-        const removeControl =
-          manage && connected ? (
-            removing === row.id ? (
-              <>
-                Remove {row.name}? A stage running on it stops until you switch it.
-                <ChromeBtn onClick={() => remove(row, connected.id)}>Remove</ChromeBtn>
-                <ChromeBtn kind="link" onClick={() => setRemoving(null)}>
-                  Cancel
-                </ChromeBtn>
-              </>
-            ) : (
-              <ChromeBtn kind="link" disabled={busy !== null} onClick={() => setRemoving(row.id)}>
-                Remove
-              </ChromeBtn>
-            )
-          ) : null;
+        const rank = sortable ? rankLabel(order.indexOf(connected.id), connected.selectedModel !== null) : null;
+        const rowClass = [
+          "row",
+          sortable && dragging === connected.id ? "is-dragging" : null,
+          sortable && over === connected.id && dragging !== connected.id ? "is-drop-target" : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
         const hint = connected
           ? ready
             ? describeConnected(connected)
@@ -274,11 +259,62 @@ export function ProviderList({
                 </div>
               </div>
             ) : null}
-          <div className="row">
+          <div
+            className={rowClass}
+            onDragOver={(event) => {
+              if (!sortable || dragging === null) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (over !== connected.id) setOver(connected.id);
+            }}
+            onDragLeave={() => {
+              if (sortable && over === connected.id) setOver(null);
+            }}
+            onDrop={(event) => {
+              if (!sortable || dragging === null) return;
+              event.preventDefault();
+              persistOrder(dropOn(order, dragging, connected.id));
+              setDragging(null);
+              setOver(null);
+            }}
+          >
+            {sortable ? (
+              <button
+                type="button"
+                className="drag-handle"
+                draggable
+                aria-label={`Reorder ${row.name}`}
+                title="Drag to change the order tried. Arrow keys move it; Home puts it first."
+                disabled={busy !== null}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", connected.id);
+                  setDragging(connected.id);
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setOver(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    persistOrder(moveBy(order, connected.id, -1));
+                  } else if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    persistOrder(moveBy(order, connected.id, 1));
+                  } else if (event.key === "Home") {
+                    event.preventDefault();
+                    persistOrder(moveTo(order, connected.id, 0));
+                  }
+                }}
+              >
+                <GripVertical size={14} aria-hidden="true" />
+              </button>
+            ) : null}
             <div className="k">
               <b>
                 {row.name}
-                {rank ? <em className={rank === PRIMARY ? "default-mark" : "fallback-mark"}>{rank}</em> : null}
+                {rank ? <em className={rank.startsWith("Default") ? "default-mark" : "fallback-mark"}>{rank}</em> : null}
                 {sortable && !rank ? <em className="fallback-mark">No model enabled · skipped</em> : null}
               </b>
               <span>{hint}</span>
@@ -344,15 +380,8 @@ export function ProviderList({
                 Waiting for the browser
                 <ChromeBtn onClick={() => cancelSignIn(row.id)}>Cancel</ChromeBtn>
               </span>
-            ) : removing === row.id ? (
-              <span className="v">{removeControl}</span>
             ) : connected && ready ? (
               <span className="v">
-                {sortable && connected.selectedModel !== null && rank !== PRIMARY ? (
-                  <ChromeBtn kind="link" disabled={busy !== null} onClick={() => persistOrder(moveTo(order, connected.id, 0))}>
-                    Make primary
-                  </ChromeBtn>
-                ) : null}
                 {manage && connected.models.length > 1 ? (
                   // The model this row tries first. Choosing one moves it to
                   // the front of the provider; the others stay as fallbacks,
@@ -398,7 +427,6 @@ export function ProviderList({
                   </ChromeBtn>
                 ) : null}
                 Connected
-                {removeControl}
               </span>
             ) : (
               <span className="v">
@@ -418,7 +446,6 @@ export function ProviderList({
                 >
                   {connected ? "Reconnect" : "Connect"}
                 </ChromeBtn>
-                {removeControl}
               </span>
             )}
           </div>

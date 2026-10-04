@@ -102,8 +102,10 @@ export type StageModelSwitchRecord = {
    *  the asset's own pin. */
   readonly offeringId: string;
   readonly switchedAt: string;
-  /** A person chose `offeringId` for this stage. Absent on a record a kit
-   *  refresh wrote for a stage that was only following the primary. */
+  /** A person chose `offeringId` for this stage. Pre-PR records omit this and
+   *  are treated as picked on read (they were only written by an explicit
+   *  switch). A kit refresh of a stage that was only following the primary
+   *  writes `false`. */
   readonly picked?: boolean;
 };
 

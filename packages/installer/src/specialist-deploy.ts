@@ -451,6 +451,19 @@ export function leadingOffering<T extends { readonly id: string }>(
 }
 
 /**
+ * The offering a recorded pick should lead the next deploy with, once nothing
+ * is live (a restart ends every deployment). Pre-PR records omit `picked` and
+ * were only written by an explicit switch, so an offeringId without the flag
+ * still leads. A kit-refresh record writes `picked: false` and does not.
+ */
+export function pickedOfferingId(
+  recorded: { readonly offeringId: string; readonly picked?: boolean } | null,
+): string | undefined {
+  if (!recorded) return undefined;
+  return (recorded.picked ?? true) ? recorded.offeringId : undefined;
+}
+
+/**
  * Whether the entry at the asset's head -- what its live deployment runs --
  * is what the kit would render today for the same stage, role and model.
  * The entry alone, not the whole tree: the closure beside it changes with
@@ -633,7 +646,7 @@ async function ensureSpecialistDeploymentOnce(
       deploymentId: fresh.deploymentId,
       offeringId: leading.id,
       switchedAt: new Date().toISOString(),
-      ...(recorded?.picked && recorded.offeringId === leading.id ? { picked: true } : {}),
+      picked: pickedOfferingId(recorded) === leading.id,
     });
     return fresh;
   }
@@ -643,7 +656,7 @@ async function ensureSpecialistDeploymentOnce(
   // no live deployment left (a restart ends them all), the stage's recorded
   // pick leads the same way while its offering is still connected.
   const recordedPick = switchToOfferingId ? undefined : await readStageSwitch(transport, projectId, stage);
-  const leadId = switchToOfferingId ?? (recordedPick?.picked ? recordedPick.offeringId : undefined);
+  const leadId = switchToOfferingId ?? pickedOfferingId(recordedPick);
   const chosen = catalogOfferings.find((offering) => offering.id === leadId);
   if (switchToOfferingId && !chosen) throw new Error("the chosen model is no longer a connected offering");
   const offerings = chosen ? [chosen, ...catalogOfferings.filter((offering) => offering !== chosen)] : catalogOfferings;
