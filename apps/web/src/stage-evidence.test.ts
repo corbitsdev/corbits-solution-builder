@@ -1,14 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import {
-  openReviewFailureMessage,
-  stage6RefusalMessage,
-  stage6StackProblem,
-  stage7StackProblem,
-  stageEvidence,
-  stageRefusalMessage,
-  type StageEvidenceDeps, STACK_RESEND_ASK, stage6StackRemediation } from "./stage-evidence.ts";
+import { openReviewFailureMessage, stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, type StageEvidenceDeps, STACK_RESEND_ASK, stage6StackRemediation, isCitationProblem, citationProblemDetail, stage6CitationRemediation } from "./stage-evidence.ts";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 const STACK = {
@@ -174,5 +167,22 @@ describe("stage6StackRemediation", () => {
       expect(STACK_RESEND_ASK).toContain(`"${field}"`);
     }
     expect(STACK_RESEND_ASK).toContain("Do not add, rename or leave out a field");
+  });
+});
+
+// #692: stale citations get the current ids, not a request for the block.
+describe("stage6CitationRemediation", () => {
+  test("tells a citation problem from a missing block, and the ask carries the authoritative list", () => {
+    expect(isCitationProblem("The build plan's Stack section has uncited or unknown requirement ids (ui cites unknown requirement id(s) IR-13). Ask the architect to fix the citations before approving.")).toBe(true);
+    expect(isCitationProblem("The build plan's Stack section is missing or not in the required shape (a fenced JSON block). Ask the architect to resend it before approving.")).toBe(false);
+    expect(citationProblemDetail("The build plan's Stack section has uncited or unknown requirement ids (ui cites unknown requirement id(s) IR-13, IR-14; package:@corbits/react-ui cites unknown requirement id(s) IR-13, IR-14). Ask the architect to fix the citations before approving.")).toBe(
+      "ui cites unknown requirement id(s) IR-13, IR-14; package:@corbits/react-ui cites unknown requirement id(s) IR-13, IR-14",
+    );
+    const remediation = stage6CitationRemediation("## Requirements (authoritative ids)\n\n- IR-1: One.", "ui cites unknown requirement id(s) IR-13");
+    expect(remediation.kind).toBe("ask_specialist");
+    expect(remediation.label).toBe("Send the architect the current ids");
+    expect(remediation.message).toContain("cites ids that do not exist (ui cites unknown requirement id(s) IR-13)");
+    expect(remediation.message).toContain("- IR-1: One.");
+    expect(remediation.message).toContain("citing only these ids");
   });
 });

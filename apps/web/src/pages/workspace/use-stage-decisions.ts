@@ -25,14 +25,7 @@ import { packagesByStakeholder } from "../../package-lineages.ts";
 import { extractRequirementItems, requirementsDiffer, mintRequirementEntries, renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { buildEvidenceState } from "./build-attempts.ts";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
-import {
-  frozenSummaryLine,
-  openReviewFailureMessage,
-  stage6RefusalMessage,
-  stage6StackProblem,
-  stage7StackProblem,
-  stageEvidence,
-  stageRefusalMessage, stage6StackRemediation } from "../../stage-evidence.ts";
+import { frozenSummaryLine, openReviewFailureMessage, stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, stage6StackRemediation, isCitationProblem, citationProblemDetail, stage6CitationRemediation } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import { designHandoff } from "../../design-handoff.ts";
@@ -371,8 +364,13 @@ export function useStageDecisions({
       const problem = stage6StackProblem(reviewMessage.body, requirementIds);
       if (problem) {
         onError(problem);
-        // One click asks the architect for the block in full (#325).
-        onRemediation(stage6StackRemediation());
+        // One click asks the architect for the block in full (#325), or,
+        // for stale citations, sends it the current ids to re-cite (#692).
+        onRemediation(
+          isCitationProblem(problem)
+            ? stage6CitationRemediation(renderRequirementsBlock(workflowView?.requirements ?? []), citationProblemDetail(problem))
+            : stage6StackRemediation(),
+        );
         return;
       }
     }
@@ -557,9 +555,12 @@ export function useStageDecisions({
         return;
       }
       await refreshWorkflow();
-      if (held.length > 0) onRequirementsReminted?.(renderRequirementsBlock(mintRequirementEntries(items)));
+      // The architect hears the ids whenever they change under a draft it
+      // already wrote (#692): after a send-back the set is minted afresh,
+      // and the architect's deployment remembers the old numbering.
+      if (held.length > 0 || reviewMessage) onRequirementsReminted?.(renderRequirementsBlock(mintRequirementEntries(items)));
     },
-    [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView, onRequirementsReminted],
+    [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView, onRequirementsReminted, reviewMessage],
   );
 
   return {

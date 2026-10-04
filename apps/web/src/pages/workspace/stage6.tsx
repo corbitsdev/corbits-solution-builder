@@ -253,7 +253,18 @@ export function Stage6Panel({
     if (!requirementsInput || requirementsMinted) return;
     if (requirementsRequestedFor.current === requirementsInput) return;
     requirementsRequestedFor.current = requirementsInput;
-    runRole(STAGE6_REQUIREMENTS_ROLE_KEY, requirementsInput, setRequirements);
+    // After a send-back the project already has a requirements document
+    // (#692): the author revises it, keeping its ids, rather than writing
+    // a fresh one with a new numbering the architect never hears of.
+    void (async () => {
+      const prior = requirementsNode ? await api.artifactContent(tenantId, requirementsNode.id).then((result) => result.content, () => "") : "";
+      const body = prior
+        ? `${requirementsInput}\n\n---\n\n## Attached: Product requirements (prior revision, keep its ids)\n\nThe approved inputs above have changed since this was written. Revise it against them: keep the id of every requirement you keep, list what you drop under "Withdrawn", add new ones after the highest number, and never renumber.\n\n${prior.trim()}`
+        : requirementsInput;
+      runRole(STAGE6_REQUIREMENTS_ROLE_KEY, body, setRequirements);
+    })();
+    // `requirementsNode` is read at the moment of the ask; a later version is a later ask's concern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirementsInput, requirementsMinted, runRole]);
 
   const requestReview = (roleKey: string) => {
