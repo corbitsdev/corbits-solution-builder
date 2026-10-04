@@ -61,4 +61,48 @@ describe("artifactContent download-path selection", () => {
     expect(result.content).toBe("hello world");
     expect(calls.some((call) => call.url.endsWith("/download"))).toBe(false);
   });
+
+  test("a pinned blob-backed version reads that version's bytes, not the current blob", async () => {
+    const calls = mockHub({
+      "GET /api/tenants/tnt/artifacts/art-1/versions/1": () =>
+        json({
+          artifact: {
+            id: "art-1",
+            kind: "file",
+            title: "report.pdf",
+            content: "",
+            version: 1,
+            source: { origin: "imported", upload: { id: "up-old", filename: "report.pdf", mimeType: "application/pdf", size: 3 } },
+          },
+        }),
+      "GET /api/tenants/tnt/artifacts/art-1/versions/1/download": () =>
+        new Response(new Uint8Array([9, 8, 7]), { status: 200, headers: { "content-type": "application/pdf" } }),
+      "GET /api/tenants/tnt/artifacts/art-1/download": () =>
+        new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "application/pdf" } }),
+    });
+    const result = await api.artifactContent("tnt", "art-1@1");
+    expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/versions/1", method: "GET" });
+    expect(calls).toContainEqual({ url: "/api/tenants/tnt/artifacts/art-1/versions/1/download", method: "GET" });
+    expect(calls.some((call) => call.url === "/api/tenants/tnt/artifacts/art-1/download")).toBe(false);
+    expect(result.content.startsWith("data:application/pdf;base64,")).toBe(true);
+  });
+
+  test("a pinned version whose record already has content does not hit the current download", async () => {
+    const calls = mockHub({
+      "GET /api/tenants/tnt/artifacts/art-3/versions/1": () =>
+        json({
+          artifact: {
+            id: "art-3",
+            kind: "file",
+            title: "old.bin",
+            content: "data:application/octet-stream;base64,YQ==",
+            version: 1,
+            source: { origin: "imported", upload: { id: "up-1", filename: "old.bin", mimeType: "application/octet-stream", size: 1 } },
+          },
+        }),
+    });
+    const result = await api.artifactContent("tnt", "art-3@1");
+    expect(result.content).toBe("data:application/octet-stream;base64,YQ==");
+    expect(calls.some((call) => call.url.endsWith("/download"))).toBe(false);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assembleBundle, bundleFileName, parseBundle, type BundleDeps } from "./project-export.ts";
+import { archiveBundle, assembleBundle, bundleFileName, isArchiveBundle, parseBundle, type ArchiveBundle, type BundleDeps } from "./project-export.ts";
 import type { ArtifactNode } from "./client.ts";
 
 function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -30,25 +30,48 @@ function deps(overrides: Partial<BundleDeps> = {}): BundleDeps {
     }),
     artifactContent: async () => ({ content: "the brief" }),
     stageAgentAddresses: async (_projectId, stage) => (stage === 1 ? ["dep_1@example"] : []),
-    readStageThread: async () => [
-      { id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" },
-    ],
+    readStageThread: async () => [{ id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" }],
     projectWorkflowView: async () => null,
     ...overrides,
   };
 }
 
 describe("assembleBundle", () => {
-  test("assembles artifacts, conversations, and project fields", async () => {
+  test("assembles artifacts, conversations, and project fields as a v4 archive", async () => {
     const bundle = await assembleBundle("proj_1", deps());
     expect(bundle.format).toBe("solutions-builder.project");
-    expect(bundle.version).toBe(3);
+    expect(bundle.version).toBe(4);
+    expect(isArchiveBundle(bundle)).toBe(true);
     expect(bundle.project).toEqual({ id: "proj_1", title: "Renew the lease", policy: { audiences: [], audienceQuorum: 0 } });
     expect(bundle.artifacts).toHaveLength(1);
     expect(bundle.artifacts[0]?.versions).toEqual([{ version: 1, content: "the brief" }]);
     expect(bundle.artifacts[0]?.node.id).toBe("node_1");
     expect(bundle.conversations).toEqual([
       { stage: 1, messages: [{ id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" }] },
+    ]);
+    expect(bundle.workflow).toBeNull();
+  });
+
+  test("loads every version of an artifact by its pinned version id", async () => {
+    const asked: string[] = [];
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectView: async () => ({
+          project: { id: "proj_1", title: "Renew the lease", policy: {} },
+          tenantId: "tenant_1",
+          nodes: [node({ version: 2 })],
+        }),
+        artifactContent: async (_tenantId, nodeId) => {
+          asked.push(nodeId);
+          return { content: `body of ${nodeId}` };
+        },
+      }),
+    );
+    expect(asked).toEqual(["node_1@1", "node_1@2"]);
+    expect(bundle.artifacts[0]?.versions).toEqual([
+      { version: 1, content: "body of node_1@1" },
+      { version: 2, content: "body of node_1@2" },
     ]);
   });
 
@@ -73,15 +96,30 @@ describe("assembleBundle", () => {
           tenantId: "tenant_1",
           nodes: [secretNode],
         }),
+        projectWorkflowView: async () => ({
+          stage: 2,
+          done: false,
+          reviews: { 1: { artifactId: "art_1", version: 1, sha256: "aaa", status: "approved" } },
+          decisions: [{ kind: "approve", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa", principalId: "prn_secret" } as never],
+          audienceDecisions: { You: { decision: "proceed", note: "", principalId: "prn_secret", apiKey: "sk-workflow-secret" } as never },
+          freeze: { target: "macos", decisionId: "dec_secret" } as never,
+          audiencePackages: {},
+          requirements: [],
+        }),
       }),
     );
-    expect(JSON.stringify(bundle)).not.toContain("sk-super-secret-token");
-    expect(JSON.stringify(bundle)).not.toContain("providerCredential");
+    const dumped = JSON.stringify(bundle);
+    expect(dumped).not.toContain("sk-super-secret-token");
+    expect(dumped).not.toContain("providerCredential");
+    expect(dumped).not.toContain("prn_secret");
+    expect(dumped).not.toContain("sk-workflow-secret");
+    expect(dumped).not.toContain("dec_secret");
+    expect(dumped).not.toContain("apiKey");
   });
 });
 
 describe("parseBundle", () => {
-  function validBundle(): unknown {
+  function validJson(): unknown {
     return {
       format: "solutions-builder.project",
       version: 2,
@@ -93,20 +131,22 @@ describe("parseBundle", () => {
     };
   }
 
-  test("accepts a well-formed bundle", () => {
-    expect(() => parseBundle(validBundle())).not.toThrow();
+  test("accepts a well-formed v2 JSON bundle", () => {
+    const parsed = parseBundle(validJson());
+    expect(isArchiveBundle(parsed)).toBe(false);
+    expect(parsed.version).toBe(2);
   });
 
   test("rejects the wrong format", () => {
-    expect(() => parseBundle({ ...(validBundle() as object), format: "something.else" })).toThrow(/format/);
+    expect(() => parseBundle({ ...(validJson() as object), format: "something.else" })).toThrow(/format/);
   });
 
   test("rejects the wrong version", () => {
-    expect(() => parseBundle({ ...(validBundle() as object), version: 1 })).toThrow(/version/);
+    expect(() => parseBundle({ ...(validJson() as object), version: 1 })).toThrow(/version/);
   });
 
   test("rejects a bundle missing a required key", () => {
-    const { artifacts: _artifacts, ...rest } = validBundle() as Record<string, unknown>;
+    const { artifacts: _artifacts, ...rest } = validJson() as Record<string, unknown>;
     expect(() => parseBundle(rest)).toThrow(/artifacts/);
   });
 
@@ -114,10 +154,139 @@ describe("parseBundle", () => {
     expect(() => parseBundle(null)).toThrow();
     expect(() => parseBundle("not a bundle")).toThrow();
   });
+
+  test("a main v3 JSON bundle still reads as one-content JSON, not a zip archive", () => {
+    const v3 = {
+      format: "solutions-builder.project",
+      version: 3,
+      exportedAt: "2026-01-02T00:00:00.000Z",
+      project: { id: "p", title: "T", policy: {} },
+      artifacts: [{ node: node(), content: "the brief" }],
+      conversations: [],
+      notes: "the workflow's position is carried; the import replays it",
+      workflow: {
+        stage: 2,
+        done: false,
+        decisions: [{ kind: "approve", stage: 1, artifactId: "art_1", version: 1, sha256: "aaa" }],
+        audienceDecisions: {},
+        freeze: null,
+      },
+    };
+    const parsed = parseBundle(v3);
+    expect(isArchiveBundle(parsed)).toBe(false);
+    expect(parsed.version).toBe(3);
+    if (isArchiveBundle(parsed)) throw new Error("expected JSON");
+    expect(parsed.artifacts[0]?.content).toBe("the brief");
+    expect(parsed.workflow?.stage).toBe(2);
+  });
 });
 
 describe("bundleFileName", () => {
   test("slugs the title and appends the export suffix", () => {
     expect(bundleFileName("Renew the Lease!")).toBe("renew-the-lease.solutions-builder.zip");
+  });
+});
+
+describe("the v4 zip", () => {
+  test("carries the stage, reviews, votes and freeze, not the rest of the view", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectWorkflowView: async () => ({
+          stage: 8,
+          done: false,
+          reviews: { 1: { artifactId: "art_1", version: 1, sha256: "aaa", status: "approved" } },
+          decisions: [
+            { kind: "open_review", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+            { kind: "approve", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+            { kind: "approve", stage: 2, accepted: false, artifactId: "art_2", version: 1, sha256: "bbb" },
+            { kind: "approve", stage: 7, accepted: true, artifactId: "art_7", version: 1, sha256: "ccc", target: "macos" },
+          ],
+          audienceDecisions: { You: { decision: "proceed", note: "" }, "Tim Burke": { decision: "proceed", note: "Looks right" } },
+          freeze: { target: "macos" },
+          audiencePackages: {},
+          requirements: [],
+        }),
+      }),
+    );
+    expect(bundle.version).toBe(4);
+    expect(bundle.workflow).toEqual({
+      stage: 8,
+      done: false,
+      reviews: { 1: { artifactId: "art_1", version: 1, sha256: "aaa", status: "approved" } },
+      decisions: [
+        { kind: "open_review", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+        { kind: "approve", stage: 1, accepted: true, artifactId: "art_1", version: 1, sha256: "aaa" },
+        { kind: "approve", stage: 2, accepted: false, artifactId: "art_2", version: 1, sha256: "bbb" },
+        { kind: "approve", stage: 7, accepted: true, artifactId: "art_7", version: 1, sha256: "ccc", target: "macos" },
+      ],
+      votes: { You: { decision: "proceed" }, "Tim Burke": { decision: "proceed", note: "Looks right" } },
+      freeze: { target: "macos" },
+      audiencePackages: {},
+      requirements: [],
+    });
+    expect(() => parseBundle(bundle)).not.toThrow();
+  });
+
+  test("packs every version as its own file under artifacts/", async () => {
+    const bundle: ArchiveBundle = {
+      format: "solutions-builder.project",
+      version: 4,
+      exportedAt: "2026-01-02T00:00:00.000Z",
+      project: { id: "proj_1", title: "Renew the lease", policy: {} },
+      artifacts: [
+        {
+          node: node({ version: 2 }),
+          versions: [
+            { version: 1, content: "first draft" },
+            { version: 2, content: "second draft" },
+          ],
+        },
+      ],
+      conversations: [],
+      workflow: null,
+    };
+    const zip = archiveBundle(bundle);
+    const names = Object.keys(zip.files).filter((name) => !zip.files[name]?.dir);
+    expect(names).toContain("project.json");
+    expect(names.some((name) => name.startsWith("artifacts/") && /v1-r1\.md$/.test(name))).toBe(true);
+    expect(names.some((name) => name.startsWith("artifacts/") && /v1\.md$/.test(name) && !name.includes("-r"))).toBe(true);
+    expect(await zip.file(names.find((name) => /v1-r1\.md$/.test(name))!)!.async("string")).toBe("first draft");
+    expect(await zip.file(names.find((name) => /v1\.md$/.test(name) && !name.includes("-r"))!)!.async("string")).toBe("second draft");
+  });
+
+  test("gzip round-trips as real gzip bytes, not a data URI", async () => {
+    const gzipBytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff]);
+    const binary = String.fromCharCode(...gzipBytes);
+    const content = `data:application/gzip;base64,${btoa(binary)}`;
+    const bundle: ArchiveBundle = {
+      format: "solutions-builder.project",
+      version: 4,
+      exportedAt: "2026-01-02T00:00:00.000Z",
+      project: { id: "proj_1", title: "Renew the lease", policy: {} },
+      artifacts: [
+        {
+          node: node({
+            id: "build_1",
+            kind: "build_evidence",
+            variant: "1",
+            stage: 8,
+            title: "Build archive",
+            mediaType: "application/gzip",
+            artifactId: "build_1",
+          }),
+          versions: [{ version: 1, content }],
+        },
+      ],
+      conversations: [],
+      workflow: null,
+    };
+    const zip = archiveBundle(bundle);
+    const packed = zip.file("builds/1/build.tar.gz");
+    expect(packed).toBeTruthy();
+    const bytes = await packed!.async("uint8array");
+    expect([...bytes]).toEqual([...gzipBytes]);
+    const asText = await packed!.async("string");
+    expect(asText.startsWith("data:")).toBe(false);
   });
 });

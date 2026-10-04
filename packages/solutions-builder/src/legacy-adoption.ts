@@ -24,6 +24,7 @@
  * so a project past stage 6 is landed at stage 7 for the person to approve.
  */
 import type { ArtifactGraphMetadata, ArtifactProvenance } from "./artifact-graph.js";
+import { STAGE_TITLES, type Stage } from "./ledger.js";
 import { versionIdFor } from "./artifact-graph.js";
 import { extractRequirementItems } from "./requirements.js";
 import type { AudiencePolicy } from "./project-workflow/contracts.js";
@@ -158,6 +159,11 @@ export const LEGACY_STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
 /** The last stage adoption replays: stage 7 needs a target the old ledger never recorded. */
 export const LAST_ADOPTED_STAGE = 6;
 
+/** A stage by its name, as the person sees it; a number they never do. */
+function stageTitle(stage: number): string {
+  return STAGE_TITLES[stage as Stage] ?? `stage ${String(stage)}`;
+}
+
 /**
  * The replay that lands a project where the old ledger left it, as far as
  * the workflow's own rules can be satisfied from what was recorded.
@@ -179,13 +185,13 @@ export function adoptionPlan(args: {
   const target = Math.min(args.position.stage, LAST_ADOPTED_STAGE + 1);
   if (args.position.stage > LAST_ADOPTED_STAGE + 1 || (args.position.stage === LAST_ADOPTED_STAGE + 1 && args.position.approvals[7])) {
     notes.push(
-      `Stage ${String(args.position.stage)} on the old ledger: replayed through stage ${String(LAST_ADOPTED_STAGE)}; stage 7 needs a delivery target, which the old ledger never recorded, so approve it here.`,
+      `${stageTitle(args.position.stage)} on the old ledger: replayed through ${stageTitle(LAST_ADOPTED_STAGE)}; Cost approval needs a delivery target, which the old ledger never recorded, so approve it here.`,
     );
   }
   for (let stage = 1; stage < target; stage += 1) {
     const versions = args.position.approvals[stage];
     if (!versions) {
-      notes.push(`Stage ${String(stage)} has no approval on the old ledger; replay stops before it.`);
+      notes.push(`${stageTitle(stage)} has no approval on the old ledger; replay stops before it.`);
       break;
     }
     const wanted = LEGACY_STAGE_DRAFT_KIND[stage];
@@ -194,7 +200,7 @@ export function adoptionPlan(args: {
       .filter((entry): entry is { version: LegacyVersion; node: LegacyNode } => entry.node !== undefined);
     const chosen = named.find((entry) => entry.node.kind === wanted) ?? named[0];
     if (!chosen) {
-      notes.push(`Stage ${String(stage)}'s approval names versions with no node rows; replay stops before it.`);
+      notes.push(`${stageTitle(stage)}'s approval names versions with no node rows; replay stops before it.`);
       break;
     }
     const ref: AdoptedReference = { artifactId: chosen.version.artifactId, version: chosen.node.version, sha256: chosen.version.contentHash };
@@ -210,7 +216,7 @@ export function adoptionPlan(args: {
       for (const [audience, vote] of Object.entries(args.position.audienceVotes)) {
         const reviewed = named5PackageFor(named, audience);
         if (!reviewed) {
-          notes.push(`Stage 5: ${audience}'s vote names no package the old approval recorded, so it is not replayed; they decide again here.`);
+          notes.push(`Concept approval: ${audience}'s vote names no package the old approval recorded, so it is not replayed; they decide again here.`);
           continue;
         }
         packages[audience] = reviewed;
@@ -223,7 +229,7 @@ export function adoptionPlan(args: {
       const requirements = named.find((entry) => entry.node.kind === "product_requirements");
       const text = requirements ? args.readContent(requirements.version.artifactId, requirements.node.version) : null;
       const items = text ? extractRequirementItems(text) : [];
-      if (items.length === 0) notes.push("Stage 6's approved requirements document yielded no requirement items; none were minted.");
+      if (items.length === 0) notes.push("Build plan's approved requirements document yielded no requirement items; none were minted.");
       steps.push({ ...step, requirementItems: items });
       continue;
     }

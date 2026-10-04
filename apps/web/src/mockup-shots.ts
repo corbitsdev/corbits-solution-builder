@@ -20,7 +20,23 @@
 import type { Deck } from "@solutions-builder/app/deck";
 
 /** One screen of the mockup: the name a slide may ask for it by, and its picture. */
-export type MockupShot = { readonly name: string; readonly png: Uint8Array };
+/** What a screen is: a phone's, or a desktop's (a browser window), for the body it is drawn in (#654). */
+export type ScreenKind = "phone" | "desktop";
+
+export type MockupShot = { readonly name: string; readonly png: Uint8Array; readonly kind?: ScreenKind; readonly width?: number; readonly height?: number };
+
+/**
+ * A screen's kind (#654): the design's `data-surface` mark when it has
+ * one, else a named test id that says phone or mobile, else its width: a
+ * screen narrower than a small tablet is a phone's.
+ */
+export function screenKind(surface: string | null | undefined, testId: string | null | undefined, width: number): ScreenKind {
+  const mark = (surface ?? "").trim().toLowerCase();
+  if (/^(phone|mobile|ios|android|handset)$/.test(mark)) return "phone";
+  if (/^(desktop|web|browser|tablet|laptop)$/.test(mark)) return "desktop";
+  if (/(phone|mobile|ios|android|handset)/i.test(testId ?? "")) return "phone";
+  return width <= 520 ? "phone" : "desktop";
+}
 
 export type Shooter = (html: string, max: number) => Promise<MockupShot[]>;
 
@@ -175,7 +191,14 @@ export async function mockupShots(html: string, max = 8): Promise<MockupShot[]> 
     for (const [index, target] of targets.entries()) {
       const rect = target.getBoundingClientRect();
       if (rect.width < 40 || rect.height < 40) continue;
-      shots.push({ name: screenNameOf(target, index), png: await rasterise(target, styles, doc) });
+      const width = Math.ceil(rect.width);
+      shots.push({
+        name: screenNameOf(target, index),
+        png: await rasterise(target, styles, doc),
+        kind: screenKind(target.getAttribute("data-surface"), target.getAttribute("data-testid"), width),
+        width,
+        height: captureHeight(width, Math.ceil(rect.height)),
+      });
     }
     return shots;
   } finally {

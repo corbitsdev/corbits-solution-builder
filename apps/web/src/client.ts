@@ -6,6 +6,8 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
+import { digestOf } from "./stage-approval.ts";
+import type { AdoptionPlan } from "@solutions-builder/app/legacy-adoption";
 import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
@@ -43,6 +45,7 @@ import {
   upgradeWorkspace as installerUpgradeWorkspace,
   vendoredMemberFiles,
   waitForDeploymentPlacement,
+  waitForPark,
   type PlacementResult,
   workflowsFor,
   workspaceOwnedCredentialIds,
@@ -64,10 +67,11 @@ import {
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
-import { parseBundle } from "./project-export.ts";
-import { importProject as importProjectBundle, type ImportWrite } from "./project-import.ts";
+import { isArchiveBundle, parseBundle } from "./project-export.ts";
+import { importArchive, importJsonProject, type ImportWrite } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
+import { bundleAdoptionPlan } from "./bundle-adoption.ts";
 import { replayAdoption } from "./adoption-replay.ts";
 import { DECK_DESIGN_DOCUMENT_KIND, DECK_DESIGN_READING_KIND, DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial, readingHasText } from "./material-reading.ts";
@@ -832,16 +836,14 @@ async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: s
 }
 
 /** The blob-backed artifact's raw bytes, over the package's own download route. */
-async function downloadArtifactBytes(tenantId: string, artifactId: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
-  const response = await fetch(
-    `${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
-    { credentials: hubCredentials() },
-  );
+async function downloadArtifactBytes(tenantId: string, artifactId: string, version?: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const rest = version === undefined ? `/artifacts/${encodeURIComponent(artifactId)}/download` : `/artifacts/${encodeURIComponent(artifactId)}/versions/${String(version)}/download`;
+  const response = await fetch(`${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}${rest}`, { credentials: hubCredentials() });
   if (response.status === 404) {
     // A project's older upload can still sit in the workspace tenant (#29);
     // the same read against the parent answers it there.
     const parentId = await parentTenantOf(createHubTransport(), tenantId).catch(() => null);
-    if (parentId) return downloadArtifactBytes(parentId, artifactId);
+    if (parentId) return downloadArtifactBytes(parentId, artifactId, version);
   }
   if (!response.ok) {
     throw new ApiFailure(
@@ -855,9 +857,10 @@ async function downloadArtifactBytes(tenantId: string, artifactId: string): Prom
 }
 
 /** Fetches a blob-backed artifact's bytes through the package's own download
- *  route and re-wraps them as a `data:` URL. */
-async function downloadUploadedArtifact(tenantId: string, artifactId: string): Promise<string> {
-  const { bytes, mimeType } = await downloadArtifactBytes(tenantId, artifactId);
+ *  route and re-wraps them as a `data:` URL. A pinned version must not fall
+ *  back to the current blob. */
+async function downloadUploadedArtifact(tenantId: string, artifactId: string, version?: number): Promise<string> {
+  const { bytes, mimeType } = await downloadArtifactBytes(tenantId, artifactId, version);
   return `data:${mimeType};base64,${toBase64(bytes)}`;
 }
 
@@ -1580,22 +1583,81 @@ export const api = {
    * Imports a project another copy of this app exported
    * (`project-export.ts`) as a NEW project — client-driven, no host route.
    * `parseBundle` gives a clear message for the wrong format, version, or a
-   * missing key; `project-import.ts` writes every artifact's versions in
-   * order, re-keyed to the new project, so version numbers and build
-   * attempts survive.
-   *
-   * A version 1 bundle, exported from `main`, carries every artifact
-   * version and the ledger the project's position lived in
-   * (`legacy-import.ts`). Either way, once the new project's workflow is
-   * running the recorded approvals are replayed on it as real decisions
+   * missing key. v2/v3 JSON writes one content per artifact and lands through
+   * `bundleAdoptionPlan` (#652). A v4 zip writes every version in order
+   * (create, then revise). A version 1 bundle from `main` goes through
+   * `legacy-import.ts`. Either way, once the new project's workflow is
+   * running the recorded approvals are replayed as real decisions
    * (`adoption-replay.ts`), through stage 6. A replay that stops short is
    * reported as `landing.stopped`, not thrown: the project is imported
    * either way.
    */
   importProject: async (raw: unknown): Promise<ImportOutcome> => {
-    const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const writes = {
-        createProject: async ({ title, policy }: { title: string; policy: unknown }) => {
+    const replay = async (projectId: string, plan: AdoptionPlan) => {
+      if (plan.steps.length === 0) return { landed: null, stopped: null, notes: plan.notes };
+      try {
+        await api.ensureProjectWorkflow(projectId);
+        const landing = await replayAdoption(
+          { view: (id) => api.projectWorkflowView(id), decide: (id, decision) => api.decide(id, decision), now: () => new Date().toISOString() },
+          plan,
+        );
+        return { ...landing, notes: plan.notes };
+      } catch (cause) {
+        return { landed: null, stopped: cause instanceof Error ? cause.message : String(cause), notes: plan.notes };
+      }
+    };
+    if (isLegacyBundle(raw)) {
+      const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
+        return importLegacyProject(parseLegacyBundle(raw), {
+          createProject: async ({ title, policy }) => {
+            const { project } = await installerCreateProject(transport, workspaceTenantId, {
+              title,
+              slug: projectSlug(),
+              policy: policy as ProjectPolicy,
+            });
+            return { projectId: project.id };
+          },
+          createArtifact: async ({ title, content, sb }: ImportWrite) => {
+            const artifact = await installerCreateArtifact(transport, sb.projectId as string, { title, content, metadata: { sb } });
+            return { id: artifact.id, version: artifact.version };
+          },
+          reviseArtifact: async (artifactId, { title, content, sb }: ImportWrite) => {
+            const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
+            return { version: artifact.version };
+          },
+        });
+      });
+      const { plan, ...outcome } = imported;
+      return { ...outcome, landing: await replay(imported.projectId, plan) };
+    }
+    const parsed = parseBundle(raw);
+    if (isArchiveBundle(parsed)) {
+      const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
+        return importArchive(parsed, {
+          createProject: async ({ title, policy }) => {
+            const { project } = await installerCreateProject(transport, workspaceTenantId, {
+              title,
+              slug: projectSlug(),
+              policy: policy as ProjectPolicy,
+            });
+            return { projectId: project.id };
+          },
+          createArtifact: async ({ title, content, sb }: ImportWrite) => {
+            const artifact = await installerCreateArtifact(transport, sb.projectId as string, { title, content, metadata: { sb } });
+            return { id: artifact.id, version: artifact.version };
+          },
+          reviseArtifact: async (artifactId, { title, content, sb }: ImportWrite) => {
+            const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
+            return { version: artifact.version };
+          },
+        });
+      });
+      const { plan, ...outcome } = imported;
+      return { ...outcome, landing: await replay(imported.projectId, plan) };
+    }
+    const written = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      return importJsonProject(parsed, {
+        createProject: async ({ title, policy }) => {
           const { project } = await installerCreateProject(transport, workspaceTenantId, {
             title,
             slug: projectSlug(),
@@ -1603,32 +1665,24 @@ export const api = {
           });
           return { projectId: project.id };
         },
-        // The project's own tenant (#29): `sb.projectId` names it.
-        createArtifact: async ({ title, content, sb }: ImportWrite) => {
-          const artifact = await installerCreateArtifact(transport, sb.projectId as string, { title, content, metadata: { sb } });
-          return { id: artifact.id, version: artifact.version };
+        createArtifact: async ({ title, content, sb }) => {
+          const artifact = await installerCreateArtifact(transport, sb.projectId as string, {
+            title,
+            content,
+            metadata: { sb },
+          });
+          return { id: artifact.id };
         },
-        reviseArtifact: async (artifactId: string, { title, content, sb }: ImportWrite) => {
-          const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
-          return { version: artifact.version };
-        },
-      };
-      return isLegacyBundle(raw) ? importLegacyProject(parseLegacyBundle(raw), writes) : importProjectBundle(parseBundle(raw), writes);
+      });
     });
-    const { plan } = imported;
-    if (plan.steps.length === 0) {
-      return { ...imported, landing: { landed: null, stopped: null, notes: plan.notes } };
+    const digests = new Map<string, string>();
+    for (const { node, content } of parsed.artifacts) {
+      if (node.kind === "source_material" || node.kind === "material_reading") continue;
+      digests.set(node.id, await digestOf(content));
     }
-    try {
-      await api.ensureProjectWorkflow(imported.projectId);
-      const landing = await replayAdoption(
-        { view: (projectId) => api.projectWorkflowView(projectId), decide: (projectId, decision) => api.decide(projectId, decision), now: () => new Date().toISOString() },
-        plan,
-      );
-      return { ...imported, landing: { ...landing, notes: plan.notes } };
-    } catch (cause) {
-      return { ...imported, landing: { landed: null, stopped: cause instanceof Error ? cause.message : String(cause), notes: plan.notes } };
-    }
+    const plan = bundleAdoptionPlan(parsed, written.projectId, written.ids, digests);
+    const { ids: _ids, ...outcome } = written;
+    return { ...outcome, landing: await replay(written.projectId, plan) };
   },
   /**
    * Hands files over with the problem; each becomes a `source_material`
@@ -2068,11 +2122,18 @@ export const api = {
     const pinned = parseVersionId(nodeId);
     const artifactId = pinned?.artifactId ?? nodeId;
     // The project's own tenant, else the workspace for an older project's
-    // artifact still recorded there (#29, `findArtifact`).
+    // artifact still recorded there (#29, `findArtifact`). A pinned version
+    // is `getArtifactVersion`, not the current row.
     const found = await findArtifact(createHubTransport(), tenantId, artifactId, pinned?.version);
     if (!found) return { content: "" };
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
     if (typeof uploadId !== "string") return { content: found.artifact.content };
+    // Blob-backed: the unversioned download is the current blob. A pinned
+    // earlier version must use that version's own bytes.
+    if (pinned) {
+      if (found.artifact.content) return { content: found.artifact.content };
+      return { content: await downloadUploadedArtifact(found.tenantId, artifactId, pinned.version) };
+    }
     return { content: await downloadUploadedArtifact(found.tenantId, artifactId) };
   },
   /** The workspace's languages (#411); American English both ways until set. */
@@ -2550,6 +2611,9 @@ export const api = {
       // byte-identical retry is accepted by the hub as a no-op, so it never
       // reaches this catch at all.
       //
+      // A fresh run names its project before its loop first parks, and a
+      // decision delivered before that park kills the run.
+      await waitForPark(transport, ref);
       // Signalled in the tenant the ref names (#163): the project's own for
       // a deployment made since #29, the workspace for a legacy one still
       // live there. The workspace's route answers 404 for a project-tenant

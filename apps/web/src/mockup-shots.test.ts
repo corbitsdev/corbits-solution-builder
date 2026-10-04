@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { captureHeight, chooseScreens, mockupShots, placeMockups, screenNamesOf, shotSvg, type MockupShot } from "./mockup-shots.ts";
+import { captureHeight, chooseScreens, mockupShots, placeMockups, screenKind, screenNamesOf, shotSvg, type MockupShot } from "./mockup-shots.ts";
 
 const a = Uint8Array.of(1);
 const b = Uint8Array.of(2);
@@ -144,5 +144,17 @@ describe("chooseScreens", () => {
     expect(chooseScreens({ surfaces: [], named: ["n1", "n2"], sections: ["t1"], body: "body" })).toEqual(["n1", "n2"]);
     expect(chooseScreens({ surfaces: [], named: [], sections: ["t1", "t2"], body: "body" })).toEqual(["t1", "t2"]);
     expect(chooseScreens({ surfaces: [], named: [], sections: [], body: "body" })).toEqual(["body"]);
+  });
+});
+
+// #654: a screen's kind decides the body it is drawn in.
+describe("screenKind", () => {
+  test("the surface mark wins, then a telling test id, then the width", () => {
+    expect(screenKind("phone", null, 1280)).toBe("phone");
+    expect(screenKind("desktop", "screen-phone-home", 400)).toBe("desktop");
+    expect(screenKind(null, "view-mobile-checkout", 1280)).toBe("phone");
+    expect(screenKind(null, "view-gantt-loading", 1280)).toBe("desktop");
+    expect(screenKind(null, "view-home", 402)).toBe("phone");
+    expect(screenKind(undefined, undefined, 900)).toBe("desktop");
   });
 });
