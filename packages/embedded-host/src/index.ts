@@ -45,6 +45,7 @@ export {
   signInEmail,
   signUpEmail,
   mintOwnerSetCookie,
+  setOwnerPassword,
   hubTransport,
   resolveWorkspace,
   forgetWorkspace,

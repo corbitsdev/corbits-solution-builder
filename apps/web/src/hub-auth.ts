@@ -102,3 +102,34 @@ export async function signInHub(input: { email: string; password: string }): Pro
   if (!user) throw new ApiError(response.status, "unknown", "The hub accepted the sign-in but did not return a user.");
   return user;
 }
+
+/** Ends the hub session; the cookie is cleared by the hub's own response. */
+export async function signOutHub(): Promise<void> {
+  const { response, parsed } = await hubAuth("/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  if (!response.ok && response.status !== 401) {
+    throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not sign out."));
+  }
+}
+
+/** Changes the signed-in person's password on the hub (#682); a hosted hub's own flow. */
+export async function changeHubPassword(input: { currentPassword: string; newPassword: string }): Promise<void> {
+  const { response, parsed } = await hubAuth("/change-password", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, revokeOtherSessions: false }),
+  });
+  if (!response.ok) throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not change the password."));
+}
+
+/** Renames the signed-in person on the hub (#682). */
+export async function renameHubUser(name: string): Promise<HubUser> {
+  const { response, parsed } = await hubAuth("/update-user", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not save the name."));
+  const session = await getHubSession();
+  if (!session) throw new ApiError(401, "unauthenticated", "The session ended while saving the name.");
+  return session.user;
+}

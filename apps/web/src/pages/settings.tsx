@@ -31,6 +31,8 @@ import {
   type Provider,
 } from "../client.js";
 import { Banner, StateLabel } from "../components.jsx";
+import { changeHubPassword, renameHubUser, type HubUser } from "../hub-auth.ts";
+import { passwordProblem } from "../account.ts";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { useZenGarden, writeZenGarden, type ZenGardenChoice } from "../zen-garden-setting.ts";
@@ -44,16 +46,24 @@ export function Settings({
   apiKeyProviders,
   oauthCandidates,
   onChanged,
+  user = null,
+  onUserChanged,
+  onSignOut,
 }: {
   status: HostStatus | null;
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
   onChanged: () => void;
+  /** Who is signed in (#682); the Account section edits them. */
+  user?: HubUser | null;
+  onUserChanged?: (user: HubUser) => void;
+  onSignOut?: () => void;
 }) {
   return (
     <div className="settings-page">
       <h1>Settings</h1>
+      {user ? <Account user={user} embedded={status?.hub.mode === "embedded"} {...(onUserChanged ? { onUserChanged } : {})} {...(onSignOut ? { onSignOut } : {})} /> : null}
       <Appearance />
       <Language />
       <Inference
@@ -299,6 +309,99 @@ function Appearance() {
 }
 
 /* ---------------------------------------------------------------- inference */
+
+/* ------------------------------------------------------------------ account */
+
+/**
+ * Who is signed in, and what they can change (#682): the name, and the
+ * password. An embedded workspace's owner never typed a password (the host
+ * minted one into the keychain), so setting one goes through the host,
+ * which keeps the keychain in step; a hosted hub asks for the current one.
+ */
+function Account({ user, embedded, onUserChanged, onSignOut }: { user: HubUser; embedded: boolean; onUserChanged?: (user: HubUser) => void; onSignOut?: () => void }) {
+  const [name, setName] = useState(user.name);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState<"name" | "password" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  useEffect(() => setName(user.name), [user.name]);
+
+  const saveName = async () => {
+    if (name.trim().length === 0 || name.trim() === user.name) return;
+    setBusy("name");
+    setError(null);
+    setDone(null);
+    try {
+      const saved = await renameHubUser(name.trim());
+      onUserChanged?.(saved);
+      setDone("Name saved.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const savePassword = async () => {
+    const problem = passwordProblem(next, confirm);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setBusy("password");
+    setError(null);
+    setDone(null);
+    try {
+      if (embedded) await api.setOwnerPassword(next);
+      else await changeHubPassword({ currentPassword: current, newPassword: next });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setDone(embedded ? "Password set. You can sign in with it, and the automatic sign-in still works." : "Password changed.");
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Section title="Account" lead={embedded ? "This computer's workspace owner. The host signs you in; a password lets you sign in by hand too." : "Who you are on this hub."}>
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        {done ? <Banner tone="okay" title={done} /> : null}
+        <Row label="Name">
+          <input className="field" aria-label="Your name" value={name} disabled={busy !== null} onChange={(event) => setName(event.target.value)} onBlur={() => void saveName()} onKeyDown={(event) => { if (event.key === "Enter") void saveName(); }} />
+        </Row>
+        <Row label="Email">
+          <span className="v">{user.email}</span>
+        </Row>
+        {!embedded ? (
+          <Row label="Current password">
+            <input className="field" type="password" aria-label="Current password" autoComplete="current-password" value={current} disabled={busy !== null} onChange={(event) => setCurrent(event.target.value)} />
+          </Row>
+        ) : null}
+        <Row label={embedded ? "Set a password" : "New password"} hint="At least 8 characters">
+          <input className="field" type="password" aria-label="New password" autoComplete="new-password" value={next} disabled={busy !== null} onChange={(event) => setNext(event.target.value)} />
+        </Row>
+        <Row label="Confirm">
+          <input className="field" type="password" aria-label="Confirm the new password" autoComplete="new-password" value={confirm} disabled={busy !== null} onChange={(event) => setConfirm(event.target.value)} />
+        </Row>
+        <Row label="">
+          <button type="button" className="btn" disabled={busy !== null || next.length === 0} onClick={() => void savePassword()}>
+            {busy === "password" ? "Saving…" : embedded ? "Set password" : "Change password"}
+          </button>
+          {onSignOut ? (
+            <button type="button" className="btn link" disabled={busy !== null} onClick={onSignOut}>
+              Sign out
+            </button>
+          ) : null}
+        </Row>
+      </div>
+    </Section>
+  );
+}
 
 /* ----------------------------------------------------------------- language */
 

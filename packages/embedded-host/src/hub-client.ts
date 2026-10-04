@@ -165,6 +165,10 @@ type AuthApi = {
       body: { email: string; password: string };
       asResponse: true;
     }) => Promise<Response>;
+    changePassword: (args: {
+      body: { currentPassword: string; newPassword: string; revokeOtherSessions?: boolean };
+      headers: Headers;
+    }) => Promise<unknown>;
   };
 };
 
@@ -273,6 +277,33 @@ export async function mintOwnerSetCookie(): Promise<string[]> {
     );
   }
   return cookies;
+}
+
+/**
+ * Sets the embedded owner's password (#682): changed on the hub under a
+ * session signed in with the keychain's current one, then written to the
+ * keychain in its place, so the automatic sign-in at the next launch still
+ * works and the person can also sign in by hand with what they chose.
+ */
+export async function setOwnerPassword(next: string): Promise<void> {
+  if (hubMode() !== "embedded") {
+    throw new HostError("provider_unavailable", "The owner's password is set here only for an embedded hub; a hosted hub changes it through its own account flow.");
+  }
+  if (!hubIsMounted()) await mountHub();
+  const current = (await ownerPassword(true))!;
+  const { ownerEmail } = hostIdentity();
+  const auth = hub().auth as unknown as AuthApi;
+  const signedIn = await auth.api.signInEmail({ body: { email: ownerEmail, password: current }, asResponse: true });
+  if (!signedIn.ok) throw new HostError("internal_error", "The hub would not sign the workspace owner in to change the password.");
+  const cookie = rawSetCookieHeaders(signedIn.headers)
+    .map((header) => header.split(";")[0]!.trim())
+    .join("; ");
+  try {
+    await auth.api.changePassword({ body: { currentPassword: current, newPassword: next, revokeOtherSessions: false }, headers: new Headers({ cookie }) });
+  } catch (cause) {
+    throw new HostError("validation_failed", cause instanceof Error ? cause.message : "The hub refused the new password.");
+  }
+  await storeSecret(OWNER_PASSWORD_ACCOUNT, next);
 }
 
 // --- The authenticated API -----------------------------------------------

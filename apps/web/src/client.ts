@@ -1211,6 +1211,8 @@ export const api = {
    * `/owner/session`). Embedded-only; a remote hub answers with a refusal.
    */
   mintOwner: () => post<{ ok: true }>("/owner/session"),
+  /** Sets the embedded owner's password through the host (#682), which keeps the keychain in step. */
+  setOwnerPassword: (password: string) => post<{ ok: true }>("/owner/password", { password }),
   /**
    * The host's Google Drive connection (#233): one click from a
    * stakeholder's slides to a Google Slides document. The sign-in is the

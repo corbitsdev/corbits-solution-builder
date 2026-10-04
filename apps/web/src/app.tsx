@@ -28,6 +28,9 @@ import { Banner, Button, Mark, notify, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu, downloadDocuments } from "./pages/project-menu.jsx";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@corbits/react-ui";
+import { getHubSession, signOutHub, type HubUser } from "./hub-auth.ts";
+import { initialsOf } from "./account.ts";
 import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
@@ -41,7 +44,6 @@ import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
-import { getHubSession } from "./hub-auth.ts";
 import { useBusyWhile } from "./use-busy.ts";
 import { ZenGarden } from "./zen-garden.tsx";
 
@@ -247,6 +249,8 @@ export function AppBar({
   onProjectDeleted,
   onNotice,
   onError,
+  user = null,
+  onSignOut,
 }: {
   view: View;
   detail: ProjectDetail | null;
@@ -270,6 +274,9 @@ export function AppBar({
   /** Returns to wherever Settings was opened from. Omitted where Settings
    *  cannot be reached (`scripts/walk-ui.tsx`'s chrome-only render). */
   onSettingsClose?: () => void;
+  /** Who is signed in (#682); the account control names them. */
+  user?: HubUser | null;
+  onSignOut?: () => void;
   /** The title's menu (#323): the same options as the project card's. All
    *  four omitted where the chrome renders without a live project. */
   onProjectChanged?: () => void;
@@ -434,6 +441,26 @@ export function AppBar({
         >
           <SettingsIcon aria-hidden="true" />
         </button>
+        {user ? (
+          <Menu>
+            <MenuTrigger asChild>
+              <button type="button" className="iconbtn account-control" title={`${user.name} · ${user.email}`} aria-label={`Account: ${user.name}`}>
+                <span className="account-initials" aria-hidden="true">
+                  {initialsOf(user)}
+                </span>
+              </button>
+            </MenuTrigger>
+            <MenuContent align="end">
+              <div className="account-menu-who">
+                <b>{user.name}</b>
+                <span>{user.email}</span>
+              </div>
+              <MenuSeparator />
+              <MenuItem onSelect={() => onNavigate("settings")}>Account settings…</MenuItem>
+              {onSignOut ? <MenuItem onSelect={() => onSignOut()}>Sign out</MenuItem> : null}
+            </MenuContent>
+          </Menu>
+        ) : null}
       </div>
     </header>
   );
@@ -505,6 +532,36 @@ export function App() {
   const [skippedSetup, setSkippedSetup] = useState(false);
   // Signup/login first: the workspace tenant is created as that session.
   const [auth, setAuth] = useState<HubAuthState>("unknown");
+  // Who is signed in (#ISSUE), read once the session holds; null until then.
+  const [user, setUser] = useState<HubUser | null>(null);
+  useEffect(() => {
+    if (auth !== "signed-in") {
+      setUser(null);
+      return;
+    }
+    let cancelled = false;
+    void getHubSession()
+      .then((session) => {
+        if (!cancelled) setUser(session?.user ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [auth]);
+  // Signed out on purpose: an embedded workspace then shows the sign-in
+  // form with a way back in as the owner, instead of minting again.
+  const [signedOutByChoice, setSignedOutByChoice] = useState(false);
+  const signOut = async () => {
+    try {
+      await signOutHub();
+    } catch {
+      // The session is ended locally either way.
+    }
+    setSignedOutByChoice(true);
+    setUser(null);
+    setAuth("signed-out");
+  };
   // Set only for an embedded (local desktop) hub whose owner could not be
   // minted automatically — a keychain the host cannot read, or a hub that
   // refused the minted account. `null` until a mint attempt fails.
@@ -618,10 +675,10 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    if (status?.hub.mode !== "embedded" || auth !== "signed-out" || mintAttempted.current) return;
+    if (status?.hub.mode !== "embedded" || auth !== "signed-out" || mintAttempted.current || signedOutByChoice) return;
     mintAttempted.current = true;
     void mintOwner();
-  }, [status?.hub.mode, auth, mintOwner]);
+  }, [status?.hub.mode, auth, mintOwner, signedOutByChoice]);
 
   useEffect(() => {
     void refresh();
@@ -751,6 +808,21 @@ export function App() {
     // anything, explicit and with a retry — never a credentials form for a
     // desktop app with nobody else to sign in as.
     if (status?.hub.mode === "embedded") {
+      if (signedOutByChoice) {
+        return (
+          <Auth
+            onSignedIn={() => {
+              setSignedOutByChoice(false);
+              setAuth("signed-in");
+            }}
+            onContinueAsOwner={() => {
+              setSignedOutByChoice(false);
+              mintAttempted.current = false;
+              void mintOwner();
+            }}
+          />
+        );
+      }
       if (mintError) {
         return (
           <Auth
@@ -775,7 +847,14 @@ export function App() {
     }
     // Remote: a hosted hub is never a single-user desktop, so this is the
     // real account flow — sign up or sign in against it.
-    return <Auth onSignedIn={() => setAuth("signed-in")} />;
+    return (
+      <Auth
+        onSignedIn={() => {
+          setSignedOutByChoice(false);
+          setAuth("signed-in");
+        }}
+      />
+    );
   }
   if (screen === "install") {
     return (
@@ -836,6 +915,8 @@ export function App() {
           void refresh();
         }}
         onNotice={notify}
+        user={user}
+        onSignOut={() => void signOut()}
         onError={(cause) => toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
@@ -894,6 +975,9 @@ export function App() {
             apiKeyProviders={apiKeyProviders}
             oauthCandidates={oauthCandidates}
             onChanged={refresh}
+            user={user}
+            onUserChanged={setUser}
+            onSignOut={() => void signOut()}
           />
         ) : null}
         </div>
