@@ -32,7 +32,7 @@ import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
+import { attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -295,6 +295,27 @@ export function BuildPanel({
     };
   }, [detail.project.id, current?.attempt, current?.state]);
 
+  // While the worker runs, the supervisor is briefed on its progress at
+  // intervals (#695) and writes an interim status; the thread poll shows
+  // it. The thread says what was already sent, so a reload never repeats.
+  const briefing = useRef(false);
+  useEffect(() => {
+    if (!address || !running || !running.startedAt || briefing.current) return;
+    const due = progressBriefDue({ messages, attempt: running.attempt, startedAt: running.startedAt, turn: latestTurn(log), now: new Date().toISOString() });
+    if (!due) return;
+    briefing.current = true;
+    const body = composeProgressBrief({ attempt: running.attempt, startedAt: running.startedAt, now: new Date().toISOString(), log, worker: worker?.worker.label ?? null });
+    api
+      .sendStageMail(tenantId, address, { body })
+      .then(() => load())
+      .catch(() => {
+        // The next poll tries again.
+      })
+      .finally(() => {
+        briefing.current = false;
+      });
+  }, [address, running, log, messages, tenantId, load, worker]);
+
   const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
     const element = logRef.current;
@@ -364,6 +385,7 @@ export function BuildPanel({
   const archive = useMemo(() => buildArchives(detail.nodes)[0], [detail.nodes]) as ArtifactNode | undefined;
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
   const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
+  const freshness = useMemo(() => (status ? statusFreshness(messages, status, current) : null), [messages, status, current]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
@@ -527,7 +549,10 @@ export function BuildPanel({
             {archive ? <BuildFile node={archive} tenantId={tenantId} /> : null}
             {status ? (
               <>
-                <h2>Build status — {agentFor(8).title}</h2>
+                <h2>
+                  Build status — {agentFor(8).title}
+                  {freshness ? <span className="inline-note"> · {freshness}</span> : null}
+                </h2>
                 <Markdown source={status.body} />
               </>
             ) : null}
