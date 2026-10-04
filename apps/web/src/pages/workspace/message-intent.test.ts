@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
+import { askKind, delegationTarget, requirementsRequest, routedLine } from "./message-intent.ts";
 
 describe("requirementsRequest", () => {
   test("a request to change the requirements document is the author's", () => {
@@ -28,5 +28,17 @@ describe("askKind", () => {
     expect(askKind("Here is the brief.", false)).toBe("draft");
     expect(askKind(null, true)).toBe("redraft");
     expect(askKind(null, false)).toBe("draft");
+  });
+});
+
+// #688: "have the GUI builder…" at another stage reaches that specialist.
+describe("delegationTarget", () => {
+  test("a delegation verb and a specialist's name name the stage; the current stage's own specialist is not a delegation", () => {
+    expect(delegationTarget("have the GUI builder add the SMTP and search account sections mentioned in the build plan", 7)).toEqual({ stage: 4 });
+    expect(delegationTarget("Ask the architect to split task 11", 7)).toEqual({ stage: 6 });
+    expect(delegationTarget("tell the estimator the roster is 40 people", 8)).toEqual({ stage: 7 });
+    expect(delegationTarget("have the designer darken the header", 4)).toBeNull();
+    expect(delegationTarget("the designer made a good choice here", 7)).toBeNull();
+    expect(delegationTarget("make the Gantt wider", 6)).toBeNull();
   });
 });
