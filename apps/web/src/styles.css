@@ -4625,12 +4625,14 @@ button[aria-disabled="true"] {
   height: calc(var(--slide-h) - 22cqw);
   overflow: hidden;
   padding-left: 3cqw;
-  font-size: 2.08cqw;
+  /* Scaled down when the lines would run off the slide (#676); the
+     renderer sets the factor from the same rule the PowerPoint uses. */
+  font-size: calc(2.08cqw * var(--slide-text-scale, 1));
   line-height: 1.3;
 }
 
 .slide-lines li {
-  margin-bottom: 0.83cqw;
+  margin-bottom: calc(0.83cqw * var(--slide-text-scale, 1));
 }
 
 /* The renderer's right-hand picture: on the cover from 58% across, on an
