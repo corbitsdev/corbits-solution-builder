@@ -86,6 +86,26 @@ describe("StageConversation message bodies", () => {
     expect(html).not.toContain("In short");
     expect(html).not.toContain("First draft is in the document.");
   });
+
+  test("an empty thread shows the given copy, not a generic getting-ready line", () => {
+    const html = renderToStaticMarkup(
+      createElement(StageConversation, {
+        stage: 8,
+        messages: [],
+        value: "",
+        onValueChange: () => undefined,
+        onSend: () => undefined,
+        who: "Build supervisor",
+        empty: "Nothing has been sent to the build supervisor yet. It reads each attempt once the attempt is recorded.",
+      }),
+    );
+    expect(html).toContain("Nothing has been sent to the build supervisor yet");
+    expect(html).not.toContain("getting ready");
+  });
+
+  test("an empty thread without a given copy says the specialist is getting ready", () => {
+    expect(render([])).toContain("The specialist is getting ready");
+  });
 });
 
 describe("SpecialistTurn drafts", () => {

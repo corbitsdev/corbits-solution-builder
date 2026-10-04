@@ -19,7 +19,7 @@
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildTurn, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Input } from "@corbits/react-ui";
@@ -112,37 +112,6 @@ function evMark(tone: keyof typeof EV_TONE): string {
   return "";
 }
 
-/** Each turn as the worker reported it: what it said, and one plain line per tool call. */
-function WorkerTurns({ turns }: { turns: readonly (BuildTurn | null)[] }) {
-  return (
-    <div aria-live="polite">
-      {turns.map((turn, index) =>
-        turn === null ? (
-          <p key={index} className="inline-note">
-            A turn report the host could not read.
-          </p>
-        ) : (
-          <div key={index}>
-            {turn.said ? <Markdown source={turn.said} /> : null}
-            {turn.tools.map((tool, call) => (
-              <p key={call} className="inline-note">
-                {tool.action}
-                {tool.path ? (
-                  <>
-                    {" "}
-                    <code>{tool.path}</code>
-                  </>
-                ) : null}
-                {tool.failed ? " — failed" : ""}
-              </p>
-            ))}
-          </div>
-        ),
-      )}
-    </div>
-  );
-}
-
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
   if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
@@ -209,7 +178,6 @@ export function BuildPanel({
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [log, setLog] = useState("");
-  const [turns, setTurns] = useState<readonly (BuildTurn | null)[]>([]);
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
@@ -277,20 +245,17 @@ export function BuildPanel({
   const current = useMemo(() => attempts.find((entry) => entry.attempt === selected) ?? latest, [attempts, selected, latest]);
 
   // The log of the attempt in view: polled while it runs, read once when it
-  // has ended. Both pipes and the worker's turn reports, in arrival order.
+  // has ended.
   useEffect(() => {
     if (!current) {
       setLog("");
-      setTurns([]);
       return;
     }
     let cancelled = false;
     const read = async () => {
       try {
         const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (cancelled) return;
-        setLog(result.log);
-        setTurns(result.turns);
+        if (!cancelled) setLog(result.log);
       } catch {
         // The next poll says.
       }
@@ -344,9 +309,9 @@ export function BuildPanel({
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
       if (!address || !attempt.outcome) return;
-      // The target probed is the one stage 7 froze, started as the attempt's run.json declares unless the fields say otherwise; its tests run either way.
+      // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
-      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets], target: freeze?.target?.trim() || "web" });
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
       // Stage 7's forecast, for the supervisor's "Cost against forecast": the
       // frozen estimate's own section, or nothing, said as nothing.
       const estimate = frozenNode(detail.nodes, freeze, "cost_approval");
@@ -508,18 +473,6 @@ export function BuildPanel({
                       </pre>
                     </details>
                   </>
-                ) : turns.length > 0 ? (
-                  // The worker's own turn reports, said readably; the raw
-                  // stream they came from stays one click away.
-                  <>
-                    <WorkerTurns turns={turns} />
-                    <details className="build-log-fold">
-                      <summary>Full log</summary>
-                      <pre ref={logRef} className="build-log">
-                        {log}
-                      </pre>
-                    </details>
-                  </>
                 ) : (
                   <pre ref={logRef} className="build-log" aria-live="polite">
                     {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}
@@ -547,7 +500,7 @@ export function BuildPanel({
                   <div className="build-record">
                     <Input
                       aria-label="Start command"
-                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional; replaces run.json's)`}
+                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
                       value={startCommand}
                       onChange={(event) => setStartCommand(event.target.value)}
                     />

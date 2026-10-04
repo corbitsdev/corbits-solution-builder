@@ -30,7 +30,6 @@ import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.
 import { BUILD_WORKERS, buildWorkerSettings, hostPlatform, saveBuildWorkerSettings } from "./build-worker.js";
 import {
   attemptLog,
-  attemptTurns,
   attemptPrompt,
   attemptRecord,
   attemptWorkspace,
@@ -131,8 +130,8 @@ export function registerBuildRoutes(api: Hono) {
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
-    const [log, turns, prompt] = await Promise.all([attemptLog(projectId, attempt), attemptTurns(projectId, attempt), attemptPrompt(projectId, attempt)]);
-    return context.json({ attempt: record, log, turns, prompt });
+    const [log, prompt] = await Promise.all([attemptLog(projectId, attempt), attemptPrompt(projectId, attempt)]);
+    return context.json({ attempt: record, log, prompt });
   });
 
   api.post("/projects/:id/build/attempts/:n/cancel", async (context) => {

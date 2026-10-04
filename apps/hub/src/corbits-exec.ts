@@ -332,7 +332,8 @@ export async function runBuildAttempt(args: {
     available: true,
     exitStatus,
     signal,
-    finalText: finalTextByTurn(stdout, tally?.texts ?? []),
+    // Final text as the process emitted it. No parsing into synthetic events.
+    finalText: stdout,
     stderrTail: stderr.split("\n").slice(-40).join("\n"),
     workspace,
     turnLog,
@@ -342,20 +343,6 @@ export async function runBuildAttempt(args: {
     endedAt: new Date().toISOString(),
     checkpointRef: null,
   };
-}
-
-/**
- * The final text, with a paragraph break between turns. Corbits Code writes
- * each turn's text to stdout with no separator, so turns run together
- * ("…exactly.The packet was…"). Where the worker's own turn reports account
- * for stdout exactly, the same text is split where those reports say a
- * turn ended; otherwise stdout stands as it was emitted.
- */
-export function finalTextByTurn(stdout: string, texts: readonly string[]): string {
-  const joined = texts.join("");
-  const said = texts.map((text) => text.trim()).filter((text) => text.length > 0);
-  if (said.length < 2 || !stdout.startsWith(joined) || stdout.slice(joined.length).trim().length > 0) return stdout;
-  return `${said.join("\n\n")}${stdout.slice(joined.length)}`;
 }
 
 /** How long the worker's tree gets to end on SIGTERM before SIGKILL. */

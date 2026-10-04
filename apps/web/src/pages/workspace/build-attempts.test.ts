@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision, supervisorStatus } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
+import type { ChatMessage } from "../../stage-mail.ts";
+import { appSubject } from "./composed-mail.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
   return {
@@ -165,5 +167,27 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("…");
     expect(brief).toContain("END");
     expect(brief.length).toBeLessThan(22_000);
+  });
+});
+
+describe("supervisorStatus", () => {
+  const at = "2026-01-01T00:00:00.000Z";
+
+  test("is null when no recorded brief for that attempt exists", () => {
+    const latest: ChatMessage = { id: "a1", author: "agent", body: "unrelated status", at };
+    expect(supervisorStatus([latest], 2)).toBeNull();
+  });
+
+  test("names the attempt's brief and that the supervisor has not replied yet", () => {
+    const brief: ChatMessage = { id: "m1", author: "me", body: "record of attempt 2", at, subject: appSubject("brief", "2") };
+    expect(supervisorStatus([brief], 2)).toEqual({ attempt: 2, reply: null });
+  });
+
+  test("pairs the supervisor's reply to that brief, not the latest agent mail", () => {
+    const brief: ChatMessage = { id: "m1", author: "me", body: "record of attempt 2", at, subject: appSubject("brief", "2") };
+    const reply: ChatMessage = { id: "a1", author: "agent", body: "attempt 2 is recorded", at };
+    const laterAsk: ChatMessage = { id: "m2", author: "me", body: "a later question", at };
+    const laterReply: ChatMessage = { id: "a2", author: "agent", body: "answering the later question", at };
+    expect(supervisorStatus([brief, reply, laterAsk, laterReply], 2)).toEqual({ attempt: 2, reply });
   });
 });

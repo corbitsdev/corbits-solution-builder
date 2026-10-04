@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composedMailFold, withoutSendBackRef } from "./composed-mail.ts";
+import { composedMailFold, withoutSendBackRef, appSubject } from "./composed-mail.ts";
 import { composeMaterialMail } from "./attached-material.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 
@@ -51,5 +51,12 @@ describe("composedMailFold", () => {
       expect(fold?.body).not.toContain("[material:");
     }
     expect(composedMailFold({ author: "agent", body: mail })).toBeNull();
+  });
+});
+
+describe("appSubject", () => {
+  test("names the app as the sender so a brief is paired by subject, never by body", () => {
+    expect(appSubject("brief", "2")).toBe("[app:brief] 2");
+    expect(appSubject("package", "web")).toBe("[app:package] web");
   });
 });
