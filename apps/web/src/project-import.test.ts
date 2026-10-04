@@ -15,6 +15,7 @@ import {
   type JsonImportDeps,
 } from "./project-import.ts";
 import { archiveBundle, isArchiveBundle, parseBundle, type ArchiveBundle, type ProjectBundle } from "./project-export.ts";
+import { digestOf } from "./stage-approval.ts";
 import type { ArtifactNode } from "./client.ts";
 
 function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -242,6 +243,45 @@ describe("importArchive", () => {
     expect(result.plan.steps.map((step) => step.stage)).toEqual([1]);
     expect(result.plan.steps[0]!.ref.artifactId).toBe("new:Problem discovery draft");
     expect(result.plan.steps[0]!.ref.version).toBe(1);
+  });
+
+  test("a two-version workflow-null zip names the latest written store version in the heads replay", async () => {
+    const result = await importArchive(
+      archive({
+        artifacts: [
+          {
+            node: node({ id: "brief", kind: "problem_brief", stage: 1, artifactId: "art_brief", version: 2 }),
+            versions: [
+              { version: 1, content: "first" },
+              { version: 2, content: "second" },
+            ],
+          },
+          {
+            node: node({
+              id: "cons",
+              kind: "solution_constraints",
+              stage: 2,
+              title: "Constraints",
+              artifactId: "art_cons",
+              createdAt: "2026-01-02T00:00:00.000Z",
+            }),
+            versions: [{ version: 1, content: "the constraints" }],
+          },
+        ],
+        conversations: [],
+        workflow: null,
+      }),
+      archiveDeps({
+        createProject: async () => ({ projectId: "proj_new" }),
+        createArtifact: async (write) => ({ id: `new:${write.title}`, version: 1 }),
+        reviseArtifact: async () => ({ version: 2 }),
+      }),
+    );
+    expect(result.plan.legacyStage).toBe(2);
+    expect(result.plan.steps.map((step) => step.stage)).toEqual([1]);
+    expect(result.plan.steps[0]!.ref.artifactId).toBe("new:Problem discovery draft");
+    expect(result.plan.steps[0]!.ref.version).toBe(2);
+    expect(result.plan.steps[0]!.ref.sha256).toBe(await digestOf("second"));
   });
 
   test("a zip with a recorded workflow replays that record, not heads", async () => {

@@ -97,6 +97,27 @@ describe("assembleBundle", () => {
     expect(bundle.artifacts[0]?.versions.some((entry) => entry.version === 1)).toBe(false);
   });
 
+  test("omits an artifact whose every pin failed so the zip still parses", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectView: async () => ({
+          project: { id: "proj_1", title: "Renew the lease", policy: {} },
+          tenantId: "tenant_1",
+          nodes: [node({ id: "node_good", artifactId: "art_good" }), node({ id: "node_bad", artifactId: "art_bad", title: "Unreadable blob", version: 2 })],
+        }),
+        artifactContent: async (_tenantId, nodeId) => {
+          if (nodeId.startsWith("node_bad")) throw new Error("Uploaded file content is not versioned");
+          return { content: "the brief" };
+        },
+      }),
+    );
+    expect(bundle.artifacts).toHaveLength(1);
+    expect(bundle.artifacts[0]?.node.id).toBe("node_good");
+    expect(bundle.artifacts[0]?.versions).toEqual([{ version: 1, content: "the brief" }]);
+    expect(() => parseBundle(bundle)).not.toThrow();
+  });
+
   test("skips stages with no deployed specialist and stages with an empty thread", async () => {
     const bundle = await assembleBundle(
       "proj_1",
@@ -200,6 +221,25 @@ describe("parseBundle", () => {
     if (isArchiveBundle(parsed)) throw new Error("expected JSON");
     expect(parsed.artifacts[0]?.content).toBe("the brief");
     expect(parsed.workflow?.stage).toBe(2);
+  });
+
+  test("drops an artifact with empty versions so the zip still parses", () => {
+    const parsed = parseBundle({
+      format: "solutions-builder.project",
+      version: 4,
+      exportedAt: "2026-01-02T00:00:00.000Z",
+      project: { id: "proj_1", title: "Renew the lease", policy: {} },
+      artifacts: [
+        { node: node(), versions: [{ version: 1, content: "the brief" }] },
+        { node: node({ id: "node_bad", artifactId: "art_bad" }), versions: [] },
+      ],
+      conversations: [],
+      workflow: null,
+    });
+    expect(isArchiveBundle(parsed)).toBe(true);
+    if (!isArchiveBundle(parsed)) throw new Error("expected archive");
+    expect(parsed.artifacts).toHaveLength(1);
+    expect(parsed.artifacts[0]?.node.id).toBe("node_1");
   });
 });
 

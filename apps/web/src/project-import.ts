@@ -6,7 +6,8 @@
  * written in order (create, then revise), gzip as real bytes, and a zip
  * with a recorded workflow is replayed from those reviews. A zip whose
  * workflow is missing derives from heads through `bundleAdoptionPlan`,
- * the same landing a v2 JSON import uses. Mail history cannot be
+ * naming the latest written store version, the same landing a v2 JSON
+ * import uses (JSON always writes version 1). Mail history cannot be
  * recreated, so each bundled conversation becomes one read-only text
  * artifact, `sb.kind: "imported_conversation"`.
  */
@@ -228,7 +229,8 @@ async function archiveHeadsAdoptionPlan(
     if (node.kind === "source_material" || node.kind === "material_reading") continue;
     digests.set(node.id, await digestOf(content));
   }
-  return bundleAdoptionPlan(json, newProjectId, artifactIds, digests);
+  const written = new Map(bundle.artifacts.filter(({ node }) => artifactIds.has(node.id)).map(({ node, versions }) => [node.id, versions.length]));
+  return bundleAdoptionPlan(json, newProjectId, artifactIds, digests, written);
 }
 
 export type JsonImportDeps = {

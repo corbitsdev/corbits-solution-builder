@@ -10,9 +10,9 @@
  * earlier stage's head document taken as approved, and every stakeholder's
  * vote taken as proceed, which the notes say plainly.
  *
- * Every bundled node was written as its own fresh version 1 under a new
- * artifact id, so a reference points at that id, version 1, and the digest
- * of the content as written.
+ * Every bundled node was written under a new artifact id, so a reference
+ * points at that id, the store version written here (1 for JSON; the latest
+ * when a zip wrote several), and the digest of the content as written.
  */
 import { LEGACY_STAGE_DRAFT_KIND, adoptionPlan, type AdoptionPlan, type AudienceVote, type LegacyNode, type LegacyPosition, type LegacyVersion } from "@solutions-builder/app/legacy-adoption";
 import { stageName } from "./components.jsx";
@@ -111,13 +111,15 @@ export function bundlePosition(bundle: ProjectBundle, digests: ReadonlyMap<strin
 /**
  * The adoption plan for the imported project: references re-pointed at the
  * artifacts written here (`ids`, bundled node id to new artifact id), each
- * at version 1 with the digest of its content.
+ * at the store version written here (`1` unless a zip wrote several) with
+ * the digest of its content.
  */
 export function bundleAdoptionPlan(
   bundle: ProjectBundle,
   newProjectId: string,
   ids: ReadonlyMap<string, string>,
   digests: ReadonlyMap<string, string>,
+  written: ReadonlyMap<string, number> = new Map(),
 ): AdoptionPlan {
   const { position, notes } = bundlePosition(bundle, digests);
   const nodes: LegacyNode[] = bundle.artifacts
@@ -126,7 +128,7 @@ export function bundleAdoptionPlan(
       id: node.id,
       projectId: newProjectId,
       artifactId: ids.get(node.id)!,
-      version: 1,
+      version: written.get(node.id) ?? 1,
       kind: node.kind,
       stage: node.stage,
       variant: node.variant,

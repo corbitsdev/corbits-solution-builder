@@ -232,27 +232,29 @@ function pickWorkflow(view: WorkflowExportView): ExportedWorkflow {
 export async function assembleBundle(projectId: string, deps: BundleDeps): Promise<ArchiveBundle> {
   const detail = await deps.projectView(projectId);
 
-  const artifacts: ExportedArtifact[] = await Promise.all(
-    detail.nodes.map(async (node) => ({
-      node: pickNode(node),
-      versions: (
-        await Promise.all(
-          Array.from({ length: node.version }, async (_, at) => {
-            const version = at + 1;
-            try {
-              return { version, content: (await deps.artifactContent(detail.tenantId, versionIdFor(node.id, version))).content };
-            } catch {
-              // A blob-backed upload has no per-version bytes; the hub 400s
-              // older pins rather than serving today's file as that version.
-              // Drop the unreadable pin. Do not substitute current bytes, and
-              // do not fail the rest of the zip.
-              return null;
-            }
-          }),
-        )
-      ).filter((entry): entry is ExportedVersion => entry !== null),
-    })),
-  );
+  const artifacts: ExportedArtifact[] = (
+    await Promise.all(
+      detail.nodes.map(async (node) => ({
+        node: pickNode(node),
+        versions: (
+          await Promise.all(
+            Array.from({ length: node.version }, async (_, at) => {
+              const version = at + 1;
+              try {
+                return { version, content: (await deps.artifactContent(detail.tenantId, versionIdFor(node.id, version))).content };
+              } catch {
+                // A blob-backed upload has no per-version bytes; the hub 400s
+                // older pins rather than serving today's file as that version.
+                // Drop the unreadable pin. Do not substitute current bytes, and
+                // do not fail the rest of the zip.
+                return null;
+              }
+            }),
+          )
+        ).filter((entry): entry is ExportedVersion => entry !== null),
+      })),
+    )
+  ).filter((artifact) => artifact.versions.length > 0);
 
   const conversations: ExportedConversation[] = [];
   for (const stage of STAGES) {
@@ -324,8 +326,9 @@ function archivePaths(artifacts: readonly ExportedArtifact[]): Map<ExportedVersi
 /** The export as a zip: `project.json` naming every version by path, and each version as its own file. */
 export function archiveBundle(bundle: ArchiveBundle): JSZip {
   const zip = new JSZip();
-  const paths = archivePaths(bundle.artifacts);
-  const artifacts = bundle.artifacts.map(({ node, versions }) => ({
+  const present = bundle.artifacts.filter((artifact) => artifact.versions.length > 0);
+  const paths = archivePaths(present);
+  const artifacts = present.map(({ node, versions }) => ({
     node,
     versions: versions.map((entry): ArchivedVersion => {
       const path = paths.get(entry)!;
@@ -354,12 +357,13 @@ function parseNode(value: unknown, index: number): ExportedNode {
   return value as unknown as ExportedNode;
 }
 
-function parseArchiveArtifact(value: unknown, index: number): ExportedArtifact {
+function parseArchiveArtifact(value: unknown, index: number): ExportedArtifact | null {
   if (!isRecord(value)) throw new Error(`project bundle's artifact ${String(index)} is missing its node`);
   const node = parseNode(value.node, index);
-  if (!Array.isArray(value.versions) || value.versions.length === 0) {
+  if (!Array.isArray(value.versions)) {
     throw new Error(`project bundle's artifact ${String(index)} has no versions`);
   }
+  if (value.versions.length === 0) return null;
   const versions = value.versions.map((entry: unknown): ExportedVersion => {
     if (!isRecord(entry) || typeof entry.version !== "number") throw new Error(`project bundle's artifact ${String(index)} has a version with no number`);
     if (typeof entry.content !== "string") {
@@ -432,7 +436,10 @@ function parseArchiveBundle(value: Record<string, unknown>): ArchiveBundle {
     format: BUNDLE_FORMAT,
     version: BUNDLE_VERSION,
     ...shared,
-    artifacts: (value.artifacts as unknown[]).map(parseArchiveArtifact),
+    artifacts: (value.artifacts as unknown[]).flatMap((entry, index) => {
+      const parsed = parseArchiveArtifact(entry, index);
+      return parsed ? [parsed] : [];
+    }),
     workflow: isRecord(value.workflow) ? (value.workflow as unknown as ExportedWorkflow) : null,
   };
 }
