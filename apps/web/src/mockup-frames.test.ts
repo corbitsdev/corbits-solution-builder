@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { bodyFor, frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
+import { PHONE_SCREEN_RATIO, bodyFor, frameGeometry, frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 
 // #654: the body around a screen is sized from the screen.
 describe("frameGeometry", () => {
-  test("a phone body wraps the screen in an even bezel with rounded corners", () => {
+  test("a phone body is the phone's: its screen height follows the device, not the page (#670)", () => {
     const g = frameGeometry("phone", 804, 1740);
-    expect(g.screen).toEqual({ x: 38, y: 38, width: 804, height: 1740, radius: 88 });
-    expect([g.width, g.height]).toEqual([804 + 76, 1740 + 76]);
+    const screenHeight = Math.round(804 * PHONE_SCREEN_RATIO);
+    expect(g.screen).toEqual({ x: 38, y: 38, width: 804, height: screenHeight, radius: 88 });
+    expect([g.width, g.height]).toEqual([804 + 76, screenHeight + 76]);
     expect(g.bodyRadius).toBe(88 + 38);
+    // A page three times as long gets the same phone.
+    expect(frameGeometry("phone", 804, 5200).height).toBe(g.height);
   });
 
   test("a browser window puts a title bar above the page and a hairline round it", () => {
