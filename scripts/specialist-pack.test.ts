@@ -29,4 +29,11 @@ describe("specialist pack", () => {
     expect(packed).toContain("@solutions-builder/tools-delivery");
     expect(packed).toContain("defineWorkflow");
   });
+
+  test("architect workflow.js carries skillTextFor overlay", () => {
+    const packed = files["architect"]!;
+    expect(packed).toContain("## Skills you carry");
+    expect(packed).toContain("what-is-interchange");
+    expect(packed).toContain("Interchange is the platform runtime");
+  });
 });

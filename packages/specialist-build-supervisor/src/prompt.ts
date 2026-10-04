@@ -1,4 +1,5 @@
+import { skillTextFor } from "@solutions-builder/specialist-shared/skill-text";
 import { buildSupervisor } from "./index.ts";
 
-/** System prompt for this specialist. The text is the role's, as #660 moved it. */
-export const systemPrompt = buildSupervisor.system;
+/** System prompt: the role's text plus the skills it carries. */
+export const systemPrompt = `${buildSupervisor.system}\n\n${skillTextFor(buildSupervisor)}`;

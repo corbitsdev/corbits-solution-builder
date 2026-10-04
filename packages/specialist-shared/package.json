@@ -5,6 +5,8 @@
   "type": "module",
   "description": "What every stage specialist obeys: the shared prompt rules, the artifact-write rule, the agent economics, the interview section and the AgentRole shape.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./skill-text": "./src/skill-text.ts",
+    "./platform-skills": "./src/platform-skills.ts"
   }
 }
