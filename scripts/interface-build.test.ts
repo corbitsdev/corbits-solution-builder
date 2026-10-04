@@ -4,9 +4,10 @@ import { interfacePackSteps } from "./interface-build.js";
 
 describe("interface pack steps", () => {
   test("are the bun run steps ui:build names before vite", () => {
-    expect(interfacePackSteps("bun run assets:pack-closure && bun run assets:pack-project-workflow && vite build -c x")).toEqual([
+    expect(interfacePackSteps("bun run assets:pack-closure && bun run assets:pack-project-workflow && bun run assets:pack-specialists && vite build -c x")).toEqual([
       "assets:pack-closure",
       "assets:pack-project-workflow",
+      "assets:pack-specialists",
     ]);
   });
 
@@ -18,8 +19,8 @@ describe("interface pack steps", () => {
     expect(interfacePackSteps("bun run a && vite build && bun run b")).toEqual(["a"]);
   });
 
-  test("the repository's own ui:build packs the closure and the project workflow", async () => {
+  test("the repository's own ui:build packs the closure, the project workflow and the specialists", async () => {
     const { scripts } = (await Bun.file(join(import.meta.dir, "..", "package.json")).json()) as { scripts: Record<string, string> };
-    expect(interfacePackSteps(scripts["ui:build"]!)).toEqual(["assets:pack-closure", "assets:pack-project-workflow"]);
+    expect(interfacePackSteps(scripts["ui:build"]!)).toEqual(["assets:pack-closure", "assets:pack-project-workflow", "assets:pack-specialists"]);
   });
 });

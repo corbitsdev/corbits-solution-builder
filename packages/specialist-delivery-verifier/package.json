@@ -8,6 +8,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@solutions-builder/specialist-shared": "workspace:*"
+    "@intx/agent": "0.4.0",
+    "@intx/workflow": "workspace:*",
+    "@solutions-builder/specialist-shared": "workspace:*",
+    "@solutions-builder/tools-delivery": "workspace:*"
+  },
+  "interchange": {
+    "workflow": "./workflow.js"
   }
 }

@@ -723,6 +723,16 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
   return { files };
 }
 
+/** Compiled specialist `workflow.js` `scripts/specialist-pack.ts` writes to
+ *  `apps/web/public/specialists/<id>/` (wired into `bun run ui:build`):
+ *  the browser cannot run `Bun.build` itself, so it fetches these
+ *  same-origin static files rather than compiling them client-side. */
+async function specialistPackedWorkflow(roleId: string): Promise<string> {
+  const response = await fetch(`/specialists/${roleId}/workflow.js`, { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`specialist entry ${roleId} unavailable (HTTP ${String(response.status)})`);
+  return response.text();
+}
+
 /**
  * Pushes the lifecycle's rendered tree into its `workflow`-kind asset over
  * the hub's stock git smart-HTTP route, the same stock-routes path
@@ -2369,6 +2379,7 @@ export const api = {
       // Mailing a deployment whose sidecar is not placed yet loses the
       // message: the run never starts and the stage waits on a reply that
       // cannot come. Wait for the hub to call it deployed first.
+      const role = await stageRole(transport, workspaceTenantId, stage as Stage);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2377,13 +2388,14 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
+        await specialistPackedWorkflow(role.id),
         // No hub credential binding: a stage 8 deployed with one never
         // produced a run, while every unbound stage does. Nothing needs it
         // now — the build runs on the host and the archive is recorded by
         // the build panel, not uploaded from a sidecar.
         false,
         undefined,
-        await stageRole(transport, workspaceTenantId, stage as Stage),
+        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
@@ -2408,6 +2420,7 @@ export const api = {
     const key = `${projectId}:${stage}`;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const role = await stageRole(transport, workspaceTenantId, stage as Stage);
       const deployment = await switchSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2417,9 +2430,10 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
+        await specialistPackedWorkflow(role.id),
         false,
         undefined,
-        await stageRole(transport, workspaceTenantId, stage as Stage),
+        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
@@ -2450,6 +2464,7 @@ export const api = {
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const role = await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2458,9 +2473,10 @@ export const api = {
         projectId,
         1 as Stage,
         specialistHubOrigin(),
+        await specialistPackedWorkflow(role.id),
         false,
         BRIEF_EVALUATOR_ROLE_KEY,
-        await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
+        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the Problem discovery brief evaluator", placement);
@@ -2474,11 +2490,10 @@ export const api = {
    * The Product guide (CL-8737 restore): calm orientation across all nine
    * stages, running `PRODUCT_GUIDE_ROLE` (`agentById("product-guide")`) as
    * its own deployment -- never the stage's own specialist -- on a fixed
-   * anchor stage (1, like the brief evaluator) so the guide never picks up a
-   * stage-tool import (`specialistEntrySource`'s deck/posix/delivery
-   * wiring keys off `stage`, not `role`) and stays project-wide, one
-   * deployment reused across the nine stages rather than redeployed on every
-   * stage change. Deploys lazily -- only when a person asks for guidance.
+   * anchor stage (1, like the brief evaluator) so the guide stays
+   * project-wide, one deployment reused across the nine stages rather than
+   * redeployed on every stage change. Deploys lazily -- only when a person
+   * asks for guidance.
    */
   ensureGuideAgent: (projectId: string): Promise<SpecialistDeployment> => {
     const pending = ensureGuideAgentCalls.get(projectId);
@@ -2491,6 +2506,7 @@ export const api = {
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const role = await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2499,9 +2515,10 @@ export const api = {
         projectId,
         1 as Stage,
         specialistHubOrigin(),
+        await specialistPackedWorkflow(role.id),
         false,
         PRODUCT_GUIDE_ROLE_KEY,
-        await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE),
+        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the product guide", placement);
@@ -2535,6 +2552,7 @@ export const api = {
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const role = await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey));
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2543,9 +2561,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
+        await specialistPackedWorkflow(role.id),
         false,
         roleKey,
-        await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey)),
+        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);

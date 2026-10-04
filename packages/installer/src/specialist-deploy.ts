@@ -16,8 +16,9 @@ import type { Stage } from "@solutions-builder/app/ledger";
 import {
   BUILD_STAGE,
   SPECIALIST_ENTRY_PATH,
+  SPECIALIST_INFERENCE_SOURCE_PATH,
+  inferenceSourceModule,
   specialistDependencies,
-  specialistEntrySource,
   specialistTooling,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
@@ -41,7 +42,6 @@ import {
   pinFor,
   pushWorkflowSourceTree,
   RECOVERY_WAIT,
-  sourceFor,
   waitForPushVisible,
   type ClosureSource,
   type PlacementWait,
@@ -366,10 +366,11 @@ export async function stageSpecialistSourcePin(
  * The asset a stage specialist deploys into: the same package-tree shape
  * `workflow-deploy.ts`'s `renderLifecycleSource` builds for the lifecycle --
  * a root workspace `package.json`, a member whose `interchange.workflow`
- * points at the rendered entry, and the vendored `@intx`/`@solutions-builder`
- * closures beside it -- but with `specialistEntrySource` as the entry and no
- * `actions.js`: a specialist has no `routeMessage` action to wire and no loop
- * body to carry it into.
+ * points at the packed entry, and the vendored `@intx`/`@solutions-builder`
+ * closures beside it -- but with the specialist package's compiled
+ * `workflow.js` as the entry (copied, not generated) and no `actions.js`:
+ * a specialist has no `routeMessage` action to wire and no loop body to
+ * carry it into. The model pin is `inference-source.js` beside that entry.
  */
 export async function renderSpecialistSource(
   closure: ClosureSource,
@@ -379,6 +380,7 @@ export async function renderSpecialistSource(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
+  packedWorkflow: string,
   /** The project tenant's artifacts credential, named by the entry's use-grant; required when `artifactTools`. */
   artifactCredentialId?: string,
 ): Promise<Record<string, string>> {
@@ -395,7 +397,7 @@ export async function renderSpecialistSource(
   // imports (#42): `@corbits/artifacts` and its `@standard-schema/spec` peer
   // only when the entry carries the generic tool bundle (never on stage 8,
   // which resolves its "hub" handle through `@solutions-builder/tools-delivery`
-  // instead, see `specialistEntrySource`), the deck or delivery tools and the
+  // instead), the deck or delivery tools and the
   // runtime package they author with only for the stages that carry them.
   const tooling = specialistTooling({ stage, artifactTools });
   const dependencies = specialistDependencies(tooling);
@@ -410,7 +412,8 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools, ...(artifactCredentialId ? { artifactCredentialId } : {}) }),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: packedWorkflow,
+    [`${SPECIALIST_DIR}/${SPECIALIST_INFERENCE_SOURCE_PATH}`]: inferenceSourceModule(source),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -450,28 +453,21 @@ export function leadingOffering<T extends { readonly id: string }>(
 
 /**
  * Whether the entry at the asset's head -- what its live deployment runs --
- * is what the kit would render today for the same stage, role and model.
- * The entry alone, not the whole tree: the closure beside it changes with
- * every release, and a release is not a reason to hand every open project a
- * new specialist. No entry to read back is not a reason either.
+ * is the packed `workflow.js` for this role today. The entry alone, not the
+ * whole tree: the closure beside it changes with every release, and a
+ * release is not a reason to hand every open project a new specialist. The
+ * inference overlay is ignored here (a model switch force-deploys). No
+ * entry to read back is not a reason to redeploy either.
  */
 export async function specialistEntryIsCurrent(
   transport: Transport,
   tenantId: string,
   assetId: string,
-  stage: Stage,
-  offering: Parameters<typeof sourceFor>[2],
-  artifactTools: boolean,
-  roleKey: string,
-  role: AgentRole,
-  artifactCredentialId?: string,
+  packedWorkflow: string,
 ): Promise<boolean> {
   const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
   if (deployed === null) return true;
-  const source = await sourceFor(transport, tenantId, offering);
-  if (!source) return true;
-  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools, ...(artifactCredentialId ? { artifactCredentialId } : {}) });
-  return rendered === deployed;
+  return packedWorkflow === deployed;
 }
 
 /**
@@ -502,6 +498,7 @@ async function ensureSpecialistDeploymentOnce(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
+  packedWorkflow: string,
   /** CL-8899 "Switch model": when set, names the offering the new deployment
    *  must lead with, and forces a fresh deploy even though a live deployment
    *  already exists on this asset -- the two early "already live" returns
@@ -585,27 +582,15 @@ async function ensureSpecialistDeploymentOnce(
       : Promise.resolve(undefined);
 
   if (existing) {
-    // A live specialist runs the entry it was deployed with, and the kit
-    // moves on without it: a revised brief (#103) reached no project whose
-    // specialist was already up, and stayed unreached until a model switch
-    // happened to redeploy it. So the entry it runs is compared against a
-    // fresh render on the model it leads with -- the switch it was chosen
-    // by, else the catalog's first -- and when the two differ it is
-    // redeployed onto that same model, recorded as a switch so mail follows
-    // the new deployment rather than `pickDeployment`'s oldest.
+    // A live specialist runs the packed entry it was deployed with. The
+    // packed `workflow.js` is compared against what this role packs today,
+    // and when the two differ it is redeployed onto the model it already
+    // leads with -- the switch it was chosen by, else the catalog's first --
+    // recorded as a switch so mail follows the new deployment rather than
+    // `pickDeployment`'s oldest.
     const recorded = await readStageSwitch(transport, projectId, stage);
     const leading = leadingOffering(recorded, existing.deployment.id, catalogOfferings);
-    const current = await specialistEntryIsCurrent(
-      transport,
-      existing.tenantId,
-      existing.assetId,
-      stage,
-      leading,
-      artifactTools,
-      roleKey,
-      role,
-      await credentialIdIn(existing.tenantId),
-    );
+    const current = await specialistEntryIsCurrent(transport, existing.tenantId, existing.assetId, packedWorkflow);
     if (current) {
       return {
         deploymentId: existing.deployment.id,
@@ -624,6 +609,7 @@ async function ensureSpecialistDeploymentOnce(
       artifactTools,
       roleKey,
       role,
+      packedWorkflow,
       leading.id,
       wait,
     );
@@ -653,7 +639,7 @@ async function ensureSpecialistDeploymentOnce(
   // project its role serves, and what is the project's (who a stage 5
   // package is for) arrives with the request (#41 step 3).
   const artifactCredentialId = await credentialIdIn(tenantId);
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, artifactCredentialId);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, packedWorkflow, artifactCredentialId);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     tenantId,
@@ -745,8 +731,10 @@ export async function ensureSpecialistDeployment(
   projectId: string,
   stage: Stage,
   hubOrigin: string,
-  /** CL-8719: opt-in, default off -- see `specialist-source.ts`'s
-   *  `SpecialistSourceOptions.artifactTools`. */
+  /** Compiled `workflow.js` for this role (`scripts/specialist-pack.ts`). */
+  packedWorkflow: string,
+  /** CL-8719: opt-in, default off. Production stays false; packed entries
+   *  do not carry artifact bindings until a later per-package tools-on PR. */
   artifactTools = false,
   /** Which of the stage's roles to deploy -- default is the primary
    *  per-stage agent, whose asset name this keeps byte-identical to before
@@ -772,6 +760,7 @@ export async function ensureSpecialistDeployment(
       artifactTools,
       roleKey,
       role,
+      packedWorkflow,
       undefined,
       wait,
     );
@@ -843,6 +832,7 @@ export async function switchSpecialistDeployment(
   stage: Stage,
   hubOrigin: string,
   offeringId: string,
+  packedWorkflow: string,
   artifactTools = false,
   roleKey: string = DEFAULT_ROLE_KEY,
   role: AgentRole = agentFor(stage),
@@ -871,6 +861,7 @@ export async function switchSpecialistDeployment(
         artifactTools,
         roleKey,
         role,
+        packedWorkflow,
         offeringId,
       );
     let result: SpecialistDeployment;

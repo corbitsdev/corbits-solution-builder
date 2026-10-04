@@ -1,9 +1,10 @@
 /**
  * What the interface needs on disk before Vite runs.
  *
- * `bun run ui:build` is more than a Vite build: the closure tarballs and the
- * compiled project-workflow entries are written into `apps/web/public/`
- * first, by the `bun run` steps that script names ahead of `vite build`.
+ * `bun run ui:build` is more than a Vite build: the closure tarballs, the
+ * compiled project-workflow entries and the packed specialist entries are
+ * written into `apps/web/public/` first, by the `bun run` steps that script
+ * names ahead of `vite build`.
  * The development launcher builds the interface itself, and once built it
  * with Vite alone, so a fresh checkout served an interface that could not
  * start a project's workflow. The steps are read from `package.json` here

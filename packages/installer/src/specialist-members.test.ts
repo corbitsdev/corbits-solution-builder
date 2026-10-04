@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { agentFor } from "@solutions-builder/app/kit";
+import { inferenceSourceModule } from "@solutions-builder/app/specialist-source";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { renderSpecialistSource } from "./specialist-deploy.js";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
 import type { ClosureManifest } from "./closure-manifest.js";
 import type { ClosureSource } from "./workflow-deploy.js";
+import { buildSpecialistWorkflowFiles } from "../../../scripts/specialist-pack.ts";
 
 /** A closure holding every member any specialist can ship, so what a
  *  rendered tree leaves out is a choice, not an absence. */
@@ -51,19 +53,30 @@ function dependenciesOf(files: Record<string, string>): Record<string, string> {
   return (JSON.parse(files["packages/specialist/package.json"]!) as { dependencies: Record<string, string> }).dependencies;
 }
 
+const packed = await buildSpecialistWorkflowFiles();
+
+function packedFor(stage: Stage): string {
+  const id = agentFor(stage).id;
+  const entry = packed[id];
+  if (!entry) throw new Error(`no packed workflow for ${id}`);
+  return entry;
+}
+
 // #42: every specialist used to ship the whole app package, both tool
 // packages and their npm trees (pptxgenjs, jszip) whatever its entry
 // imported. Now the tree carries the members the entry resolves against.
 describe("renderSpecialistSource members", () => {
+  const pin = { provider: "openai", model: "gpt-5.5" } as const;
   const render = async (stage: Stage, roleKey = "primary", artifactTools = false) =>
     renderSpecialistSource(
       await fullClosure(),
       "proj_1",
       stage,
-      { provider: "openai", model: "gpt-5.5" },
+      pin,
       artifactTools,
       roleKey,
       agentFor(stage),
+      packedFor(stage),
       artifactTools ? "crd_test" : undefined,
     );
 
@@ -97,30 +110,46 @@ describe("renderSpecialistSource members", () => {
     const bound = await render(2, "primary", true);
     expect(membersOf(bound)).toEqual(["corbits-artifacts", "intx-workflow"]);
     expect(dependenciesOf(bound)["@corbits/artifacts"]).toBe("workspace:*");
-    expect(bound["packages/specialist/workflow.js"]).toContain('"resource":"credential:crd_test"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"action":"use"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"source":"creator"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
     expect(membersOf(await render(8, "primary", true))).toEqual(["corbits-artifacts", "intx-workflow"]);
   });
 
-  // #41 step 5: the rendered entry for a role is identical across projects;
+  test("the rendered entry is the packed file, and the pin is the overlay", async () => {
+    const files = await render(1);
+    expect(files["packages/specialist/workflow.js"]).toBe(packedFor(1));
+    expect(files["packages/specialist/inference-source.js"]).toBe(inferenceSourceModule(pin));
+    expect(files["packages/specialist/workflow.js"]).not.toContain("gpt-5.5");
+    expect(files["packages/specialist/workflow.js"]).toContain("inference-source");
+  });
+
+  // #41 step 5: the packed entry for a role is identical across projects;
   // only the package's own name carries the project, since the asset is
-  // named for it. The one exception is the id of the project's own artifacts
-  // credential, which a credential-bound entry's use-grant names (#288).
-  test("the same role renders the same entry for two projects, up to the credential id", async () => {
+  // named for it. The model pin is the overlay, not the entry.
+  test("the same role copies the same packed entry for two projects", async () => {
     const closure = await fullClosure();
-    for (const [stage, artifactTools] of [[1, false], [5, false], [8, false], [8, true], [9, true]] as [Stage, boolean][]) {
-      const one = await renderSpecialistSource(closure, "proj_1", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_one" : undefined);
-      const two = await renderSpecialistSource(closure, "proj_2", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_two" : undefined);
+    for (const [stage, artifactTools] of [
+      [1, false],
+      [5, false],
+      [8, false],
+      [8, true],
+      [9, true],
+    ] as [Stage, boolean][]) {
+      const one = await renderSpecialistSource(closure, "proj_1", stage, pin, artifactTools, "primary", agentFor(stage), packedFor(stage), artifactTools ? "crd_one" : undefined);
+      const two = await renderSpecialistSource(closure, "proj_2", stage, pin, artifactTools, "primary", agentFor(stage), packedFor(stage), artifactTools ? "crd_two" : undefined);
       const entry = "packages/specialist/workflow.js";
-      expect(one[entry]!.replaceAll("crd_one", "crd_x")).toBe(two[entry]!.replaceAll("crd_two", "crd_x"));
+      expect(one[entry]).toBe(two[entry]);
+      expect(one[entry]).toBe(packedFor(stage));
       expect(one[entry]).not.toContain("proj_1");
+      expect(one[entry]).not.toContain("crd_one");
     }
   });
 
   test("every member the package depends on is in the tree, and nothing in the tree is undeclared", async () => {
-    for (const [stage, roleKey, artifactTools] of [[1, "primary", false], [5, "primary", false], [8, "primary", false], [9, "primary", true]] as [Stage, string, boolean][]) {
+    for (const [stage, roleKey, artifactTools] of [
+      [1, "primary", false],
+      [5, "primary", false],
+      [8, "primary", false],
+      [9, "primary", true],
+    ] as [Stage, string, boolean][]) {
       const files = await render(stage, roleKey, artifactTools);
       const declaredMembers = Object.entries(dependenciesOf(files))
         .filter(([, spec]) => spec === "workspace:*")

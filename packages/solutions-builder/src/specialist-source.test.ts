@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { agentFor } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import {
   credentialAccess,
@@ -8,8 +7,8 @@ import {
   DELIVERY_TOOL_DEPENDENCIES,
   POSIX_TOOL_DEPENDENCIES,
   SPECIALIST_BASE_DEPENDENCIES,
+  inferenceSourceModule,
   specialistDependencies,
-  specialistEntrySource,
   specialistTooling,
   WORKFLOW_PACKAGE_DEPENDENCIES,
 } from "./specialist-source.js";
@@ -72,63 +71,16 @@ describe("specialistDependencies", () => {
   });
 });
 
-describe("specialistEntrySource", () => {
-  const entry = (stage: Stage, roleKey = "primary", artifactTools = false) =>
-    specialistEntrySource({
-      stage,
-      source: { provider: "openai", model: "gpt-5.5" },
-      role: agentFor(stage),
-      roleKey,
-      artifactTools,
-      ...(artifactTools ? { artifactCredentialId: "crd_test" } : {}),
-    });
-
-  test("imports exactly the tools the tooling matrix names", () => {
-    const stage1 = entry(1);
-    expect(stage1).not.toContain("@solutions-builder/");
-    expect(stage1).not.toContain("@intx/tools-posix");
-    expect(stage1).not.toContain("@corbits/artifacts");
-
-    expect(entry(5)).not.toContain("tools-deck");
-
-    const stage8 = entry(8);
-    expect(stage8).not.toContain("@intx/tools-posix");
-    expect(stage8).not.toContain("@solutions-builder/");
-    expect(stage8).not.toContain("@corbits/artifacts/sidecar-bundle");
-
-    expect(entry(9)).toContain('from "@solutions-builder/tools-delivery/sidecar-bundle"');
-    expect(entry(9)).not.toContain("tools-deck");
-
-    expect(entry(2, "primary", true)).toContain('from "@corbits/artifacts/sidecar-bundle"');
+describe("inferenceSourceModule", () => {
+  test("exports the pin as the default, nothing else", () => {
+    expect(inferenceSourceModule({ provider: "openai", model: "gpt-5.5" })).toBe(
+      `export default {"provider":"openai","model":"gpt-5.5"};\n`,
+    );
   });
+});
 
-  // #41 step 3: who a package is for arrives with the request, so the
-  // rendered entry names no stakeholder and needs no redeploy when the
-  // project's audiences change.
-  // #41 step 4: what a document-writing specialist needs to know is its
-  // stage and kind, fixed per role; the project is the run's own tenant.
-  test("an entry with the artifact tools names its stage and kind, never a project", () => {
-    const stage2 = entry(2, "primary", true);
-    expect(stage2).toContain("## Stage document");
-    expect(stage2).toContain("stage 2 specialist");
-    expect(stage2).toContain("`solution_constraints`");
-    expect(stage2).not.toContain("## Artifact context");
-    expect(stage2).not.toContain("projectId:");
-    expect(entry(2)).not.toContain("## Stage document");
-  });
-
-  // #41 step 5: the entry takes nothing of the project's. The credential
-  // binding is named for the role, so the same role renders the same entry
-  // everywhere.
-  test("a credential-bound entry names its binding for the role", () => {
-    expect(entry(2, "primary", true)).toContain('"name":"workflow-artifacts:constraints-mapper"');
-    expect(entry(8)).not.toContain("publishWorkspaceTool");
-    expect(entry(8, "primary", true)).toContain('"name":"workflow-artifacts:build-supervisor"');
-  });
-
-  // #288: the binding delivers the credential, the requirement lets the run
-  // use it, and both name the same consumer -- the bundle's own id.
-  test("a credential-bound entry declares the use-grant its run needs, scoped to the bound package", () => {
+describe("credentialAccess", () => {
+  test("names the use-grant for the bound package", () => {
     expect(credentialAccess("@corbits/artifacts/sidecar-bundle", "workflow-artifacts:brainstormer", "crd_1")).toEqual({
       credentialBindings: [
         { package: "@corbits/artifacts/sidecar-bundle", handle: "hub", provider: "sb-workflow-artifacts", name: "workflow-artifacts:brainstormer", locator: "tenant" },
@@ -137,20 +89,5 @@ describe("specialistEntrySource", () => {
         { resource: "credential:crd_1", action: "use", source: "creator", conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" } },
       ],
     });
-    const bound = entry(2, "primary", true);
-    expect(bound).toContain('"resource":"credential:crd_test"');
-    expect(bound).toContain('"action":"use"');
-    expect(bound).toContain('"source":"creator"');
-    expect(bound).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
-    expect(entry(2)).not.toContain("grantRequirements");
-    expect(entry(2)).not.toContain("credentialBindings");
-    expect(() => specialistEntrySource({ stage: 2, source: { provider: "openai", model: "gpt-5.5" }, role: agentFor(2), roleKey: "primary", artifactTools: true })).toThrow(/credential/);
-  });
-
-  test("stage 5's entry names no audience", () => {
-    const stage5 = entry(5);
-    expect(stage5).not.toContain("## Audiences");
-    expect(stage5).not.toContain("project_owner");
-    expect(stage5).not.toContain("carries no deck tool");
   });
 });
