@@ -472,10 +472,10 @@
   }
 }
 
-/* While the specialist gets ready: one tip at a time, in the middle of
-   the space below the thread, each fading in as it replaces the last. */
+/* While the specialist gets ready: one tip at a time, at the foot of the
+   space below the thread, each fading in as it replaces the last. */
 .conv .waiting-tips {
-  margin: auto 0;
+  margin: auto 0 0;
   padding: var(--space-4) var(--space-6);
   text-align: center;
 }
