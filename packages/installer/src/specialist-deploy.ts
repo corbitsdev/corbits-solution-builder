@@ -11,10 +11,8 @@
  * write, not a signal this deploy waits on.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
-  BUILD_STAGE,
   SPECIALIST_ENTRY_PATH,
   SPECIALIST_INFERENCE_SOURCE_PATH,
   inferenceSourceModule,
@@ -22,7 +20,6 @@ import {
   specialistTooling,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
-import { ensureWorkflowArtifactsCredentialRow, registerWorkflowArtifactsBearer } from "./artifacts-credential.js";
 import { assetsFor, readWorkflowSourceBlob, workflowsFor, type HubAsset, type HubDeployment } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { readStageSwitch, writeStageSwitch } from "./project-tenant.js";
@@ -377,12 +374,8 @@ export async function renderSpecialistSource(
   projectId: string,
   stage: Stage,
   source: InferenceSourcePin,
-  artifactTools: boolean,
   roleKey: string,
-  role: AgentRole,
   packedWorkflow: string,
-  /** The project tenant's artifacts credential, named by the entry's use-grant; required when `artifactTools`. */
-  artifactCredentialId?: string,
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage, roleKey);
   const root = {
@@ -394,12 +387,11 @@ export async function renderSpecialistSource(
     catalog: closure.manifest.catalog,
   };
   // The package depends on exactly the members and npm packages its entry
-  // imports (#42): `@corbits/artifacts` and its `@standard-schema/spec` peer
-  // only when the entry carries the generic tool bundle (never on stage 8,
-  // which resolves its "hub" handle through `@solutions-builder/tools-delivery`
-  // instead), the deck or delivery tools and the
-  // runtime package they author with only for the stages that carry them.
-  const tooling = specialistTooling({ stage, artifactTools });
+  // imports (#42), read off the packed entry itself: `@corbits/artifacts`
+  // and its `@standard-schema/spec` peer only when the entry imports the
+  // generic tool bundle, the deck or delivery tools and the runtime package
+  // they author with only when the entry imports them.
+  const tooling = specialistTooling(packedWorkflow);
   const dependencies = specialistDependencies(tooling);
   const member = {
     name,
@@ -421,11 +413,10 @@ export async function renderSpecialistSource(
     // drop this pin without changing what the specialist runs on.
     [SOURCE_PIN_PATH]: `${JSON.stringify(source, null, 2)}\n`,
     // The members this entry's imports resolve against, and no others (#42):
-    // the vendored workflow always; the runtime package with the deck tool
-    // for a stage 5 audience deployment, or with the delivery tool for
-    // stages 8 and 9; the generic artifact bundle only when the entry
-    // carries it. A stage that imports no tool ships the workflow alone, so
-    // its sidecar materialises a fraction of the closure.
+    // the vendored workflow always; the runtime package with the deck or
+    // delivery tool when the entry imports one; the generic artifact bundle
+    // only when the entry imports it. An entry that imports no tool ships
+    // the workflow alone, so its sidecar materialises a fraction of the closure.
     ...(await vendoredMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(tooling.deck || tooling.delivery ? await runtimeMemberFiles(closure.manifest, closure.fetchTarball) : {}),
     ...(tooling.deck ? await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball) : {}),
@@ -494,10 +485,7 @@ async function ensureSpecialistDeploymentOnce(
   gitPush: WorkflowGitPush,
   projectId: string,
   stage: Stage,
-  hubOrigin: string,
-  artifactTools: boolean,
   roleKey: string,
-  role: AgentRole,
   packedWorkflow: string,
   /** CL-8899 "Switch model": when set, names the offering the new deployment
    *  must lead with, and forces a fresh deploy even though a live deployment
@@ -510,6 +498,15 @@ async function ensureSpecialistDeploymentOnce(
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
+  }
+  // CL-8719 / #288 / #388: a credential-bound entry has to declare its `hub`
+  // binding and use-grant itself (`credentialAccess`), and the installer then
+  // mints the credential row and scopes its bearer to the winning run
+  // (`artifacts-credential.ts`). No packed entry declares either yet, so an
+  // entry importing the bundle would run with a tool it cannot authenticate.
+  // Refused here rather than deployed as if bound.
+  if (specialistTooling(packedWorkflow).artifacts) {
+    throw new Error(`the ${roleKey} specialist's entry imports @corbits/artifacts but declares no credential binding; it cannot be deployed yet`);
   }
 
   // The project's own tenant is where this deploys (#29): the hub then
@@ -573,14 +570,6 @@ async function ensureSpecialistDeploymentOnce(
     throw new Error("connect a model provider before deploying a stage specialist");
   }
 
-  // CL-8719 / #288: a credential-bound entry names the id of the credential
-  // its run uses, so the row exists before anything renders -- in the tenant
-  // the specialist runs in. Never rotated here; see `registerWorkflowArtifactsBearer`.
-  const credentialIdIn = (specialistTenantId: string) =>
-    artifactTools
-      ? ensureWorkflowArtifactsCredentialRow(transport, specialistTenantId, hubOrigin, role.id, home.legacyTenantId ?? tenantId)
-      : Promise.resolve(undefined);
-
   if (existing) {
     // A live specialist runs the packed entry it was deployed with. The
     // packed `workflow.js` is compared against what this role packs today,
@@ -605,10 +594,7 @@ async function ensureSpecialistDeploymentOnce(
       gitPush,
       projectId,
       stage,
-      hubOrigin,
-      artifactTools,
       roleKey,
-      role,
       packedWorkflow,
       leading.id,
       wait,
@@ -638,8 +624,7 @@ async function ensureSpecialistDeploymentOnce(
   // No project read here: a specialist's entry is the same for every
   // project its role serves, and what is the project's (who a stage 5
   // package is for) arrives with the request (#41 step 3).
-  const artifactCredentialId = await credentialIdIn(tenantId);
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, packedWorkflow, artifactCredentialId);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, roleKey, packedWorkflow);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     tenantId,
@@ -702,24 +687,6 @@ async function ensureSpecialistDeploymentOnce(
     ? deployment
     : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar)) ?? deployment);
 
-  // CL-8719: the bearer the winning deployment's credential carries must be
-  // scoped to the winning anchor run before its first mail trigger launches
-  // it. Only reached on an actual (re)deploy, never the early "already live"
-  // returns above: rotating the secret here would break an in-flight tool
-  // call against a still-live prior deployment. The row itself was ensured
-  // before render (`credentialIdIn`), so the entry could name its id (#288).
-  // Skipped entirely when `artifactTools` is off -- the rendered source
-  // carries no `credentialBindings` to satisfy, so minting one is dead work.
-  // CL-8783: untouched by the model-needs verdict -- the hub's credential-push
-  // (`pushSourceUpdatesToTenants`) already excludes deployment-anchor runs
-  // (`anchorRunId IS NULL`), so this per-deployment bearer stays the only
-  // credential story for specialists. See `docs/specialist-model-requirements.md`.
-  // The credential is the project's own (#29); the one `sb-workflow-artifacts`
-  // provider it names stays on the workspace, resolved through the walk-up.
-  if (artifactCredentialId) {
-    await registerWorkflowArtifactsBearer(transport, tenantId, artifactCredentialId, winner.id);
-  }
-
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, tenantId };
 }
 
@@ -730,40 +697,20 @@ export async function ensureSpecialistDeployment(
   gitPush: WorkflowGitPush,
   projectId: string,
   stage: Stage,
-  hubOrigin: string,
-  /** Compiled `workflow.js` for this role (`scripts/specialist-pack.ts`). */
+  /** Compiled `workflow.js` for the role this deployment runs
+   *  (`scripts/specialist-pack.ts`): the prompt and tools are the package's own. */
   packedWorkflow: string,
-  /** CL-8719: opt-in, default off. Production stays false; packed entries
-   *  do not carry artifact bindings until a later per-package tools-on PR. */
-  artifactTools = false,
   /** Which of the stage's roles to deploy -- default is the primary
    *  per-stage agent, whose asset name this keeps byte-identical to before
-   *  roles existed (`DEFAULT_ROLE_KEY`, `specialistAssetName`). */
+   *  roles existed (`DEFAULT_ROLE_KEY`, `specialistAssetName`). A caller
+   *  naming a non-default `roleKey` passes that role's packed entry, or the
+   *  deployment would carry that name while running another role. */
   roleKey: string = DEFAULT_ROLE_KEY,
-  /** Which agent the deployment actually runs. Defaults to the stage's own
-   *  primary role, so every existing caller is unchanged; a caller naming a
-   *  non-default `roleKey` must pass the matching role or the deployment
-   *  would carry that name while running the stage specialist's prompt. */
-  role: AgentRole = agentFor(stage),
   /** How long a deployment the hub is still placing is waited for before a fresh one takes its place (#236); tests shorten it. */
   wait: PlacementWait = RECOVERY_WAIT,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
-    ensureSpecialistDeploymentOnce(
-      transport,
-      sidecar,
-      closure,
-      gitPush,
-      projectId,
-      stage,
-      hubOrigin,
-      artifactTools,
-      roleKey,
-      role,
-      packedWorkflow,
-      undefined,
-      wait,
-    );
+    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packedWorkflow, undefined, wait);
   try {
     return await attempt();
   } catch (cause) {
@@ -830,12 +777,9 @@ export async function switchSpecialistDeployment(
   gitPush: WorkflowGitPush,
   projectId: string,
   stage: Stage,
-  hubOrigin: string,
   offeringId: string,
   packedWorkflow: string,
-  artifactTools = false,
   roleKey: string = DEFAULT_ROLE_KEY,
-  role: AgentRole = agentFor(stage),
 ): Promise<SpecialistDeployment> {
   return serialize(`${projectId}:${stage}:${roleKey}`, async () => {
     const recorded = await readStageSwitch(transport, projectId, stage);
@@ -850,20 +794,7 @@ export async function switchSpecialistDeployment(
     }
 
     const attempt = () =>
-      ensureSpecialistDeploymentOnce(
-        transport,
-        sidecar,
-        closure,
-        gitPush,
-        projectId,
-        stage,
-        hubOrigin,
-        artifactTools,
-        roleKey,
-        role,
-        packedWorkflow,
-        offeringId,
-      );
+      ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packedWorkflow, offeringId);
     let result: SpecialistDeployment;
     try {
       result = await attempt();

@@ -1,13 +1,28 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildSpecialistWorkflowFiles, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
+import { AGENT_KIT, agentFor } from "@solutions-builder/app/kit";
+import { DELIVERY_STAGE, specialistTooling } from "@solutions-builder/app/specialist-source";
+import { buildSpecialistWorkflowFiles, EXTERNAL, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
 
 const files = await buildSpecialistWorkflowFiles();
 
+/** The bare package specifiers a packed entry still imports. */
+function externalImportsOf(packed: string): string[] {
+  const found = new Set<string>();
+  for (const match of packed.matchAll(/from\s*["']([^"']+)["']/g)) {
+    const specifier = match[1]!;
+    if (specifier.startsWith(".")) continue;
+    const parts = specifier.split("/");
+    found.add(specifier.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0]!);
+  }
+  return [...found].sort();
+}
+
 describe("specialist pack", () => {
-  test("packs every role package", () => {
-    expect(Object.keys(files).sort()).toEqual(SPECIALIST_PACK_ROLES.map((role) => role.id).sort());
+  test("packs every kit role, and nothing else", () => {
+    expect(Object.keys(files).sort()).toEqual(AGENT_KIT.map((role) => role.id).sort());
+    expect(SPECIALIST_PACK_ROLES.map((role) => role.id).sort()).toEqual(AGENT_KIT.map((role) => role.id).sort());
   });
 
   test("brainstormer workflow.js is a real defineWorkflow, not a string-built template", () => {
@@ -24,10 +39,32 @@ describe("specialist pack", () => {
     expect(packed).not.toContain("gpt-5.5");
   });
 
-  test("delivery verifier keeps the deliver tool as an external import", () => {
-    const packed = files["delivery-verifier"]!;
-    expect(packed).toContain("@solutions-builder/tools-delivery");
-    expect(packed).toContain("defineWorkflow");
+  // #42: the package's `workflow.ts` is the one place that decides a
+  // specialist's tools; the installer ships what the packed entry imports
+  // (`specialistTooling`). So every import left in a packed entry must be
+  // one the installer knows how to ship, and the detector must see it.
+  test("every packed entry imports only the externals the installer ships, and the detector agrees", () => {
+    for (const [id, packed] of Object.entries(files)) {
+      const imports = externalImportsOf(packed);
+      for (const name of imports) expect({ id, name, known: EXTERNAL.includes(name) }).toEqual({ id, name, known: true });
+      const tooling = specialistTooling(packed);
+      expect({ id, tooling }).toEqual({
+        id,
+        tooling: {
+          deck: imports.includes("@solutions-builder/tools-deck"),
+          posix: imports.includes("@intx/tools-posix"),
+          delivery: imports.includes("@solutions-builder/tools-delivery"),
+          artifacts: imports.includes("@corbits/artifacts"),
+        },
+      });
+    }
+  });
+
+  test("only the delivery verifier carries a tool: deliver", () => {
+    for (const role of AGENT_KIT) {
+      const expected = role.id === agentFor(DELIVERY_STAGE).id ? { deck: false, posix: false, delivery: true, artifacts: false } : { deck: false, posix: false, delivery: false, artifacts: false };
+      expect({ id: role.id, tooling: specialistTooling(files[role.id]!) }).toEqual({ id: role.id, tooling: expected });
+    }
   });
 
   test("architect workflow.js carries skillTextFor overlay", () => {

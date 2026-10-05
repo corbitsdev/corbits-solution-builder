@@ -531,8 +531,9 @@ function Inference({
 /**
  * What the stage-4 designer draws to. Each control saves on its own as it
  * changes; the design language saves when the field is left, since it is
- * typed. The stage-4 specialist is redeployed with them the next time it is
- * opened, as it is after a language change.
+ * typed. Not yet carried to the stage-4 specialist: its instructions are its
+ * package's own, and how a workspace setting reaches a packed specialist is
+ * still to be decided.
  */
 function Designer() {
   const [settings, setSettings] = useState<DesignerSettings | null>(null);

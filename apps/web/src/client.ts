@@ -10,11 +10,10 @@ import { digestOf } from "./stage-approval.ts";
 import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
-import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import type { LanguageSettings } from "@solutions-builder/app/language-settings";
 import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
 import { singleFlight } from "./single-flight.ts";
 import { DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
-import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
@@ -63,7 +62,6 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
-  readDesignerSettings,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
@@ -741,11 +739,9 @@ async function specialistPackedWorkflow(roleId: string): Promise<string> {
  * credentialed URL `pushSourceTree` cannot construct itself.
  */
 /**
- * The origin a specialist's sidecar dials for its artifact tool calls, and
- * the one `lifecycleGitPush` pushes to. `hubOrigin()` is `""` in the embedded
- * app, where the hub is same-origin; that empty string must never reach the
- * installer, which pins the `sb-workflow-artifacts` provider to it and the
- * hub then refuses to launch any specialist bound to that provider, silently.
+ * The origin `lifecycleGitPush` pushes to. `hubOrigin()` is `""` in the
+ * embedded app, where the hub is same-origin; isomorphic-git needs the
+ * absolute origin to construct its URL.
  */
 function specialistHubOrigin(): string {
   return hubOrigin() || window.location.origin;
@@ -1201,32 +1197,6 @@ async function persistDraftOfKind(
     versionId: artifact.id,
     contentHash: `${artifact.id}@${String(artifact.version)}`,
   };
-}
-
-/**
- * A role with the workspace's output language in its instructions (#411):
- * what every specialist is deployed with, so documents, replies and the
- * text of any software it builds come out in that language. Read at deploy
- * time off the workspace tenant; the default is American English.
- */
-async function localizedRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, role: AgentRole): Promise<AgentRole> {
-  const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
-  if (!settings) return role;
-  return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
-}
-
-/**
- * A stage's role as its specialist is deployed: localized, and for the
- * experience designer, with the workspace's designer settings (surface,
- * design language) read at deploy time the same way. A changed setting makes
- * the rendered entry differ from the deployed one, so the next
- * `ensureSpecialistDeployment` redeploys it.
- */
-async function stageRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<AgentRole> {
-  const role = await localizedRole(transport, workspaceTenantId, agentFor(stage));
-  if (stage !== 4) return role;
-  const settings = await readDesignerSettings(transport, workspaceTenantId);
-  return { ...role, system: `${role.system}\n\n${designerGuidance(settings)}` };
 }
 
 export const api = {
@@ -2375,11 +2345,13 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const [status, packed] = await Promise.all([
+        readyToDeploy(transport, workspaceTenantId, projectId),
+        specialistPackedWorkflow(agentFor(stage as Stage).id),
+      ]);
       // Mailing a deployment whose sidecar is not placed yet loses the
       // message: the run never starts and the stage waits on a reply that
       // cannot come. Wait for the hub to call it deployed first.
-      const role = await stageRole(transport, workspaceTenantId, stage as Stage);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2387,15 +2359,7 @@ export const api = {
         lifecycleGitPush,
         projectId,
         stage as Stage,
-        specialistHubOrigin(),
-        await specialistPackedWorkflow(role.id),
-        // No hub credential binding: a stage 8 deployed with one never
-        // produced a run, while every unbound stage does. Nothing needs it
-        // now — the build runs on the host and the archive is recorded by
-        // the build panel, not uploaded from a sidecar.
-        false,
-        undefined,
-        role,
+        packed,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
@@ -2419,8 +2383,10 @@ export const api = {
   switchStageAgent: (projectId: string, stage: number, offeringId: string): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${stage}`;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const role = await stageRole(transport, workspaceTenantId, stage as Stage);
+      const [status, packed] = await Promise.all([
+        readyToDeploy(transport, workspaceTenantId, projectId),
+        specialistPackedWorkflow(agentFor(stage as Stage).id),
+      ]);
       const deployment = await switchSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2428,12 +2394,8 @@ export const api = {
         lifecycleGitPush,
         projectId,
         stage as Stage,
-        specialistHubOrigin(),
         offeringId,
-        await specialistPackedWorkflow(role.id),
-        false,
-        undefined,
-        role,
+        packed,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
@@ -2463,8 +2425,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const role = await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE);
+      const [status, packed] = await Promise.all([
+        readyToDeploy(transport, workspaceTenantId, projectId),
+        specialistPackedWorkflow(BRIEF_EVALUATOR_ROLE.id),
+      ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2472,11 +2436,8 @@ export const api = {
         lifecycleGitPush,
         projectId,
         1 as Stage,
-        specialistHubOrigin(),
-        await specialistPackedWorkflow(role.id),
-        false,
+        packed,
         BRIEF_EVALUATOR_ROLE_KEY,
-        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the Problem discovery brief evaluator", placement);
@@ -2505,8 +2466,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const role = await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE);
+      const [status, packed] = await Promise.all([
+        readyToDeploy(transport, workspaceTenantId, projectId),
+        specialistPackedWorkflow(PRODUCT_GUIDE_ROLE.id),
+      ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2514,11 +2477,8 @@ export const api = {
         lifecycleGitPush,
         projectId,
         1 as Stage,
-        specialistHubOrigin(),
-        await specialistPackedWorkflow(role.id),
-        false,
+        packed,
         PRODUCT_GUIDE_ROLE_KEY,
-        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the product guide", placement);
@@ -2551,8 +2511,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const role = await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey));
+      const [status, packed] = await Promise.all([
+        readyToDeploy(transport, workspaceTenantId, projectId),
+        specialistPackedWorkflow(stage6RoleFor(roleKey).id),
+      ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2560,11 +2522,8 @@ export const api = {
         lifecycleGitPush,
         projectId,
         stage as Stage,
-        specialistHubOrigin(),
-        await specialistPackedWorkflow(role.id),
-        false,
+        packed,
         roleKey,
-        role,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);

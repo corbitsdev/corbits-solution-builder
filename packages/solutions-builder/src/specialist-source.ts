@@ -113,36 +113,42 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The tools a specialist's packed entry imports, by stage: what the pushed
- * tree must ship as members and the package must depend on (#42). One place
- * decides, so an entry never imports a tool its closure lacks.
+ * The tools a specialist's packed entry imports: what the pushed tree must
+ * ship as members and the package must depend on (#42). The package's own
+ * `workflow.ts` decides by what it imports; this only reads that decision
+ * off the packed bytes, so an entry never imports a tool its closure lacks.
  */
 export type SpecialistTooling = {
-  /** `render_deck`: a stage 5 per-audience deployment, never the primary one (CL-8873). */
+  /** `@solutions-builder/tools-deck`'s `render_deck`. No stage carries it (#435). */
   readonly deck: boolean;
   /** `@intx/tools-posix`: the shell. No stage carries it; the build runs on the host. */
   readonly posix: boolean;
   /** `@solutions-builder/tools-delivery`: stage 9's `deliver`. */
   readonly delivery: boolean;
-  /** `@corbits/artifacts`' generic bundle: opt-in. */
+  /** `@corbits/artifacts`' generic bundle. */
   readonly artifacts: boolean;
 };
 
-export function specialistTooling(options: {
-  readonly stage: Stage;
-  readonly artifactTools?: boolean | undefined;
-}): SpecialistTooling {
-  const { stage, artifactTools = false } = options;
+/** The tool packages `scripts/specialist-pack.ts` leaves external, so their
+ *  import specifiers survive into the packed entry verbatim. */
+const TOOL_PACKAGES: Readonly<Record<keyof SpecialistTooling, string>> = {
+  deck: "@solutions-builder/tools-deck",
+  posix: "@intx/tools-posix",
+  delivery: "@solutions-builder/tools-delivery",
+  artifacts: "@corbits/artifacts",
+};
+
+function importsPackage(packedWorkflow: string, pkg: string): boolean {
+  const escaped = pkg.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  return new RegExp(`from\\s*["']${escaped}(?:/[^"']*)?["']`).test(packedWorkflow);
+}
+
+export function specialistTooling(packedWorkflow: string): SpecialistTooling {
   return {
-    // The app draws and exports a stakeholder's slides from the deck outline
-    // in the reply; a rendered file nothing reads only cost the model a turn
-    // in which it reported the render instead of the package (#435).
-    deck: false,
-    // Stage 8 builds through the host's bridge; its specialist reviews the
-    // worker's report and carries no shell.
-    posix: false,
-    delivery: stage === DELIVERY_STAGE,
-    artifacts: artifactTools,
+    deck: importsPackage(packedWorkflow, TOOL_PACKAGES.deck),
+    posix: importsPackage(packedWorkflow, TOOL_PACKAGES.posix),
+    delivery: importsPackage(packedWorkflow, TOOL_PACKAGES.delivery),
+    artifacts: importsPackage(packedWorkflow, TOOL_PACKAGES.artifacts),
   };
 }
 
@@ -183,8 +189,8 @@ export function specialistWorkflowId(stage: Stage): string {
  * use-grant its run needs on exactly that credential. Interchange delivers
  * the bound credential's material but mints no `credential:<id>` / `use`
  * grant (#388), so the requirement is declared here, scoped to the package
- * the binding is for. Production `artifactTools` stays false; bindings are
- * not in the packed entry until a later per-package tools-on PR.
+ * the binding is for. No packed entry carries a binding yet; a package that
+ * imports `@corbits/artifacts` declares this itself in a later tools-on PR.
  */
 export function credentialAccess(pkg: string, credentialName: string, credentialId: string) {
   return {

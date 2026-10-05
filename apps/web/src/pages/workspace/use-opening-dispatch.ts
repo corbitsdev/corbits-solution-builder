@@ -184,9 +184,8 @@ export function useOpeningDispatch({
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
           const chain = await queryClient.fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage }));
-          // The workspace's language is in the specialist's own instructions
-          // (`localizedRole`, client.ts), where a changed setting redeploys
-          // it; the mail carries the record and the stage's lead, nothing else.
+          // The mail carries the record and the stage's lead, nothing else;
+          // the specialist's instructions are its package's own.
           const body = chain ? `${chain}\n\n${opening}` : opening;
           await api.sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` });
           if (cancelled) return;

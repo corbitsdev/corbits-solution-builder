@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { Stage } from "./ledger.js";
 import {
   credentialAccess,
   ARTIFACT_TOOL_DEPENDENCIES,
@@ -15,50 +14,44 @@ import {
 
 const NONE = { deck: false, posix: false, delivery: false, artifacts: false };
 
-// #42: a specialist ships only what its entry imports. The tooling matrix is
-// what decides both the entry's imports and the members and dependencies
-// beside it, so it is pinned here, stage by stage.
+const BARE = 'import { defineWorkflow } from "@intx/workflow";\nimport SOURCE from "./inference-source.js";\n';
+const DELIVERY = `${BARE}import { deliver } from "@solutions-builder/tools-delivery/sidecar-bundle";\n`;
+const ARTIFACTS = `${BARE}import { artifacts } from '@corbits/artifacts/sidecar-bundle';\n`;
+
+// #42: a specialist ships only what its entry imports, and the entry is the
+// package's own `workflow.ts`, so the tooling is read off the packed bytes
+// rather than decided a second time here.
 describe("specialistTooling", () => {
-  test("stages 1 to 4, 6 and 7 import no tool", () => {
-    for (const stage of [1, 2, 3, 4, 6, 7] as Stage[]) {
-      expect(specialistTooling({ stage })).toEqual(NONE);
-    }
+  test("an entry importing no tool package carries nothing", () => {
+    expect(specialistTooling(BARE)).toEqual(NONE);
   });
 
-  test("stage 5 carries no tool: the app draws slides from the outline in the reply (#435)", () => {
-    expect(specialistTooling({ stage: 5 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 5, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
+  test("each external tool import is detected by its package, subpath or not", () => {
+    expect(specialistTooling(DELIVERY)).toEqual({ ...NONE, delivery: true });
+    expect(specialistTooling(ARTIFACTS)).toEqual({ ...NONE, artifacts: true });
+    expect(specialistTooling(`${BARE}import { deck } from "@solutions-builder/tools-deck";\n`)).toEqual({ ...NONE, deck: true });
+    expect(specialistTooling(`${BARE}import { shell } from "@intx/tools-posix";\n`)).toEqual({ ...NONE, posix: true });
+    expect(specialistTooling(`${DELIVERY}import { artifacts } from "@corbits/artifacts/sidecar-bundle";\n`)).toEqual({ ...NONE, delivery: true, artifacts: true });
   });
 
-  test("stage 8 carries no tool: the build runs through the host's bridge and its specialist reviews the report", () => {
-    expect(specialistTooling({ stage: 8 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 8, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
-  });
-
-  test("stage 9 carries the delivery tool alone", () => {
-    expect(specialistTooling({ stage: 9 })).toEqual({ ...NONE, delivery: true });
-  });
-
-  test("the generic artifact bundle is opt-in on any stage", () => {
-    expect(specialistTooling({ stage: 2, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
-    expect(specialistTooling({ stage: 9, artifactTools: true })).toEqual({ ...NONE, delivery: true, artifacts: true });
+  test("a package name inside a string is not an import", () => {
+    expect(specialistTooling(`${BARE}const note = "see @solutions-builder/tools-delivery";\n`)).toEqual(NONE);
+    expect(specialistTooling(`${BARE}import { x } from "@solutions-builder/tools-delivery-extras";\n`)).toEqual(NONE);
   });
 });
 
 describe("specialistDependencies", () => {
   test("a tool-less specialist depends on the base set alone: no app, deck, delivery or pptx", () => {
-    const deps = specialistDependencies(specialistTooling({ stage: 1 }));
+    const deps = specialistDependencies(specialistTooling(BARE));
     expect(deps).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(Object.keys(deps).some((name) => name.startsWith("@solutions-builder/"))).toBe(false);
   });
 
   test("each tool brings its own set, and the runtime package comes with the deck or delivery tool", () => {
-    expect(specialistDependencies(specialistTooling({ stage: 5 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(specialistDependencies({ deck: true, posix: false, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DECK_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 8 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(specialistDependencies({ deck: false, posix: true, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...POSIX_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 9 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 3, artifactTools: true }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling(DELIVERY))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling(ARTIFACTS))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
     expect(DECK_TOOL_DEPENDENCIES["@solutions-builder/specialist-runtime"]).toBe("workspace:*");
     expect(DELIVERY_TOOL_DEPENDENCIES["@solutions-builder/specialist-runtime"]).toBe("workspace:*");
   });

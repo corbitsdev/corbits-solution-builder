@@ -86,10 +86,9 @@ the GUI design mockup — and there those instructions win over every rule in th
 section.
 `.trim();
 
-/** CL-8719: only appended to a specialist's prompt when it actually carries
- *  the `@corbits/artifacts` tool bundle (`specialist-source.ts`'s
- *  `artifactTools` option) — telling a model to call a tool it was not given
- *  just makes it hallucinate the call. */
+/** CL-8719: only appended to a specialist's prompt when its `workflow.ts`
+ *  actually imports the `@corbits/artifacts` tool bundle — telling a model to
+ *  call a tool it was not given just makes it hallucinate the call. */
 export const ARTIFACT_WRITE_RULE = `
 Your prompt's "Stage document" note names the kind your document is recorded
 under. The first time you write your stage document, call artifact_create
