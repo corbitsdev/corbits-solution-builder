@@ -85,6 +85,11 @@ import { askKind, delegationTarget, requirementsRequest, routedLine } from "./me
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
+/** The newest unsuperseded node of a kind, or null. */
+function newestOfKind(nodes: readonly ArtifactNode[], kind: string): ArtifactNode | null {
+  return nodes.filter((node) => node.kind === kind && node.supersededByNodeId === null).sort((a, b) => b.version - a.version || Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
+}
+
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
   const byReviewer = new Map<string, ArtifactNode>();
   for (const node of nodes) {
@@ -98,6 +103,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
+import { PRD_FOR_PEOPLE_KIND } from "../../prd-for-people.ts";
 import {
   EvaluatorStance,
   OpeningScreen,
@@ -1321,6 +1327,8 @@ export function StageWorkspace({
               .filter((node) => node.kind === "product_requirements" && node.supersededByNodeId === null)
               .sort((a, b) => b.version - a.version)[0] ?? null
           }
+          peopleNode={newestOfKind(detail.nodes, PRD_FOR_PEOPLE_KIND)}
+          designNode={newestOfKind(detail.nodes, "design_artifact")}
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}

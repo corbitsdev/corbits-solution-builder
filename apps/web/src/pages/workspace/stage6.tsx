@@ -7,12 +7,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown, Users } from "lucide-react";
-import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
+import { api, ApiFailure, STAGE6_PEOPLE_ROLE_KEY, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
+import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE, composePeopleBrief, mockupKey } from "../../prd-for-people.ts";
+import { screenNamesOf, type MockupShot } from "../../mockup-shots.ts";
+import { framedMockupShots } from "../../mockup-frames.ts";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
-import { requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
+import { peopleDocument, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -43,11 +46,14 @@ const STAGE6_REQUIREMENTS_ROLE_KEY = REQUIREMENTS_ROLE_KEY;
 
 /** The artifact kind a stage 6 page's draft is exported under (#242): the requirements as the document they become, a panel review under its own name. */
 function draftKindOf(page: string): string {
-  return page === "requirements" ? "product_requirements" : `build_plan_review_${page}`;
+  if (page === "requirements") return "product_requirements";
+  if (page === "people") return PRD_FOR_PEOPLE_KIND;
+  return `build_plan_review_${page}`;
 }
 
 const PAGES: readonly { key: string; label: string }[] = [
   { key: "requirements", label: "Product requirements" },
+  { key: "people", label: PRD_FOR_PEOPLE_TITLE },
   ...STAGE6_PANEL_ROLES.map((role) => ({ key: role.key, label: `${role.label} review` })),
 ];
 
@@ -75,6 +81,8 @@ export function Stage6Panel({
   requirementsBlock = null,
   requirementsMinted,
   requirementsNode = null,
+  peopleNode = null,
+  designNode = null,
   reviewNodes = null,
   onDocumentsChanged,
   onDocuments,
@@ -104,6 +112,10 @@ export function Stage6Panel({
   /** The project's recorded product requirements document, newest version
    *  (#328): shown on a reload instead of asking or waiting. */
   requirementsNode?: ArtifactNode | null;
+  /** The project's recorded PRD for people, newest version (#737); shown on a reload, rewritten when the PRD changes. */
+  peopleNode?: ArtifactNode | null;
+  /** The approved design, whose screens the PRD for people pictures (#737). */
+  designNode?: ArtifactNode | null;
   /** The project's recorded panel reviews, newest version each, by reviewer (#334). */
   reviewNodes?: ReadonlyMap<string, ArtifactNode> | null;
   /** A document was recorded (#334): the project's artifact graph should be re-read. */
@@ -127,7 +139,30 @@ export function Stage6Panel({
   planDocument?: ((reviewMenu: ReactNode) => ReactNode) | null;
 }) {
   const [requirements, setRequirements] = useState<Stage6RoleState>(STAGE6_IDLE_ROLE);
+  const [people, setPeople] = useState<Stage6RoleState>(STAGE6_IDLE_ROLE);
   const [reviews, setReviews] = useState<Record<string, Stage6RoleState>>({});
+  // The approved design's text (#737): its screen names tell the writer
+  // what it may picture, and its drawn screens show on the page.
+  const [designHtml, setDesignHtml] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!designNode) {
+      setDesignHtml(null);
+      return;
+    }
+    api
+      .artifactContent(tenantId, designNode.id)
+      .then((result) => {
+        if (!cancelled) setDesignHtml(result.content);
+      })
+      .catch(() => {
+        // Unreadable: the writer goes without pictures rather than never being asked.
+        if (!cancelled) setDesignHtml("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [designNode?.id, tenantId]);
   const [page, setPage] = useState("requirements");
   const requirementsRequestedFor = useRef<string | null>(null);
   // The requirements-author's accepted document mints the workflow's
@@ -170,6 +205,77 @@ export function Stage6Panel({
       setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
     })();
   }, [requirements.status, requirementsNode, requirementsMinted, projectId, tenantId]);
+
+  // The PRD for people (#737) is read back the same way on a reload.
+  const peopleRecoveredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (people.status !== "idle" || !peopleNode) return;
+    if (peopleRecoveredFor.current === peopleNode.id) return;
+    peopleRecoveredFor.current = peopleNode.id;
+    void api
+      .artifactContent(tenantId, peopleNode.id)
+      .then((result) => setPeople((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev)))
+      .catch(() => undefined);
+  }, [people.status, peopleNode, tenantId]);
+
+  // The writer is asked once per requirements document (#737): when a
+  // fresh PRD lands, and for a project that has a PRD but no PRD for people
+  // yet. A recorded pair on a reload asks nothing.
+  const peopleAskedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (requirements.status !== "done" || !requirements.reply) return;
+    if (designNode && designHtml === null) return;
+    const fresh = requirements.recorded !== true;
+    if (!fresh && peopleNode) return;
+    if (peopleAskedFor.current === requirements.reply) return;
+    peopleAskedFor.current = requirements.reply;
+    const body = composePeopleBrief({
+      requirements: requirements.reply,
+      screens: designHtml ? screenNamesOf(designHtml) : [],
+      approvedInputs: requirementsInput,
+      prior: people.status === "done" ? people.reply : null,
+    });
+    runRole(STAGE6_PEOPLE_ROLE_KEY, body, setPeople);
+    // `people` and `designHtml` are read at the moment the PRD lands; a later change is a later ask's concern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requirements.status, requirements.reply, requirements.recorded, peopleNode, designHtml, designNode]);
+
+  const peopleRecordedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (people.status !== "done" || !people.reply || people.recorded) return;
+    const mark = `${String(people.requestedAt)}:${String(people.reply.length)}`;
+    if (peopleRecordedFor.current === mark) return;
+    peopleRecordedFor.current = mark;
+    const reply = people.reply;
+    void api
+      .persistPrdForPeople(projectId, reply, requirementsNode ? [requirementsNode.id] : [])
+      .then(() => {
+        setPeople((prev) => (prev.reply === reply ? { ...prev, recorded: true } : prev));
+        onDocumentsChanged?.();
+      })
+      .catch(() => undefined);
+  }, [people, projectId, requirementsNode, onDocumentsChanged]);
+
+  // The pictures the document refers to (#737), drawn from the design
+  // once the document is on the page: screen key to a PNG data URL.
+  const [pictures, setPictures] = useState<ReadonlyMap<string, string> | null>(null);
+  useEffect(() => {
+    if (page !== "people" || !designHtml || pictures) return;
+    let cancelled = false;
+    framedMockupShots(designHtml, 12)
+      .then((shots: MockupShot[]) => {
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const shot of shots) map.set(mockupKey(shot.name), `data:image/png;base64,${bytesToBase64(shot.png)}`);
+        setPictures(map);
+      })
+      .catch(() => {
+        if (!cancelled) setPictures(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, designHtml, pictures]);
 
   // The panel reviews the same way (#334): a recorded review is read
   // back; a project that reviewed before reviews were recorded has each
@@ -278,6 +384,7 @@ export function Stage6Panel({
   // backstops a missed nudge. Never resends a request: this only reads.
   const waitingAddresses = [
     ...(requirements.status === "waiting" && requirements.address ? [["requirements", requirements] as const] : []),
+    ...(people.status === "waiting" && people.address ? [["people", people] as const] : []),
     ...Object.entries(reviews).filter(([, state]) => state.status === "waiting" && state.address),
   ];
   const anyWaiting = waitingAddresses.length > 0;
@@ -304,6 +411,14 @@ export function Stage6Panel({
           requirements.requestedAt,
           (reply) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
           (message) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "error", error: message } : prev)),
+        );
+      }
+      if (people.status === "waiting" && people.address) {
+        void checkOne(
+          people.address,
+          people.requestedAt,
+          (reply) => setPeople((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
+          (message) => setPeople((prev) => (prev.status === "waiting" ? { ...prev, status: "error", error: message } : prev)),
         );
       }
       for (const [roleKey, state] of Object.entries(reviews)) {
@@ -335,6 +450,7 @@ export function Stage6Panel({
   // What the stage has written so far, as documents a message may name (#345).
   const documents: StageDocument[] = [
     ...(requirements.status === "done" && requirements.reply ? [requirementsDocument(requirements.reply)] : []),
+    ...(people.status === "done" && people.reply ? [peopleDocument(people.reply)] : []),
     ...STAGE6_PANEL_ROLES.flatMap((role) => {
       const state = reviews[role.key];
       return state?.status === "done" && state.reply ? [reviewDocument(role.label, state.reply)] : [];
@@ -353,7 +469,8 @@ export function Stage6Panel({
   // first request takes.
   const [ask, setAsk] = useState("");
   const askRole = (roleKey: string, text = ask) => {
-    const asked = withAttachedDocuments(text.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
+    const own = roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : roleKey === STAGE6_PEOPLE_ROLE_KEY ? "people" : `review:${roleKey}`;
+    const asked = withAttachedDocuments(text.trim(), documents.filter((doc) => doc.key !== own));
     if (!asked) return;
     // A companion role sees only what it is sent, and after a redeploy it
     // remembers nothing (#409): the author always gets the approved
@@ -368,9 +485,19 @@ export function Stage6Panel({
           ]
             .filter((part): part is string => part !== null)
             .join("\n\n")
-        : [asked, requirementsBlock, reviewInput ? `---\n\n## Attached: The build plan under review\n\n${reviewInput.trim()}` : null].filter((part): part is string => part !== null).join("\n\n");
+        : roleKey === STAGE6_PEOPLE_ROLE_KEY
+          ? [
+              asked,
+              requirements.reply
+                ? composePeopleBrief({ requirements: requirements.reply, screens: designHtml ? screenNamesOf(designHtml) : [], prior: people.reply }).replace(/^[^\n]*\n/, "")
+                : null,
+            ]
+              .filter((part): part is string => part !== null)
+              .join("\n\n")
+          : [asked, requirementsBlock, reviewInput ? `---\n\n## Attached: The build plan under review\n\n${reviewInput.trim()}` : null].filter((part): part is string => part !== null).join("\n\n");
     setAsk("");
     if (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY) runRole(roleKey, body, setRequirements);
+    else if (roleKey === STAGE6_PEOPLE_ROLE_KEY) runRole(roleKey, body, setPeople);
     else runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
   };
 
@@ -388,10 +515,12 @@ export function Stage6Panel({
   // The companion roles say what they are doing while they work (#407).
   const requirementsBusy = requirements.status === "starting" || requirements.status === "waiting";
   useBusyWhile(requirementsBusy, requirementsNode || requirements.reply ? "Requirements author is rewriting the requirements" : "Requirements author is writing the requirements");
+  const peopleBusy = people.status === "starting" || people.status === "waiting";
+  useBusyWhile(peopleBusy, peopleNode || people.reply ? "Requirements explainer is rewriting the PRD for people" : "Requirements explainer is writing the PRD for people");
   const reviewingRole = STAGE6_PANEL_ROLES.find((role) => reviews[role.key]?.status === "starting" || reviews[role.key]?.status === "waiting");
   useBusyWhile(reviewingRole !== undefined, `${reviewingRole?.label ?? "A"} reviewer is reviewing the plan`);
 
-  const current = page === "requirements" ? requirements : (reviews[page] ?? STAGE6_IDLE_ROLE);
+  const current = page === "requirements" ? requirements : page === "people" ? people : (reviews[page] ?? STAGE6_IDLE_ROLE);
   const currentPage = PAGES.find((entry) => entry.key === page) ?? PAGES[0]!;
   const busy = current.status === "starting" || current.status === "waiting";
   const meta =
@@ -405,7 +534,9 @@ export function Stage6Panel({
             ? requirementsMinted || requirementsNode
               ? "looking for the requirements document"
               : "waiting on opening material"
-            : reviewInput
+            : page === "people"
+              ? "waiting on the product requirements"
+              : reviewInput
               ? "not yet requested"
               : "waiting on a plan draft";
 
@@ -418,6 +549,7 @@ export function Stage6Panel({
   if (!pane) {
     const failures = [
       requirements.status === "error" ? { key: "requirements", title: "The requirements could not be drafted", error: requirements.error } : null,
+      people.status === "error" ? { key: "people", title: "The PRD for people could not be written", error: people.error } : null,
       ...STAGE6_PANEL_ROLES.map((role) =>
         reviews[role.key]?.status === "error"
           ? { key: role.key, title: `The ${role.label.toLowerCase()} review could not be completed`, error: reviews[role.key]!.error }
@@ -467,7 +599,7 @@ export function Stage6Panel({
             <div className="docmeta">
               <span>
                 {meta}
-                {page === "requirements" ? " · Requirements Author" : ` · ${STAGE6_PANEL_ROLES.find((role) => role.key === page)?.label}`}
+                {page === "requirements" ? " · Requirements Author" : page === "people" ? " · Requirements Explainer" : ` · ${STAGE6_PANEL_ROLES.find((role) => role.key === page)?.label}`}
               </span>
               <div className="document-tools">
                 <select aria-label="Build plan document" value={page} onChange={(event) => setPage(event.target.value)}>
@@ -477,7 +609,7 @@ export function Stage6Panel({
                     </option>
                   ))}
                 </select>
-                {page !== "requirements" ? (
+                {page !== "requirements" && page !== "people" ? (
                   <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => requestReview(page)}>
                     {current.status === "done" ? "Request again" : "Request review"}
                   </Button>
@@ -494,22 +626,32 @@ export function Stage6Panel({
             {current.status === "idle" && page === "requirements" ? (
               <p className="inline-note">Waiting on this stage's opening material.</p>
             ) : null}
-            {current.status === "idle" && page !== "requirements" && !reviewInput ? (
+            {current.status === "idle" && page === "people" ? (
+              <p className="inline-note">Written once the product requirements are, from them and the design's screens.</p>
+            ) : null}
+            {current.status === "idle" && page !== "requirements" && page !== "people" && !reviewInput ? (
               <p className="inline-note">A draft plan is needed before the panel can review it.</p>
             ) : null}
-            {current.status === "idle" && page !== "requirements" && reviewInput ? (
+            {current.status === "idle" && page !== "requirements" && page !== "people" && reviewInput ? (
               <p className="inline-note">Not yet requested.</p>
             ) : null}
             {busy ? <p className="inline-note">Drafting…</p> : null}
             {current.status === "error" ? (
-              <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}>
+              <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : page === "people" ? "The PRD for people could not be written" : "This review could not be completed"}>
                 {current.error}
               </Banner>
             ) : null}
-            {current.status === "done" && current.reply ? <Markdown source={current.reply} /> : null}
+            {current.status === "done" && current.reply ? <Markdown source={current.reply} {...(page === "people" && pictures ? { images: pictures } : {})} /> : null}
           </div>
         </div>
       )}
     </StagePanes>
   );
+}
+
+/** PNG bytes as base64, in chunks a call stack can take. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(binary);
 }
