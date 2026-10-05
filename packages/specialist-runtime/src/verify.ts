@@ -241,11 +241,13 @@ export async function verifyArchive(input: {
   cwd: string;
   exclude: ReadonlySet<string>;
   ranOn: "sidecar" | "host";
+  /** The one folder the archive unpacks into (#699); the manifest's paths are relative to it. */
+  root?: string;
 }): Promise<DeliveryVerificationContent> {
   const extracted = await extractArchive(input.archiveBytes);
   let compared: { items: VerificationItem[]; extras: number };
   try {
-    compared = compareArchiveToManifest(input.manifest, await hashTree(extracted, input.exclude));
+    compared = compareArchiveToManifest(input.manifest, await hashTree(input.root ? join(extracted, input.root) : extracted, input.exclude));
   } finally {
     await rm(extracted, { recursive: true, force: true });
   }

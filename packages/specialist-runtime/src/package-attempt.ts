@@ -13,8 +13,9 @@
  * here imports one.
  */
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { hashFiles, shippedFiles, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
@@ -57,7 +58,8 @@ export const DEFAULT_EXCLUDES: readonly string[] = [
 export type DeliveryManifestContent = {
   stage: 8;
   attempt: string;
-  archive: { fileName: string; sizeBytes: number; sha256: string };
+  /** `root`: the one top-level folder the archive unpacks into (#699); absent on an archive made before it. */
+  archive: { fileName: string; sizeBytes: number; sha256: string; root?: string };
   files: ManifestFileEntry[];
   fileCount: number;
   truncated: boolean;
@@ -112,7 +114,29 @@ export function parseTargetProbe(raw: unknown): TargetProbe | null {
  *  gzip bytes. Shells out rather than reimplementing tar: every place this
  *  runs — a POSIX container image, or the host on macOS or Linux — has `tar`
  *  and `git` on PATH. */
-export function tarDirectory(cwd: string, files: readonly string[]): Promise<Buffer> {
+export async function tarDirectory(cwd: string, files: readonly string[], root?: string): Promise<Buffer> {
+  if (!root) return tarFrom(cwd, files);
+  // One top-level folder (#699): a scratch directory holds a link named
+  // `root` to the attempt directory, and every path is given through it.
+  // tar resolves a path that passes through a link to the file it reaches,
+  // so each entry is `root/path`, a regular file, with the bytes unchanged.
+  const scratch = await mkdtemp(join(tmpdir(), "sb-pack-"));
+  try {
+    await symlink(cwd, join(scratch, root), "dir");
+    return await tarFrom(scratch, files.map((path) => `${root}/${path}`));
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+/** The folder an archive unpacks into, from its file name: `build.tar.gz` → `build`. */
+export function archiveRoot(fileName: string): string {
+  const base = fileName.replace(/\.(tar\.gz|tgz|tar)$/i, "");
+  const safe = base.replace(/[\\/]/g, "-").replace(/^\.+/, "").trim();
+  return safe.length > 0 ? safe : "build";
+}
+
+function tarFrom(cwd: string, files: readonly string[]): Promise<Buffer> {
   return new Promise((res, reject) => {
     const child = spawn("tar", ["-czf", "-", "--null", "-T", "-"], { cwd });
     child.stdin.end(files.map((path) => `${path}\0`).join(""));
@@ -140,7 +164,7 @@ export async function buildManifest(
   attempt: string,
   targetDir: string,
   files: readonly string[],
-  archive: { fileName: string; sizeBytes: number; sha256: string },
+  archive: { fileName: string; sizeBytes: number; sha256: string; root?: string },
 ): Promise<DeliveryManifestContent> {
   const hashed = await hashFiles(targetDir, files);
   const listed = hashed.slice(0, MANIFEST_FILE_CAP);
@@ -173,6 +197,7 @@ export async function verifyAndRecord(
     manifestNodeId,
     probes: args.targets,
     cwd: targetDir,
+    ...(manifest.archive.root ? { root: manifest.archive.root } : {}),
     exclude: new Set(args.exclude),
     ranOn,
   });
@@ -217,6 +242,8 @@ export async function packageAttempt(input: {
   /** The attempt's variant, e.g. "attempt-3". */
   attempt: string;
   fileName?: string;
+  /** The one folder the archive unpacks into (#699); the file name's stem when unset. */
+  root?: string;
   exclude?: readonly string[];
   targets?: readonly TargetProbe[];
   /** Refused above this many archive bytes; the fallback's cap when unset. */
@@ -225,11 +252,12 @@ export async function packageAttempt(input: {
   ranOn?: "sidecar" | "host";
 }): Promise<PackagedAttempt> {
   const fileName = input.fileName ?? "build.tar.gz";
+  const root = archiveRoot(input.root ?? fileName);
   const exclude = [...new Set([...DEFAULT_EXCLUDES, ...(input.exclude ?? [])])];
   const targets = [...(input.targets ?? [])];
   const maxBytes = input.maxBytes ?? FALLBACK_MAX_ARCHIVE_BYTES;
   const files = await shippedFiles(input.dir, exclude);
-  const bytes = await tarDirectory(input.dir, files);
+  const bytes = await tarDirectory(input.dir, files, root);
   if (bytes.byteLength > maxBytes) {
     throw new Error(
       `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit. ` +
@@ -238,7 +266,7 @@ export async function packageAttempt(input: {
   }
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const manifest = await buildManifest(input.attempt, input.dir, files, { fileName, sizeBytes: bytes.byteLength, sha256 });
+  const manifest = await buildManifest(input.attempt, input.dir, files, { fileName, sizeBytes: bytes.byteLength, sha256, root });
   const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { exclude, targets }, input.dir, input.ranOn ?? "sidecar");
   return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }
