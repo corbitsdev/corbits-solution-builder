@@ -473,11 +473,16 @@
 }
 
 /* While the specialist gets ready: one tip at a time, in the middle of
-   the space below the thread, each fading in as it replaces the last. */
+   the space below the thread, each fading in as it replaces the last.
+   With nothing under them, the tips sit at the foot of the column instead. */
 .conv .waiting-tips {
   margin: auto 0;
   padding: var(--space-4) var(--space-6);
   text-align: center;
+}
+
+.conv .waiting-tips:last-child {
+  margin-bottom: 0;
 }
 
 .conv .waiting-tips-head {
