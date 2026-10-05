@@ -65,9 +65,17 @@ describe("Estimator prompt", () => {
   test("names every picker candidate with whether the platform exercises it", () => {
     const prompt = agentById("estimator")!.system;
     for (const entry of SELECTABLE_TARGETS) {
-      expect(prompt).toContain(entry.target);
-      expect(prompt).toContain(entry.label);
-      expect(prompt).toContain(entry.verified ? "exercised" : "not exercised");
+      // Assert on the entry's own rendered line: bare "exercised" is a
+      // substring of "not exercised", so a prompt-wide contains check passes
+      // even when a verified target is misreported (#710 review).
+      const line = prompt.split("\n").find((l) => l.includes(entry.target) && l.includes(entry.label));
+      expect(line).toBeDefined();
+      if (entry.verified) {
+        expect(line!).toContain("exercised");
+        expect(line!).not.toContain("not exercised");
+      } else {
+        expect(line!).toContain("not exercised");
+      }
     }
   });
 
