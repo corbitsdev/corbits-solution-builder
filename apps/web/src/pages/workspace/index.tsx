@@ -333,6 +333,7 @@ export function StageWorkspace({
         resultNodeId: null,
         questions: null,
         createdAt: message.at,
+        ...(message.subject ? { subject: message.subject } : {}),
       })),
     [foldedMessages],
   );

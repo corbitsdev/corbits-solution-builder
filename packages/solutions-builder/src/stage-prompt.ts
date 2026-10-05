@@ -22,6 +22,8 @@ export type StageTurn = {
   readonly createdAt: string;
   /** Set on a specialist turn that reports a round the platform could not complete. */
   readonly failed?: true;
+  /** The mail's subject, where the turn is one: an opening the app composed is told apart by it. */
+  readonly subject?: string;
 };
 
 export type Inputs = { node: { id: string; title: string; kind: string; stage: number }; content: string }[];

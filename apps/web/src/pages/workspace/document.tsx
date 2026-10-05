@@ -24,7 +24,7 @@ import { Button, documentName, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { ComposedMail, MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
-import { materialMailFold } from "./composed-mail.ts";
+import { composedMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
@@ -473,7 +473,10 @@ export function StageDocument({
             ) : (
               <>
                 {who}
-                <PersonTurn text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <PersonTurn
+                  text={message.parts.map((part) => (part as { text: string }).text).join("\n\n")}
+                  subject={turns.find((turn) => turn.id === message.id)?.subject}
+                />
               </>
             );
           }}
@@ -761,12 +764,14 @@ const EMPTY_EVENTS: readonly StageEvent[] = [];
 type AttachedQuote = { quote: string; note?: string };
 
 /**
- * A person's turn in the transcript. Material attached after the stage
- * opened travels as a mail in the person's name (#607): the files' names
- * show, and what they say opens on demand. Anything else shows as
- * `MessageBody` does: the person's words, what the app added folded.
+ * A person's turn in the transcript. A mail the app composed in the
+ * person's name folds the way the thread folds it before the first reply
+ * (`composedMailFold`): a stage's opening behind one line, material
+ * attached after the opening (#607) as the files' names with what they say
+ * on demand. Anything else shows as `MessageBody` does: the person's words,
+ * what the app added folded.
  */
-function PersonTurn({ text }: { text: string }) {
-  const material = materialMailFold(text);
-  return material ? <ComposedMail fold={material} /> : <MessageBody text={text} />;
+function PersonTurn({ text, subject }: { text: string; subject: string | undefined }) {
+  const composed = composedMailFold({ author: "me", body: text, ...(subject ? { subject } : {}) });
+  return composed ? <ComposedMail fold={composed} /> : <MessageBody text={text} />;
 }
