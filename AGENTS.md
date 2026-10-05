@@ -103,4 +103,5 @@ following still costs someone an evening when forgotten:
 - Commit messages and how to open a PR: see CONTRIBUTING.md. These rules bind
   humans and agents alike; a pull request that does not follow them is declined.
 - One issue per defect, one PR per issue.
-- Comments explain why, not what. The code says what.
+- Only leave comments when you are describing WHY we chose to do something,
+  not how something works. Code should self-document easily enough.
