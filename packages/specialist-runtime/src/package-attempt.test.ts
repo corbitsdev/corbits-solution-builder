@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { archiveRoot, packageAttempt, tarDirectory } from "./package-attempt.js";
+import { archiveRoot, ensureExecutableScripts, packageAttempt, tarDirectory } from "./package-attempt.js";
+import { chmod, stat } from "node:fs/promises";
 
 async function fixtureTree(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "sb-pack-fixture-"));
@@ -89,6 +90,34 @@ describe("the documents every build ships", () => {
       const item = packaged.manifest.verification?.items.find((entry) => entry.path === "docs/USER-MANUAL.md");
       expect(item).toMatchObject({ category: "docs", required: true, status: "missing", checkedBy: "tool" });
       expect(packaged.manifest.verification?.items.find((entry) => entry.path === "README.md" && entry.category === "docs")).toMatchObject({ status: "verified", checkedBy: "tool" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// #744: a shebang script ships executable, whatever the worker left.
+describe("ensureExecutableScripts", () => {
+  test("sets the bit on shebang files that lack it, leaves other files and already-executable scripts alone, and the archive carries it", async () => {
+    const dir = await fixtureTree();
+    try {
+      await mkdir(join(dir, "scripts"), { recursive: true });
+      await writeFile(join(dir, "scripts", "dev-db.sh"), "#!/bin/sh\necho db\n", { mode: 0o644 });
+      await writeFile(join(dir, "scripts", "already.sh"), "#!/bin/sh\n", { mode: 0o755 });
+      await writeFile(join(dir, "scripts", "notes.txt"), "#not a shebang\n", { mode: 0o644 });
+      const fixed = await ensureExecutableScripts(dir, ["README.md", "scripts/dev-db.sh", "scripts/already.sh", "scripts/notes.txt"]);
+      expect(fixed).toEqual(["scripts/dev-db.sh"]);
+      expect((await stat(join(dir, "scripts", "dev-db.sh"))).mode & 0o111).toBe(0o111);
+      expect((await stat(join(dir, "scripts", "notes.txt"))).mode & 0o111).toBe(0);
+      expect((await stat(join(dir, "README.md"))).mode & 0o111).toBe(0);
+      // Packaging does the same and says so on the manifest; the tar entry is executable.
+      await chmod(join(dir, "scripts", "dev-db.sh"), 0o644);
+      const packaged = await packageAttempt({ dir, attempt: "attempt-1" });
+      expect(packaged.manifest.scriptsMadeExecutable).toEqual(["scripts/dev-db.sh"]);
+      const bytes = Buffer.from(packaged.dataUri.slice(packaged.dataUri.indexOf(",") + 1), "base64");
+      const listing = Bun.spawnSync(["tar", "-tvzf", "-"], { stdin: new Uint8Array(bytes) }).stdout.toString();
+      const line = listing.split("\n").find((entry) => entry.endsWith("build/scripts/dev-db.sh")) ?? "";
+      expect(line.startsWith("-rwx")).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
