@@ -302,3 +302,31 @@ describe("AGENTS.md and the PRD for people", () => {
     expect(agents).toContain("is not a source; build from 06-product-requirements.md.");
   });
 });
+
+// #766: the download carries the slides as drawn now, and a later artifact beats an older one's higher version.
+describe("slides in the download", () => {
+  test("a current deck replaces the recorded file; a stakeholder whose slides cannot be drawn keeps the recorded file", async () => {
+    const nodes = [node({ kind: "audience_deck", stage: 5, variant: "Joe", id: "dj" }), node({ kind: "audience_deck", stage: 5, variant: "Tim", id: "dt" })];
+    const contents: Record<string, string> = { dj: PPTX, dt: PPTX };
+    const archive = await assembleDocumentsArchive(
+      "P",
+      nodes,
+      async (n) => contents[n.id]!,
+      async () => [],
+      async (shot) => shot.png,
+      () => undefined,
+      async (deck) => (deck.variant === "Joe" ? "data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,UEsDBAEB" : null),
+    );
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    expect([...(await zip.file("05-slides-joe.pptx")!.async("uint8array"))].slice(0, 6)).toEqual([0x50, 0x4b, 0x03, 0x04, 0x01, 0x01]);
+    expect([...(await zip.file("05-slides-tim.pptx")!.async("uint8array"))]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+  });
+
+  test("among unsuperseded versions of one lineage, a later artifact wins over an older one's higher version", () => {
+    const older = node({ kind: "audience_deck", stage: 5, variant: "Joe", id: "old", artifactId: "old", version: 3, createdAt: "2026-10-01T00:00:00.000Z" });
+    const newer = node({ kind: "audience_deck", stage: 5, variant: "Joe", id: "new", artifactId: "new", version: 1, createdAt: "2026-10-05T00:00:00.000Z" });
+    expect(completedDocuments([older, newer]).map((n) => n.id)).toEqual(["new"]);
+    const revised = node({ kind: "audience_deck", stage: 5, variant: "Joe", id: "old@4", artifactId: "old", version: 4, createdAt: "2026-10-02T00:00:00.000Z" });
+    expect(completedDocuments([older, revised]).map((n) => n.id)).toEqual(["old@4"]);
+  });
+});
