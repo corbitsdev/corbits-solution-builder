@@ -17,7 +17,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { PRD_FOR_PEOPLE_KIND, cleanPeopleDocument, composePeopleBrief, mockupKey } from "../../prd-for-people.ts";
 import { screenNamesOf, type MockupShot } from "../../mockup-shots.ts";
-import { framedMockupShots } from "../../mockup-frames.ts";
+import { cachedFramedMockupShots } from "../../mockup-cache.ts";
 import { IDLE_COMPANION, type CompanionState } from "./companion-state.ts";
 
 /** The newest unsuperseded node of a kind, or null. */
@@ -85,7 +85,7 @@ export function useDesignPictures(designHtml: string | null, enabled: boolean): 
   useEffect(() => {
     if (!enabled || !designHtml || pictures?.html === designHtml) return;
     let cancelled = false;
-    framedMockupShots(designHtml, 12)
+    cachedFramedMockupShots(designHtml, 12)
       .then((shots: MockupShot[]) => {
         if (cancelled) return;
         const map = new Map<string, string>();

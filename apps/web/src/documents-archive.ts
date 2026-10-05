@@ -12,7 +12,8 @@ import JSZip from "jszip";
 import type { ArtifactNode } from "./client.js";
 import { documentName } from "./components.jsx";
 import type { MockupShot, Shooter } from "./mockup-shots.ts";
-import { frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
+import { frameLabel, frameMockup } from "./mockup-frames.ts";
+import { cachedFramedMockupShots } from "./mockup-cache.ts";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { slug } from "./slug.ts";
 import { PRD_FOR_PEOPLE_FILE, PRD_FOR_PEOPLE_KIND, cleanPeopleDocument, mockupKey, resolveMockupReferences } from "./prd-for-people.ts";
@@ -152,10 +153,12 @@ export async function assembleDocumentsArchive(
   projectTitle: string,
   nodes: readonly ArtifactNode[],
   read: (node: ArtifactNode) => Promise<string>,
-  /** Draws a design's screens (#336); the browser's rasteriser by default, which draws nothing outside a browser. */
-  shoot: Shooter = framedMockupShots,
+  /** Draws a design's screens (#336); the session's cached drawing by default (#751), which draws nothing outside a browser. */
+  shoot: Shooter = cachedFramedMockupShots,
   /** Draws a screen inside its body (#654) when the shooter did not already (`framed`); the canvas framer by default. A frame that fails leaves the screen bare. */
   frame: (shot: MockupShot) => Promise<Uint8Array> = frameMockup,
+  /** Says which step is under way (#751), for the busy strip. */
+  progress: (doing: string) => void = () => undefined,
 ): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
   const files: { name: string; node: ArtifactNode }[] = [];
@@ -164,14 +167,17 @@ export async function assembleDocumentsArchive(
   const mockups: string[] = [];
   // The pictures by screen key (#737), for the PRD for people's references.
   const pictures = new Map<string, string>();
-  for (const node of completedDocuments(nodes)) {
-    let content: string;
-    try {
-      content = await read(node);
-    } catch {
+  // Every document is fetched at once (#751), then packed in order.
+  const documents = completedDocuments(nodes);
+  progress(`Reading ${String(documents.length)} document${documents.length === 1 ? "" : "s"}`);
+  const contents = await Promise.all(documents.map((node) => read(node).then((content) => ({ content }), () => null)));
+  for (const [index, node] of documents.entries()) {
+    const held = contents[index];
+    if (!held) {
       skipped.push(`${documentName(node.kind)}${node.variant ? ` for ${node.variant}` : ""}`);
       continue;
     }
+    let content = held.content;
     // The PRD for people goes out without any word about itself (#742).
     if (node.kind === PRD_FOR_PEOPLE_KIND) content = cleanPeopleDocument(content);
     const name = documentFileName(node, content);
@@ -181,6 +187,7 @@ export async function assembleDocumentsArchive(
     if (node.kind === "design_artifact" && mockups.length === 0) {
       // The screens as pictures, beside the HTML they are drawn from. A
       // design that cannot be drawn leaves the folder out; the HTML stands.
+      progress("Drawing the design's screens");
       const shots = await shoot(content, 12).catch((): MockupShot[] => []);
       for (const [index, shot] of shots.entries()) {
         const picture = mockupFileName(index, shot);
@@ -212,6 +219,7 @@ export async function assembleDocumentsArchive(
     );
     zip.file("QUESTIONS.md", QUESTIONS_MD);
   }
+  progress("Packing the archive");
   let readme = archiveReadme(projectTitle, files, mockups, requirementsFile !== undefined);
   const mockupFiles = mockups.map((entry) => entry.split(" — ")[0]!);
   if (skipped.length > 0) readme += `\nNot included, since they could not be read: ${skipped.join("; ")}.\n`;
@@ -224,8 +232,10 @@ export type DocumentsArchiveDeps = {
   projectView: (projectId: string) => Promise<{ project: { title: string }; tenantId: string; nodes: ArtifactNode[] }>;
   artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
   save: (blob: Blob, name: string) => void;
-  /** Draws the design's screens; the browser's rasteriser when absent. */
+  /** Draws the design's screens; the session's cached drawing when absent. */
   shoot?: Shooter;
+  /** Says which step is under way (#751), for the busy strip. */
+  onProgress?: (doing: string) => void;
 };
 
 /** Saves the browser's download of a Blob under `name`. */
@@ -245,7 +255,9 @@ export async function downloadProjectDocuments(projectId: string, deps: Document
     detail.project.title,
     detail.nodes,
     async (node) => (await deps.artifactContent(detail.tenantId, node.id)).content,
-    ...(deps.shoot ? [deps.shoot] : []),
+    deps.shoot ?? cachedFramedMockupShots,
+    frameMockup,
+    deps.onProgress ?? (() => undefined),
   );
   const name = documentsArchiveName(detail.project.title);
   if (archive.files.length === 0) return { message: `${detail.project.title} has no finished documents yet.`, complete: false };

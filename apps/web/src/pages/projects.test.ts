@@ -126,7 +126,7 @@ describe("project card menu", () => {
     expect(menu).toContain("<MenuTrigger asChild>{trigger}</MenuTrigger>");
     for (const item of ["Project info…", "Rename", "Settings…", "Download documents…", "Export…", "Archive", "Unarchive", "Prune old versions…", "Repair this project…", "Delete…", "Yes, delete it"]) expect(menu).toContain(item);
     expect(menu).toContain("exportProjectBundle(project)");
-    expect(menu).toContain("downloadDocuments(project)");
+    expect(menu).toContain("downloadDocuments(project, progress)");
     expect(menu).toContain("api.updateProject(project.id, { archived: !project.archivedAt })");
     expect(menu).toContain("api.deleteProject(project.id)");
     // A slip cannot delete: the confirming item only exists after Delete… was chosen, and closing the menu forgets it.

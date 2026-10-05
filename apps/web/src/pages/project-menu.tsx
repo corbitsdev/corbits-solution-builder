@@ -60,8 +60,8 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */
-export function downloadDocuments(project: MenuProject): Promise<{ message: string; complete: boolean; saveAgain?: () => void }> {
-  return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob });
+export function downloadDocuments(project: MenuProject, onProgress?: (doing: string) => void): Promise<{ message: string; complete: boolean; saveAgain?: () => void }> {
+  return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob, ...(onProgress ? { onProgress } : {}) });
 }
 
 export function ProjectMenu({
@@ -124,10 +124,10 @@ export function ProjectMenu({
   // seconds, which otherwise looks like nothing happening.
   const [acting, setActing] = useState<string | null>(null);
   useBusyWhile(acting !== null, acting ?? undefined);
-  const act = async (work: () => Promise<unknown>, doing: string | null = null) => {
+  const act = async (work: (progress: (doing: string) => void) => Promise<unknown>, doing: string | null = null) => {
     setActing(doing);
     try {
-      await work();
+      await work((step) => setActing(step));
       onChanged();
     } catch (cause) {
       onError(cause);
@@ -161,8 +161,8 @@ export function ProjectMenu({
           <MenuSeparator />
           <MenuItem
             onSelect={() =>
-              void act(async () => {
-                const { message, complete, saveAgain } = await downloadDocuments(project);
+              void act(async (progress) => {
+                const { message, complete, saveAgain } = await downloadDocuments(project, progress);
                 onNotice(message, complete, saveAgain ? { label: "Save again", onClick: saveAgain } : undefined);
               }, "Building the document package")
             }
