@@ -381,13 +381,14 @@ function ArtifactReader({
   );
 }
 
-/** Saves an artifact's bytes under a file name; a failure is a toast. */
+/** Saves an artifact's bytes under a file name; the outcome either way is a toast. */
 function useFileDownload(tenantId: string, node: ArtifactNode, fileName: string) {
   const [busy, setBusy] = useState(false);
   const download = async () => {
     setBusy(true);
     try {
       downloadArtifact((await api.artifactContent(tenantId, node.id)).content, fileName);
+      toast.success(`Saved ${fileName}`);
     } catch (cause) {
       toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
