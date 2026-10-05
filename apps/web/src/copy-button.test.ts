@@ -16,7 +16,8 @@ describe("the Copy control", () => {
   test("sits on the reader, the stage document, the design and a stakeholder package", () => {
     expect(read("./pages/workspace/index.tsx")).toContain("<CopyButton text={isDataUrl(artifacts.activeContent) ? null : artifacts.activeContent} />");
     expect(read("./pages/workspace/document.tsx")).toContain("{!binary ? <CopyButton text={content} /> : null}");
-    expect(read("./pages/design.tsx")).toContain("<CopyButton text={content || null} />");
+    // A design is HTML, and the label says so (#713).
+    expect(read("./pages/design.tsx")).toContain('<CopyButton text={content || null} label="Copy HTML" />');
     expect(read("./pages/audiences.tsx")).toContain("<CopyButton text={content || null} />");
   });
 });

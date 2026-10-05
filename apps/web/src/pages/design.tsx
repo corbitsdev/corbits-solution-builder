@@ -309,7 +309,7 @@ export function DesignFeedbackView({
               <option value="feedback">Feedback</option>
             </select>
             <FrameSelect value={frameMode} onChange={setFrameMode} />
-            <CopyButton text={content || null} />
+            <CopyButton text={content || null} label="Copy HTML" />
             {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
             {design && approval.canApprove ? (
               <Button
