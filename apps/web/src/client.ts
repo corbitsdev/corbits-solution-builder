@@ -1115,6 +1115,9 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
 }
 
 /** Stage 6's requirements author, as `stage6.tsx` names it. */
+/** How many of a run's last events the specialist's state is read from (#757): enough to hold its latest working, parked or ended word. */
+const RUN_STATE_TAIL = 32;
+
 export const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
 /** The PRD for people's writer (#737): the Build plan companion that tells the requirements for a reader. */
 export const STAGE6_PEOPLE_ROLE_KEY = "requirements-explainer";
@@ -2528,7 +2531,9 @@ export const api = {
       if (!status || ENDED_DEPLOYMENT_STATUSES.has(status.status)) return UNKNOWN_RUN;
       const workflows = workflowsFor(transport, status.tenantId);
       const runIds = topLevelRunIds(await workflows.runs(status.deploymentId));
-      const runs = await Promise.all(runIds.map(async (runId) => runStateOf((await workflows.runEvents(status.deploymentId, runId)).events)));
+      // The newest state-bearing event is all the state needs (#757): a
+      // long run's whole log, read every few seconds, pinned the host.
+      const runs = await Promise.all(runIds.map(async (runId) => runStateOf((await workflows.runEvents(status.deploymentId, runId, { tail: RUN_STATE_TAIL })).events)));
       return newestRun(runs);
     }).catch(() => UNKNOWN_RUN),
   /**
