@@ -23,6 +23,7 @@ import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
 import { openQuestions, planTasks, progressHeadline, taskProgress } from "./build-progress.ts";
 import { slug } from "../../documents-archive.ts";
+import { DEFAULT_LANGUAGE_SETTINGS, languageLabel } from "@solutions-builder/app/language-settings";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
@@ -58,14 +59,16 @@ export async function buildPromptMaterial(
   nodes: readonly ArtifactNode[],
   freeze: Freeze | null,
   read: (nodeId: string) => Promise<string> = (nodeId) => api.artifactContent(tenantId, nodeId).then((result) => result.content),
+  language: () => Promise<string> = outputLanguage,
 ): Promise<BuildPromptMaterial> {
   const plan = frozenNode(nodes, freeze, "build_plan");
   const requirements = frozenNode(nodes, freeze, "product_requirements");
   const design = frozenNode(nodes, freeze, "design_artifact");
-  const [planText, requirementsText, designText] = await Promise.all([
+  const [planText, requirementsText, designText, settings] = await Promise.all([
     plan ? read(plan.id) : Promise.resolve(""),
     requirements ? read(requirements.id) : Promise.resolve(""),
     design ? read(design.id) : Promise.resolve(""),
+    language(),
   ]);
   return {
     planText,
@@ -74,8 +77,18 @@ export async function buildPromptMaterial(
     stackBlock: renderStackBlock(freeze) ?? "",
     target: freeze?.target ?? "",
     planRef: plan ? `${plan.artifactId}@${String(plan.version)}` : "",
-    files: workspaceFiles({ planText, requirementsText, designText }),
+    files: workspaceFiles({ planText, requirementsText, designText }, settings),
+    language: settings,
   };
+}
+
+/** The workspace's output language, by name (#733): what the build's documents are written in. */
+async function outputLanguage(): Promise<string> {
+  try {
+    return languageLabel((await api.languageSettings()).output);
+  } catch {
+    return languageLabel(DEFAULT_LANGUAGE_SETTINGS.output);
+  }
 }
 
 /**
@@ -83,7 +96,7 @@ export async function buildPromptMaterial(
  * AGENTS.md first, then the PRD, the plan, the design when it is an HTML
  * document, and an empty QUESTIONS.md for the decisions it must not make.
  */
-export function workspaceFiles(texts: { planText: string; requirementsText: string; designText: string }): { path: string; content: string }[] {
+export function workspaceFiles(texts: { planText: string; requirementsText: string; designText: string }, language?: string): { path: string; content: string }[] {
   const files: { path: string; content: string }[] = [];
   const designIsHtml = /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(texts.designText);
   if (texts.requirementsText) files.push({ path: "product-requirements.md", content: texts.requirementsText });
@@ -95,6 +108,7 @@ export function workspaceFiles(texts: { planText: string; requirementsText: stri
       content: agentsInstructions(
         { requirements: "product-requirements.md", design: texts.designText ? (designIsHtml ? "design.html" : "design.md") : null, mockups: null, plan: texts.planText ? "build-plan.md" : null },
         texts.requirementsText,
+        language,
       ),
     });
     files.push({ path: "QUESTIONS.md", content: QUESTIONS_MD });
@@ -563,6 +577,22 @@ export function BuildPanel({
                       </div>
                     </details>
                   </>
+                ) : null}
+                {report?.documents ? (
+                  // The two documents every build ships (#733), as the directory holds them.
+                  <div className="ev build-tasks">
+                    <span className={report.documents.readme ? "p" : "f"}>
+                      {report.documents.readme ? "✓ " : "✗ "}
+                      <b>README.md</b> for the installer, sysadmin or IT person{report.documents.readme ? "" : " — missing"}
+                    </span>
+                    <span className={report.documents.userManual ? "p" : "f"}>
+                      {report.documents.userManual ? "✓ " : "✗ "}
+                      <b>docs/USER-MANUAL.md</b> for the people who use it
+                      {report.documents.userManual
+                        ? `, with ${String(report.documents.manualImages)} picture${report.documents.manualImages === 1 ? "" : "s"}${report.documents.manualImages === 0 ? " (none yet)" : ""}`
+                        : " — missing"}
+                    </span>
+                  </div>
                 ) : null}
                 {report?.status ? (
                   <details className="bubble-fold">

@@ -36,6 +36,8 @@ async function fixtureTree(): Promise<string> {
   await mkdir(join(dir, "node_modules", "dep"), { recursive: true });
   await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
   await writeFile(join(dir, "README.md"), "# hi\n");
+  await mkdir(join(dir, "docs"), { recursive: true });
+  await writeFile(join(dir, "docs", "USER-MANUAL.md"), "# Using it\n");
   await writeFile(join(dir, "node_modules", "dep", "index.js"), "module.exports = 1;\n");
   return dir;
 }
@@ -52,7 +54,7 @@ describe("hashTree and extractArchive", () => {
     try {
       const exclude = new Set(["node_modules"]);
       const manifest = await hashTree(dir, exclude);
-      expect(manifest.map((file) => file.path)).toEqual(["README.md", "src/index.ts"]);
+      expect(manifest.map((file) => file.path)).toEqual(["README.md", "docs/USER-MANUAL.md", "src/index.ts"]);
       const extracted = await extractArchive(tarOf(dir, ["node_modules"]));
       try {
         const archive = await hashTree(extracted, exclude);
@@ -81,10 +83,14 @@ describe("hashTree and extractArchive", () => {
         ranOn: "sidecar",
       });
       expect(verification.checkedBy).toBe("tool");
-      expect(verification.items.map((item) => [item.path, item.status])).toEqual([
-        ["README.md", "verified"],
-        ["src/index.ts", "hash_mismatch"],
-        ["src/new.ts", "missing"],
+      expect(verification.items.map((item) => [item.category, item.path, item.status])).toEqual([
+        ["source", "README.md", "verified"],
+        ["source", "docs/USER-MANUAL.md", "verified"],
+        ["source", "src/index.ts", "hash_mismatch"],
+        ["source", "src/new.ts", "missing"],
+        // The two documents every build ships, checked on the archive itself.
+        ["docs", "README.md", "verified"],
+        ["docs", "docs/USER-MANUAL.md", "verified"],
       ]);
       expect(verification.report.complete).toBe(false);
       expect(verification.report.failed).toEqual(["src/index.ts", "src/new.ts"]);

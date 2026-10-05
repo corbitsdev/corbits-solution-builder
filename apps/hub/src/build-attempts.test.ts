@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { assembleBuildPrompt, nextAttemptNumber, parseGitLog, workspaceReportAt } from "./build-attempts.js";
-import { mkdtemp, writeFile as writeFileAsync, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile as writeFileAsync, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { safeWorkspacePath } from "./build-attempts.js";
@@ -44,6 +44,13 @@ describe("assembleBuildPrompt", () => {
       last = at;
     }
     expect(prompt).not.toContain("earlier attempt");
+  });
+
+  test("states the two documents every build ships, in the workspace's language", () => {
+    expect(assembleBuildPrompt(input)).toContain("Every build ships two documents, written in American English.");
+    expect(assembleBuildPrompt(input)).toContain("README.md, at the top level, is for the person who installs and runs the application");
+    expect(assembleBuildPrompt(input)).toContain("docs/USER-MANUAL.md is for the people who use the application");
+    expect(assembleBuildPrompt({ ...input, language: "British English" })).toContain("written in British English.");
   });
 
   test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {
@@ -121,9 +128,14 @@ describe("workspace report", () => {
       await git("init", "-q");
       await git("add", "STATUS.md");
       await git("commit", "-q", "-m", "feat: scaffold (Task 1)");
+      await mkdir(joinPath(directory, "docs", "manual"), { recursive: true });
+      await writeFileAsync(joinPath(directory, "docs", "USER-MANUAL.md"), "# Using it\n");
+      await writeFileAsync(joinPath(directory, "docs", "manual", "people.png"), "png");
+      await writeFileAsync(joinPath(directory, "docs", "manual", "notes.txt"), "not a picture");
       const report = await workspaceReportAt(directory);
       expect(report.status).toContain("## Task 1: scaffold");
       expect(report.questions).toBeNull();
+      expect(report.documents).toEqual({ readme: false, userManual: true, manualImages: 1 });
       expect(report.commits.map((commit) => commit.subject)).toEqual(["feat: scaffold (Task 1)"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -133,7 +145,7 @@ describe("workspace report", () => {
   test("a directory without a repository reports no commits rather than failing", async () => {
     const directory = await mkdtemp(joinPath(tmpdir(), "sb-report-"));
     try {
-      expect(await workspaceReportAt(directory)).toEqual({ commits: [], status: null, questions: null });
+      expect(await workspaceReportAt(directory)).toEqual({ commits: [], status: null, questions: null, documents: { readme: false, userManual: false, manualImages: 0 } });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

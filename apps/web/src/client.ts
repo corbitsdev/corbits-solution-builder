@@ -259,6 +259,8 @@ export type BuildWorkspaceReport = {
   commits: { hash: string; at: string; subject: string }[];
   status: string | null;
   questions: string | null;
+  /** The two documents every build ships (#733); absent from a host before it. */
+  documents?: { readme: boolean; userManual: boolean; manualImages: number };
 };
 
 export type BuildAttempt = {
@@ -282,6 +284,8 @@ export type BuildPromptMaterial = {
   planRef: string;
   /** Files seeded into the attempt's workspace (#686): AGENTS.md, the documents, QUESTIONS.md. */
   files?: { path: string; content: string }[];
+  /** The workspace's output language, for the documents the build ships (#733). */
+  language?: string;
 };
 
 export class ApiFailure extends Error {

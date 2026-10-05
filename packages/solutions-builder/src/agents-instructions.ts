@@ -5,6 +5,7 @@
  * the acceptance criteria that mean done, named by the PRD's own ids.
  */
 import { extractRequirementItems, mintRequirementEntries } from "./requirements.js";
+import { buildDocumentsRule } from "@solutions-builder/specialist-runtime/build-documents";
 
 /** The names the instructions refer to; a caller passes what its package actually holds. */
 export type AgentsFiles = {
@@ -28,7 +29,7 @@ export function acceptanceRange(requirementsMarkdown: string): string | null {
 
 export const QUESTIONS_MD = "# Open product decisions\n\nRecord here any product decision the documents leave unresolved, with the choice it blocks. Do not choose silently.\n";
 
-export function agentsInstructions(files: AgentsFiles, requirementsMarkdown: string): string {
+export function agentsInstructions(files: AgentsFiles, requirementsMarkdown: string, language?: string): string {
   const range = acceptanceRange(requirementsMarkdown);
   const designLine = files.design || files.mockups
     ? `2. ${[files.design, files.mockups].filter((name): name is string => name !== null).join(" and ")}\n   Authoritative for UI appearance, interaction, states,\n   responsive behavior, and copy where the PRD refers to the design.`
@@ -62,6 +63,10 @@ export function agentsInstructions(files: AgentsFiles, requirementsMarkdown: str
     "silently choosing behavior.",
     "",
     range ? `Implementation is complete only when ${range} pass.` : "Implementation is complete only when every acceptance criterion in the PRD passes.",
+    "",
+    "## Documents every build ships",
+    "",
+    buildDocumentsRule(language),
     "",
   ].join("\n");
 }
