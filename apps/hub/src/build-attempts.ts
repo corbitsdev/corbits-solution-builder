@@ -30,10 +30,11 @@
  * (`packages/tools-delivery`), kept so the archive and manifest it writes
  * name the attempt the same way.
  */
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
+import { buildDocumentsRule, MANUAL_IMAGES_DIR, README_PATH, USER_MANUAL_PATH } from "@solutions-builder/specialist-runtime/build-documents";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
@@ -95,6 +96,8 @@ export type BuildPromptInput = {
   readonly continuing: boolean;
   /** Files written into the workspace before the worker starts (#686): AGENTS.md, the documents, QUESTIONS.md. */
   readonly files?: readonly { readonly path: string; readonly content: string }[];
+  /** The workspace's output language, for the documents the build ships (#733); American English when unset. */
+  readonly language?: string;
 };
 
 /** A workspace-relative file path a seeded file may take: no absolute paths, no `..`, no hidden traversal. */
@@ -127,6 +130,8 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
     // The progress record (#697): the person watching reads the plan's
     // task numbers off the worker's own commits and status file, so the
     // page can say how far the build got without inferring anything.
+    buildDocumentsRule(input.language),
+    ``,
     `Keep a progress record the person can read. Name the plan task every commit is for in its subject, as "(Task N)" or "(Tasks N, M)". Keep STATUS.md at the root of the working directory with one section per finished task, headed with the task's number and name. Your final message says which tasks are done and which are not.`,
     ``,
     ...(input.stackBlock ? [`--- STACK (frozen; build exactly this) ---`, input.stackBlock, ``] : []),
@@ -256,6 +261,8 @@ export type WorkspaceReport = {
   readonly status: string | null;
   /** QUESTIONS.md at the root; null when there is none. */
   readonly questions: string | null;
+  /** The two documents every build ships (#733): present or not, and how many pictures the manual has. */
+  readonly documents: { readonly readme: boolean; readonly userManual: boolean; readonly manualImages: number };
 };
 
 const REPORT_FILE_KEEP = 60_000;
@@ -294,8 +301,10 @@ export async function workspaceReportAt(directory: string): Promise<WorkspaceRep
   } catch {
     // No git, or no repository: no commits to report.
   }
-  const [status, questions] = await Promise.all([readText("STATUS.md"), readText("QUESTIONS.md")]);
-  return { commits, status, questions };
+  const exists = (name: string) => stat(join(directory, name)).then((info) => info.isFile(), () => false);
+  const manualImages = readdir(join(directory, MANUAL_IMAGES_DIR)).then((names) => names.filter((name) => /\.(png|jpe?g|gif|webp)$/i.test(name)).length, () => 0);
+  const [status, questions, readme, userManual, images] = await Promise.all([readText("STATUS.md"), readText("QUESTIONS.md"), exists(README_PATH), exists(USER_MANUAL_PATH), manualImages]);
+  return { commits, status, questions, documents: { readme, userManual, manualImages: images } };
 }
 
 /** The progress record of an attempt's directory. */

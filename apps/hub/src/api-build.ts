@@ -56,6 +56,7 @@ const StartBody = type({
     target: "string",
     planRef: "string",
     "files?": [{ path: "string", content: "string" }, "[]"],
+    "language?": "string",
   },
   "continueFrom?": "number",
 });
