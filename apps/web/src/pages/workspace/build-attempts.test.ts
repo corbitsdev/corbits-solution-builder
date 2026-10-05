@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, progressBriefOf, statusFreshness, toolCallsSoFar } from "./build-attempts.ts";
+import { archiveRootOf, manifestOf, attemptOfNode, attemptRecorded, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, progressBriefOf, statusFreshness, toolCallsSoFar } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -256,5 +256,29 @@ describe("statusFreshness", () => {
     const status = { id: "s", author: "agent" as const, body: "Build not started", at: "2026-10-04T19:01:00.000Z" };
     expect(statusFreshness([opening, status], status, attempt)).toMatch(/^written before attempt 1 started · /);
     expect(statusFreshness([status], status, null)).not.toMatch(/before|interim|record/);
+  });
+});
+
+// #727: packaging again says so, and the caption reads the folder off the manifest.
+describe("repackaging", () => {
+  test("the brief says the record replaces the earlier one", () => {
+    const outcome: BridgeOutcome = { bridgeId: "b", worker: "corbits-code", command: "corbits", available: true, exitStatus: 0, signal: null, finalText: "done", stderrTail: "", workspace: "/w", turnLog: null, turns: 1, toolCalls: 1, startedAt: "2026-10-04T19:42:21Z", endedAt: "2026-10-05T00:39:31Z", checkpointRef: null };
+    const archive = { fileName: "a.tar.gz", sha256: "abc", sizeBytes: 1, fileCount: 1 };
+    const verification = { complete: true, failed: [], targets: [] };
+    expect(composeSupervisorBrief({ attempt: 1, outcome, archive, verification, repackaged: true })).toMatch(/^Build attempt 1 has ended and its work is recorded again, replacing the earlier record of this attempt\./);
+    expect(composeSupervisorBrief({ attempt: 1, outcome, archive, verification })).toMatch(/^Build attempt 1 has ended and its work is recorded\. /);
+  });
+
+  test("archiveRootOf reads the folder, and says null for a manifest without one or unreadable JSON", () => {
+    expect(archiveRootOf(JSON.stringify({ archive: { fileName: "x.tar.gz", root: "agentic-agency-attempt-1" } }))).toBe("agentic-agency-attempt-1");
+    expect(archiveRootOf(JSON.stringify({ archive: { fileName: "build.tar.gz" } }))).toBeNull();
+    expect(archiveRootOf("not json")).toBeNull();
+  });
+
+  test("manifestOf finds the newest manifest of the archive's attempt", () => {
+    const manifest = (overrides: Partial<ArtifactNode>) => archiveNode({ kind: "delivery_manifest", mediaType: "application/json", ...overrides });
+    const nodes = [archiveNode(), manifest({ id: "m1", createdAt: "2026-01-01T00:06:00.000Z" }), manifest({ id: "m2", createdAt: "2026-01-01T00:07:00.000Z" }), manifest({ id: "other", variant: "attempt-3" })];
+    expect(manifestOf(nodes, { variant: "attempt-2" })?.id).toBe("m2");
+    expect(manifestOf(nodes, { variant: "attempt-9" })).toBeNull();
   });
 });

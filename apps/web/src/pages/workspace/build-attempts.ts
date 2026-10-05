@@ -76,6 +76,8 @@ export type SupervisorBriefInput = {
     readonly failed: readonly string[];
     readonly targets: readonly { target: string; ranSuccessfully: boolean; transcript: string }[];
   };
+  /** True when this record replaces an earlier one of the same attempt (#727). */
+  readonly repackaged?: boolean;
 };
 
 /** Where the package step's target probes ran: on the host, with the start command the person typed. */
@@ -147,7 +149,9 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
       ? `- ${input.probeSkipped ?? "No target was started or probed."}`
       : input.verification.targets.map((target) => `- ${target.target}: ${target.ranSuccessfully ? "responded" : "did not respond"} (${PROBE_RAN_ON}).`).join("\n");
   return [
-    `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
+    input.repackaged
+      ? `Build attempt ${String(input.attempt)} has ended and its work is recorded again, replacing the earlier record of this attempt. Write the build status from this record.`
+      : `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
@@ -348,4 +352,56 @@ export function statusFreshness(
     return `written before attempt ${String(attempt.attempt)} started · ${zonedTime(status.at)}`;
   }
   return zonedTime(status.at);
+}
+
+/**
+ * The one folder an archive unpacks into, read off its manifest (#727):
+ * null when the manifest names none, which is every archive made before
+ * #699, whose files sit at the archive root.
+ */
+export function archiveRootOf(manifestJson: string): string | null {
+  try {
+    const parsed = JSON.parse(manifestJson) as { archive?: { root?: unknown } };
+    const root = parsed.archive?.root;
+    return typeof root === "string" && root.length > 0 ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The manifest written beside an archive: same attempt variant, newest. */
+export function manifestOf(nodes: readonly ArtifactNode[], archive: Pick<ArtifactNode, "variant">): ArtifactNode | null {
+  const candidates = nodes.filter((node) => node.kind === "delivery_manifest" && node.stage === 8 && node.variant === archive.variant && node.supersededByNodeId === null);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
+}
+
+/**
+ * How an archive unpacks, for its caption: the folder its manifest names,
+ * null for none, undefined while the manifest is being read.
+ */
+export function useArchiveRoot(tenantId: string, nodes: readonly ArtifactNode[], archive: Pick<ArtifactNode, "variant">): string | null | undefined {
+  const manifest = manifestOf(nodes, archive);
+  const manifestId = manifest?.id ?? null;
+  const [root, setRoot] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    if (!manifestId) {
+      setRoot(null);
+      return;
+    }
+    setRoot(undefined);
+    api
+      .artifactContent(tenantId, manifestId)
+      .then((result) => {
+        if (!cancelled) setRoot(archiveRootOf(result.content));
+      })
+      .catch(() => {
+        if (!cancelled) setRoot(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, manifestId]);
+  return root;
 }

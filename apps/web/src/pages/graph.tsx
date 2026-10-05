@@ -14,6 +14,7 @@ import { AddMaterial, Button, documentName, downloadArtifact, stageName } from "
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
+import { useArchiveRoot } from "./workspace/build-attempts.ts";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -313,7 +314,7 @@ function ArtifactReader({
           ) : node.kind === "audience_deck" ? (
             <DeckFile node={node} tenantId={tenantId} />
           ) : node.kind === "build_evidence" ? (
-            <BuildFile node={node} tenantId={tenantId} />
+            <BuildFile node={node} nodes={nodes} tenantId={tenantId} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -430,15 +431,17 @@ export async function downloadBuild(tenantId: string, node: ArtifactNode): Promi
  * The completed build, as the person accepted it: one archive of the
  * attempt's workspace. Saved, not shown — a source tree is not a document.
  */
-export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
   const { busy, download } = useFileDownload(tenantId, node, node.title);
-  const size = formatSize(node.sizeBytes);
+  // How it unpacks is read off its manifest (#727), never assumed: an
+  // archive made before #699 has its files at the root.
+  const root = useArchiveRoot(tenantId, nodes, node);
+  const unpacks = root === undefined ? "" : root ? ` It unpacks into one folder, ${root}/.` : " Its files sit at the archive root, so unpack it inside an empty folder.";
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as the worker left it,
-        without installed dependencies; it unpacks into a directory named for the project. Its bytes are what delivery
-        review verifies once accepted.
+        {node.title} · tar.gz archive{node.sizeBytes === undefined ? "" : ` · about ${formatSize(node.sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
+        without installed dependencies.{unpacks} Its bytes are what delivery review verifies once accepted.
       </p>
       <div className="button-row">
         <Button
