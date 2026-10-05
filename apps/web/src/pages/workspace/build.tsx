@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
 import { openQuestions, planTasks, progressHeadline, taskProgress } from "./build-progress.ts";
+import { slug } from "../../documents-archive.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
@@ -387,7 +388,11 @@ export function BuildPanel({
       if (!address || !attempt.outcome) return;
       // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
-      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
+      // The archive and the one folder it unpacks into are named for the
+      // project and attempt (#699), so unpacking never spills into the
+      // directory around it.
+      const archiveName = `${slug(detail.project.title)}-attempt-${String(attempt.attempt)}`;
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { fileName: `${archiveName}.tar.gz`, root: archiveName, targets: [...probe.targets] });
       // Stage 7's forecast, for the supervisor's "Cost against forecast": the
       // frozen estimate's own section, or nothing, said as nothing.
       const estimate = frozenNode(detail.nodes, freeze, "cost_approval");

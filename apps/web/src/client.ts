@@ -1210,7 +1210,7 @@ export const api = {
   cancelBuildAttempt: (projectId: string, attempt: number) =>
     request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
   /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
-  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[] }) =>
+  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; root?: string; targets?: unknown[] }) =>
     request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string; fileCount: number } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
       `/projects/${projectId}/build/attempts/${String(attempt)}/package`,
       { method: "POST", body: JSON.stringify(body) },
