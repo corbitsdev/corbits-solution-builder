@@ -410,6 +410,16 @@ export function StageDocument({
           renderBody={(message) => {
             const event = eventById.get(message.id);
             if (event) {
+              if (event.body) {
+                return (
+                  <div className="event conv-event">
+                    <details className="bubble-fold">
+                      <summary>{event.text}</summary>
+                      <MessageBody text={event.body} />
+                    </details>
+                  </div>
+                );
+              }
               return (
                 <span className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}>
                   {event.text}

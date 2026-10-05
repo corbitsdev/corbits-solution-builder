@@ -72,6 +72,7 @@ import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionSelect } from "./artifact-strip.tsx";
 import { cueEvents, stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
+import { sendBackCueIdOf } from "./send-back-cue.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -323,9 +324,10 @@ export function StageWorkspace({
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
   // or result-node bookkeeping under mail-chat).
+  // A send-back cue is shown as its event line (`cueEvents`), not as a turn.
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.map((message) => ({
+      foldedMessages.filter((message) => !(message.author === "me" && sendBackCueIdOf(message.subject))).map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
