@@ -2724,6 +2724,7 @@ export const api = {
             kind: STAGE_DRAFT_KIND[8]!,
             stage: 8,
             mediaType: bundle.mediaType,
+            sizeBytes: bundle.sizeBytes,
             ...(variant === null ? {} : { variant }),
             sourceVersionIds,
             provenance,

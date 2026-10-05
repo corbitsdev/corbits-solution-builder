@@ -578,7 +578,9 @@ export function BuildPanel({
                 {current.state === "ended" && current.outcome?.finalText.trim() ? (
                   <details className="bubble-fold">
                     <summary>What the worker said at the end</summary>
-                    <Markdown source={current.outcome.finalText.slice(-20_000)} />
+                    <pre className="build-log" style={{ whiteSpace: "pre-wrap" }}>
+                      {current.outcome.finalText.slice(-20_000)}
+                    </pre>
                   </details>
                 ) : null}
                 <h2>Attempt {String(current.attempt)} — what the worker wrote</h2>

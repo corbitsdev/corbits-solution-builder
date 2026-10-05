@@ -39,6 +39,11 @@ export type ArtifactGraphMetadata = {
    * the fold reads it back here to fill `ArtifactGraphNode.mediaType` (CL-8501).
    */
   mediaType: string;
+  /**
+   * The byte size of a data-URL artifact the host packaged (a build archive),
+   * which `source.upload.size` cannot see; read back to fill `sizeBytes`.
+   */
+  sizeBytes?: number;
 };
 
 /** The metadata contract on an artifact version: everything Builder owns lives under `sb`. */
@@ -162,7 +167,7 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
   }
 
   const nodes: ArtifactGraphNode[] = scoped.map(({ entry, sb }) => {
-    const sizeBytes = readUploadSize(entry);
+    const sizeBytes = readUploadSize(entry) ?? sb.sizeBytes;
     return {
       id: entry.id,
       versionId: versionIdFor(entry.id, entry.version),
