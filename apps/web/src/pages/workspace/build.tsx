@@ -20,7 +20,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
-import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
+import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
+import { openQuestions, planTasks, progressHeadline, taskProgress } from "./build-progress.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
@@ -202,6 +203,8 @@ export function BuildPanel({
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [log, setLog] = useState("");
+  const [report, setReport] = useState<BuildWorkspaceReport | null>(null);
+  const [planText, setPlanText] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
 
@@ -273,13 +276,17 @@ export function BuildPanel({
   useEffect(() => {
     if (!current) {
       setLog("");
+      setReport(null);
       return;
     }
     let cancelled = false;
     const read = async () => {
       try {
         const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (!cancelled) setLog(result.log);
+        if (cancelled) return;
+        setLog(result.log);
+        // A host from before #697 sends no report; progress then rests on the turn lines.
+        setReport(result.workspaceReport ?? null);
       } catch {
         // The next poll says.
       }
@@ -315,6 +322,30 @@ export function BuildPanel({
         briefing.current = false;
       });
   }, [address, running, log, messages, tenantId, load, worker]);
+
+  // The plan the attempt was built from, for its task list (#697): the
+  // frozen version when there is a freeze, read once per project.
+  useEffect(() => {
+    let cancelled = false;
+    const plan = frozenNode(detail.nodes, freeze, "build_plan");
+    if (!plan) {
+      setPlanText("");
+      return;
+    }
+    api
+      .artifactContent(tenantId, plan.id)
+      .then((result) => {
+        if (!cancelled) setPlanText(result.content);
+      })
+      .catch(() => {
+        // Without the plan the tally counts commits alone.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.nodes, freeze, tenantId]);
+  const tasks = useMemo(() => planTasks(planText), [planText]);
+  const progress = useMemo(() => taskProgress(tasks, report, log), [tasks, report, log]);
 
   const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -497,6 +528,51 @@ export function BuildPanel({
             ) : null}
             {current ? (
               <>
+                <h2>Build progress</h2>
+                <p className="build-headline">{progressHeadline(current, progress)}</p>
+                {progress.tasks.length > 0 ? (
+                  <>
+                    <div className="build-meter" role="img" aria-label={`${String(progress.committed)} of ${String(progress.tasks.length)} tasks committed, ${String(progress.started)} under way`}>
+                      <span className="build-meter-done" style={{ flexGrow: progress.committed }} />
+                      <span className="build-meter-started" style={{ flexGrow: progress.started }} />
+                      <span className="build-meter-rest" style={{ flexGrow: progress.unnamed }} />
+                    </div>
+                    <details className="bubble-fold" open={current.state !== "running"}>
+                      <summary>
+                        The plan's {String(progress.tasks.length)} tasks: {String(progress.committed)} committed, {String(progress.started)} under way, {String(progress.unnamed)} not yet named
+                      </summary>
+                      <div className="ev build-tasks">
+                        {progress.tasks.map((task) => (
+                          <span key={task.number} className={task.state === "committed" ? "p" : task.state === "started" ? "w" : "r"} title={task.evidence ?? "Not named in any commit, status section or turn line"}>
+                            {task.state === "committed" ? "✓ " : task.state === "started" ? "… " : ""}
+                            <b>Task {String(task.number)}</b> {task.title}
+                            {task.evidence ? <i className="build-task-evidence"> — {task.evidence}</i> : null}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  </>
+                ) : null}
+                {report?.status ? (
+                  <details className="bubble-fold">
+                    <summary>The worker's own status report (STATUS.md)</summary>
+                    <Markdown source={report.status} />
+                  </details>
+                ) : null}
+                {report?.questions && openQuestions(report.questions) > 0 ? (
+                  <details className="bubble-fold">
+                    <summary>
+                      {String(openQuestions(report.questions))} decision{openQuestions(report.questions) === 1 ? "" : "s"} the worker left to you (QUESTIONS.md)
+                    </summary>
+                    <Markdown source={report.questions} />
+                  </details>
+                ) : null}
+                {current.state === "ended" && current.outcome?.finalText.trim() ? (
+                  <details className="bubble-fold">
+                    <summary>What the worker said at the end</summary>
+                    <Markdown source={current.outcome.finalText.slice(-20_000)} />
+                  </details>
+                ) : null}
                 <h2>Attempt {String(current.attempt)} — what the worker wrote</h2>
                 <pre ref={logRef} className="build-log" aria-live="polite" style={{ maxHeight: "24rem", overflow: "auto", whiteSpace: "pre-wrap" }}>
                   {log || (current.state === "running" ? "Waiting for the worker's first output…" : "The worker wrote nothing.")}

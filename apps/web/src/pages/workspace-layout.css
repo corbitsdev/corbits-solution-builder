@@ -1043,3 +1043,38 @@
   content: "✗";
   color: var(--wb-destructive);
 }
+
+/* Build progress (#697): one line, a meter of the plan's tasks, the list. */
+.build-headline {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.build-meter {
+  display: flex;
+  height: 0.5rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--wb-muted);
+  margin: 0 0 0.75rem;
+}
+.build-meter span {
+  display: block;
+  min-width: 0;
+}
+.build-meter-done {
+  background: var(--ok, var(--wb-okay));
+}
+.build-meter-started {
+  background: var(--wb-primary);
+}
+.build-meter-rest {
+  background: transparent;
+}
+.build-tasks span {
+  display: block;
+}
+.build-task-evidence {
+  color: var(--wb-muted-foreground);
+  font-style: normal;
+  font-size: 0.8125rem;
+}
