@@ -19,10 +19,11 @@ import { DEL, END, INS } from "./revisions.js";
  * Formatting is matched first so a change that starts outside a bold run and
  * ends inside it still renders as bold; the change state carries across.
  */
-function inline(text: string, keyPrefix: string, state = { open: null as string | null }): ReactNode[] {
+function inline(text: string, keyPrefix: string, state = { open: null as string | null }, images?: ReadonlyMap<string, string>): ReactNode[] {
   const out: ReactNode[] = [];
-  // One pass, longest markers first, so `**` never matches as two `*`.
-  const pattern = /(`[^`]+`)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
+  // One pass, longest markers first, so `**` never matches as two `*`; an
+  // image before a link, since an image is a link with a `!` in front.
+  const pattern = /(`[^`]+`)|!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|\[([^\]]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
   let last = 0;
   let match: RegExpExecArray | null;
   let index = 0;
@@ -33,10 +34,28 @@ function inline(text: string, keyPrefix: string, state = { open: null as string 
     const key = `${keyPrefix}-${index++}`;
     if (token.startsWith("`")) {
       out.push(<code key={key}>{token.slice(1, -1).replace(MARKS, "")}</code>);
-    } else if (match[2] !== undefined && match[3] !== undefined) {
+    } else if (token.startsWith("!") && match[3] !== undefined) {
+      // A picture (#737): shown when the caller resolved its path or it is
+      // an inline PNG; otherwise its caption stands in for it, as text.
+      const caption = (match[2] ?? "").replace(MARKS, "");
+      const path = match[3].replace(MARKS, "");
+      const src = images?.get(path) ?? (path.startsWith("data:image/") ? path : null);
+      out.push(
+        src ? (
+          <figure key={key} className="prose-figure">
+            <img src={src} alt={caption} />
+            {caption ? <figcaption>{caption}</figcaption> : null}
+          </figure>
+        ) : (
+          <em key={key} className="prose-missing-picture">
+            {caption || "picture"} (picture in the documents download)
+          </em>
+        ),
+      );
+    } else if (match[4] !== undefined && match[5] !== undefined) {
       // A model wrote this href: only http(s) may navigate; anything else shows as its words.
-      const label = inline(match[2], key, state);
-      const href = match[3].replace(MARKS, "");
+      const label = inline(match[4], key, state, images);
+      const href = match[5].replace(MARKS, "");
       if (href.startsWith("https://") || href.startsWith("http://")) {
         out.push(
           <a key={key} href={href} target="_blank" rel="noopener noreferrer">
@@ -211,7 +230,7 @@ export function InlineMarkdown({ source }: { source: string }): JSX.Element {
   return <>{inline(source, "inline")}</>;
 }
 
-export function Markdown({ source }: { source: string }): JSX.Element {
+export function Markdown({ source, images }: { source: string; images?: ReadonlyMap<string, string> }): JSX.Element {
   const blocks = parse(source);
   return (
     <div className="prose">
@@ -220,24 +239,24 @@ export function Markdown({ source }: { source: string }): JSX.Element {
         switch (block.kind) {
           case "heading": {
             const Tag = `h${block.level}` as "h2" | "h3" | "h4";
-            return <Tag key={key}>{inline(block.text, key)}</Tag>;
+            return <Tag key={key}>{inline(block.text, key, undefined, images)}</Tag>;
           }
           case "list":
             return block.ordered ? (
               <ol key={key} start={block.start}>
                 {block.items.map((item, at) => (
-                  <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`)}</li>
+                  <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`, undefined, images)}</li>
                 ))}
               </ol>
             ) : (
               <ul key={key}>
                 {block.items.map((item, at) => (
-                  <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`)}</li>
+                  <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`, undefined, images)}</li>
                 ))}
               </ul>
             );
           case "quote":
-            return <blockquote key={key}>{inline(block.text, key)}</blockquote>;
+            return <blockquote key={key}>{inline(block.text, key, undefined, images)}</blockquote>;
           case "code":
             return (
               <pre key={key}>
@@ -270,7 +289,9 @@ export function Markdown({ source }: { source: string }): JSX.Element {
           case "rule":
             return <hr key={key} />;
           default:
-            return <p key={key}>{inline(block.text, key)}</p>;
+            // A paragraph that is one picture is a figure of its own, not a picture inside a paragraph.
+            if (/^!\[[^\]]*\]\((?:[^\s()]|\([^\s()]*\))+\)$/.test(block.text.trim())) return <div key={key}>{inline(block.text.trim(), key, undefined, images)}</div>;
+            return <p key={key}>{inline(block.text, key, undefined, images)}</p>;
         }
       })}
     </div>

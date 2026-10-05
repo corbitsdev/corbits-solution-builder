@@ -14,6 +14,8 @@ import { documentName } from "./components.jsx";
 import type { MockupShot, Shooter } from "./mockup-shots.ts";
 import { frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
+import { slug } from "./slug.ts";
+import { PRD_FOR_PEOPLE_FILE, PRD_FOR_PEOPLE_KIND, mockupKey, resolveMockupReferences } from "./prd-for-people.ts";
 
 /** Where the design's screens go, as pictures (#336). */
 export const MOCKUPS_FOLDER = "mockups";
@@ -32,6 +34,7 @@ export const DOCUMENT_KINDS = [
   "audience_package",
   "audience_deck",
   "product_requirements",
+  PRD_FOR_PEOPLE_KIND,
   "build_plan",
   "engineering_review",
   "cost_approval",
@@ -42,15 +45,7 @@ export const DOCUMENT_KINDS = [
 
 const KIND_ORDER = new Map<string, number>(DOCUMENT_KINDS.map((kind, index) => [kind, index]));
 
-/** A file-name-safe form of a title: lower case, hyphens, never empty. */
-export function slug(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "document"
-  );
-}
+export { slug };
 
 /** One line of a lineage: the same kind and stakeholder. */
 function lineageOf(node: ArtifactNode): string {
@@ -107,6 +102,8 @@ export function documentExtension(node: Pick<ArtifactNode, "kind" | "mediaType">
 
 /** `06-product-requirements.md`, `05-slides-barry-moneyman.pptx`: stage, document, stakeholder. */
 export function documentFileName(node: Pick<ArtifactNode, "kind" | "stage" | "variant" | "mediaType">, content: string): string {
+  // The PRD for people goes by the name it was asked for (#737).
+  if (node.kind === PRD_FOR_PEOPLE_KIND) return PRD_FOR_PEOPLE_FILE;
   const stage = String(node.stage).padStart(2, "0");
   const who = node.variant ? `-${slug(node.variant)}` : "";
   return `${stage}-${slug(documentName(node.kind))}${who}.${documentExtension(node, content)}`;
@@ -165,6 +162,8 @@ export async function assembleDocumentsArchive(
   const contentOf = new Map<string, string>();
   const skipped: string[] = [];
   const mockups: string[] = [];
+  // The pictures by screen key (#737), for the PRD for people's references.
+  const pictures = new Map<string, string>();
   for (const node of completedDocuments(nodes)) {
     let content: string;
     try {
@@ -185,8 +184,17 @@ export async function assembleDocumentsArchive(
         const picture = mockupFileName(index, shot);
         zip.file(picture, await frame(shot).catch(() => shot.png));
         mockups.push(`${picture} — ${frameLabel(shot.kind)}`);
+        pictures.set(mockupKey(shot.name), picture);
       }
     }
+  }
+  // The PRD for people names pictures by screen (#737); each reference is
+  // rewritten to the file the folder holds, so the document reads in place.
+  const peopleFile = files.find((file) => file.node.kind === PRD_FOR_PEOPLE_KIND);
+  if (peopleFile && pictures.size > 0) {
+    const resolved = resolveMockupReferences(contentOf.get(peopleFile.name) ?? "", pictures);
+    zip.file(peopleFile.name, resolved);
+    contentOf.set(peopleFile.name, resolved);
   }
   // The coding agent's instructions (#686), naming the package's own files
   // and the PRD's acceptance criteria, when the package has a PRD.
@@ -196,7 +204,7 @@ export async function assembleDocumentsArchive(
     zip.file(
       "AGENTS.md",
       agentsInstructions(
-        { requirements: requirementsFile.name, design: named("design_artifact"), mockups: mockups.length > 0 ? `${MOCKUPS_FOLDER}/` : null, plan: named("build_plan") },
+        { requirements: requirementsFile.name, design: named("design_artifact"), mockups: mockups.length > 0 ? `${MOCKUPS_FOLDER}/` : null, plan: named("build_plan"), people: named(PRD_FOR_PEOPLE_KIND) },
         contentOf.get(requirementsFile.name) ?? "",
       ),
     );

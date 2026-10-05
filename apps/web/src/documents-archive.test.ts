@@ -265,3 +265,37 @@ describe("AGENTS.md in the archive", () => {
     expect(zip.file("AGENTS.md")).toBeNull();
   });
 });
+
+// #737: the PRD for people goes by its asked-for name, and its pictures resolve to the files in the folder.
+describe("the PRD for people in the download", () => {
+  test("is named PRD-for-PEOPLE.md whatever its stage", () => {
+    expect(documentFileName(node({ kind: "prd_for_people", stage: 6 }), "# PRD for people")).toBe("PRD-for-PEOPLE.md");
+  });
+
+  test("its screen references are rewritten to the pictures the folder holds", async () => {
+    const nodes = [node({ kind: "design_artifact", stage: 4, id: "d" }), node({ kind: "prd_for_people", stage: 6, id: "p" })];
+    const contents: Record<string, string> = {
+      design_artifact: "<!doctype html><html><body><section data-testid=\"screen-phone-home\"><h1>Home</h1></section></body></html>",
+      prd_for_people: "# PRD for people\n\n![The home screen](mockups/phone-home.png)\n\n![Not drawn](mockups/settings.png)",
+    };
+    const shooter = async () => [{ name: "phone home", png: new Uint8Array([1, 2, 3]), kind: "phone" as const, framed: true }];
+    const archive = await assembleDocumentsArchive("P", nodes, async (n) => contents[n.kind]!, shooter);
+    expect(archive.mockups).toEqual(["mockups/01-phone-home.png"]);
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    const people = await zip.file("PRD-for-PEOPLE.md")!.async("string");
+    expect(people).toContain("![The home screen](mockups/01-phone-home.png)");
+    expect(people).toContain("![Not drawn](mockups/settings.png)");
+  });
+});
+
+describe("AGENTS.md and the PRD for people", () => {
+  test("names it as not a source when the package has it", async () => {
+    const nodes = [node({ kind: "product_requirements", stage: 6, id: "r" }), node({ kind: "prd_for_people", stage: 6, id: "p" })];
+    const contents: Record<string, string> = { product_requirements: "# PRD\n\n- AC-1: works.", prd_for_people: "# PRD for people" };
+    const archive = await assembleDocumentsArchive("P", nodes, async (n) => contents[n.kind]!);
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    const agents = await zip.file("AGENTS.md")!.async("string");
+    expect(agents).toContain("PRD-for-PEOPLE.md tells the same requirements for a person to read.");
+    expect(agents).toContain("is not a source; build from 06-product-requirements.md.");
+  });
+});

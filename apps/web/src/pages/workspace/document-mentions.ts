@@ -29,6 +29,16 @@ export function requirementsDocument(content: string): StageDocument {
 }
 
 /** One panel review, by its reviewer. */
+/** The PRD for people (#737), as a message may name it. */
+export function peopleDocument(content: string): StageDocument {
+  return {
+    key: "people",
+    label: "PRD for people",
+    aliases: ["prd for people", "people prd", "plain prd", "readable prd", "human prd", "the overview document", "prd-for-people"],
+    content,
+  };
+}
+
 export function reviewDocument(reviewer: string, content: string, kind = "review"): StageDocument {
   const who = reviewer.toLowerCase();
   return {
