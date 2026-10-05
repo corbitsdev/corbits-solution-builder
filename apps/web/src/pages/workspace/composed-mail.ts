@@ -61,15 +61,21 @@ export function materialMailFold(body: string): ComposedFold | null {
  * message the person wrote. Only `author === "me"` is ever inspected, so
  * nothing a specialist writes can be folded away by echoing a marker.
  */
+/**
+ * The fold for a stage's opening, or null for any other message. Stage 1's
+ * opening is the person's own problem statement, nothing composed ahead of
+ * it; a fold would hide their words behind a caption.
+ */
+export function openingMailFold(message: Pick<ChatMessage, "author" | "body" | "subject">): ComposedFold | null {
+  if (message.author !== "me" || !message.subject) return null;
+  const opening = OPENING_SUBJECT.exec(message.subject);
+  if (!opening || opening[1] === "1") return null;
+  return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
+}
+
 export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | "subject">): ComposedFold | null {
   if (message.author !== "me") return null;
-  const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
-  if (opening) {
-    // Stage 1's opening is the person's own problem statement, nothing
-    // composed ahead of it; a fold would hide their words behind a caption.
-    if (opening[1] === "1") return null;
-    return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
-  }
+  if (message.subject && OPENING_SUBJECT.test(message.subject)) return openingMailFold(message);
   const material = materialMailFold(message.body);
   if (material) return material;
   // The supervisor's briefs (#695): the record of an ended attempt, and the

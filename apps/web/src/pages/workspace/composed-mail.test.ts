@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composedMailFold, withoutSendBackRef } from "./composed-mail.ts";
+import { composedMailFold, openingMailFold, withoutSendBackRef } from "./composed-mail.ts";
 import { composeMaterialMail } from "./attached-material.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 
@@ -16,6 +16,13 @@ describe("composedMailFold", () => {
 
   test("stage 1's opening is the person's own statement and is not folded", () => {
     expect(composedMailFold({ author: "me", subject: "[opening:proj_1:1] Problem discovery", body: "I want to build a recipe app." })).toBeNull();
+  });
+
+  test("the opening fold alone folds nothing but an opening", () => {
+    expect(openingMailFold({ author: "me", subject: "[opening:proj_1:3] Solution proposal", body: "The approved shape." })?.summary).toBe("What Solution proposal opened with");
+    expect(openingMailFold({ author: "me", subject: "[opening:proj_1:1] Problem discovery", body: "I want a recipe app." })).toBeNull();
+    expect(openingMailFold({ author: "me", body: "## Requirements (authoritative ids)\n\n- FR-1: Does a thing.\n\nReview it." })).toBeNull();
+    expect(openingMailFold({ author: "agent", subject: "[opening:proj_1:3] x", body: "echoed" })).toBeNull();
   });
 
   test("a send-back cue shows its sentence and never its marker", () => {
