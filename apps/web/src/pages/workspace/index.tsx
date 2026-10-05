@@ -61,6 +61,7 @@ import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useMaterialDispatch } from "./use-material-dispatch.ts";
 import { splitMaterialMail } from "./attached-material.ts";
+import { isComposedOpening } from "./composed-mail.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
@@ -252,6 +253,10 @@ export function StageWorkspace({
     setError,
   );
   const foldedMessages = withdrawn.messages;
+  // What the transcript shows (#723): the stage's composed opening is mail
+  // for the specialist, not a turn of the person's. Everything that reasons
+  // over the thread still reads `foldedMessages`, opening included.
+  const shownMessages = useMemo(() => foldedMessages.filter((message) => !isComposedOpening(message)), [foldedMessages]);
   const withdrawnIds = withdrawn.ids;
   const pending = withdrawn.pending;
   const stopTurn = withdrawn.stop;
@@ -324,10 +329,11 @@ export function StageWorkspace({
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
   // or result-node bookkeeping under mail-chat).
-  // A send-back cue is shown as its event line (`cueEvents`), not as a turn.
+  // A send-back cue is shown as its event line (`cueEvents`), not as a turn,
+  // and the composed opening is not shown at all (#723).
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.filter((message) => !(message.author === "me" && sendBackCueIdOf(message.subject))).map((message) => ({
+      shownMessages.filter((message) => !(message.author === "me" && sendBackCueIdOf(message.subject))).map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -336,7 +342,7 @@ export function StageWorkspace({
         questions: null,
         createdAt: message.at,
       })),
-    [foldedMessages],
+    [shownMessages],
   );
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
@@ -985,7 +991,7 @@ export function StageWorkspace({
   const conversation = (
     <StageConversation
       stage={stage}
-      messages={foldedMessages}
+      messages={shownMessages}
       value={composer}
       onValueChange={setComposer}
       onSend={() => {

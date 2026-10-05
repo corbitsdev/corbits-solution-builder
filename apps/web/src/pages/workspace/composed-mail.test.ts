@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composedMailFold, withoutSendBackRef } from "./composed-mail.ts";
+import { composedMailFold, isComposedOpening, withoutSendBackRef } from "./composed-mail.ts";
 import { composeMaterialMail } from "./attached-material.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 
@@ -9,13 +9,18 @@ describe("composedMailFold", () => {
     expect(composedMailFold({ author: "agent", body: "[ref:dec_1] echoed", subject: "[opening:p:3] x" })).toBeNull();
   });
 
-  test("an opening folds behind one line naming its stage", () => {
-    const fold = composedMailFold({ author: "me", subject: "[opening:proj_1:9] Deliver", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc" });
-    expect(fold).toEqual({ summary: "What Deliver opened with", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc", lead: null });
+  test("a composed opening is not shown at all, and is never folded (#723)", () => {
+    const opening = { author: "me" as const, subject: "[opening:proj_1:9] Deliver", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc" };
+    expect(isComposedOpening(opening)).toBe(true);
+    expect(composedMailFold(opening)).toBeNull();
+    expect(isComposedOpening({ author: "agent", subject: "[opening:proj_1:4] GUI design" })).toBe(false);
+    expect(isComposedOpening({ author: "me", subject: "Re: the brief" })).toBe(false);
   });
 
-  test("stage 1's opening is the person's own statement and is not folded", () => {
-    expect(composedMailFold({ author: "me", subject: "[opening:proj_1:1] Problem discovery", body: "I want to build a recipe app." })).toBeNull();
+  test("stage 1's opening is the person's own statement: shown, and not folded", () => {
+    const opening = { author: "me" as const, subject: "[opening:proj_1:1] Problem discovery", body: "I want to build a recipe app." };
+    expect(isComposedOpening(opening)).toBe(false);
+    expect(composedMailFold(opening)).toBeNull();
   });
 
   test("a send-back cue shows its sentence and never its marker", () => {
