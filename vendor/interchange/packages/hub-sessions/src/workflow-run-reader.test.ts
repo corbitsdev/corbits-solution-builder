@@ -62,6 +62,32 @@ async function commitFiles(
   });
 }
 
+/** Packs every reachable object of `main` into one pack and removes the loose copies. */
+async function packRepository(dir: string): Promise<void> {
+  const head = await git.resolveRef({ fs, dir, ref: "main" });
+  const oids = new Set<string>([head]);
+  const commit = await git.readCommit({ fs, dir, oid: head });
+  const walk = async (treeOid: string): Promise<void> => {
+    oids.add(treeOid);
+    const { tree } = await git.readTree({ fs, dir, oid: treeOid });
+    for (const entry of tree) {
+      if (entry.type === "tree") await walk(entry.oid);
+      else oids.add(entry.oid);
+    }
+  };
+  await walk(commit.commit.tree);
+  const { packfile } = await git.packObjects({ fs, dir, oids: [...oids] });
+  if (!packfile) throw new Error("test: packObjects produced nothing");
+  const packDir = path.join(dir, ".git", "objects", "pack");
+  await fs.promises.mkdir(packDir, { recursive: true });
+  const name = "pack-test-fixture.pack";
+  await fs.promises.writeFile(path.join(packDir, name), packfile);
+  await git.indexPack({ fs, dir, filepath: path.join(".git", "objects", "pack", name) });
+  for (const entry of await fs.promises.readdir(path.join(dir, ".git", "objects"))) {
+    if (/^[0-9a-f]{2}$/.test(entry)) await fs.promises.rm(path.join(dir, ".git", "objects", entry), { recursive: true, force: true });
+  }
+}
+
 describe("WorkflowRunReader", () => {
   let dir: string;
   let reader: ReturnType<typeof createWorkflowRunReader>;
@@ -76,6 +102,33 @@ describe("WorkflowRunReader", () => {
 
   afterEach(async () => {
     await fs.promises.rm(dir, { recursive: true, force: true });
+  });
+
+  test("reads through the store's per-repo git cache when it offers one", async () => {
+    await commitFiles(dir, {
+      "runs/run-c/events/0.json": JSON.stringify({ type: "RunStarted" }),
+    });
+    // A packed repository, as a received push leaves one: loose objects are
+    // read without any cache, pack reads are what the cache is for.
+    await packRepository(dir);
+    // isomorphic-git keeps its memos under symbol keys on the object it is
+    // handed; a fixture of loose objects gives it little to memoize, so the
+    // proof is that the object is consulted at all.
+    const touched: PropertyKey[] = [];
+    const cache = new Proxy<Record<PropertyKey, unknown>>(
+      {},
+      {
+        get(target, key) {
+          touched.push(key);
+          return Reflect.get(target, key);
+        },
+      },
+    );
+    const store = repoStoreFor(new Map([[REPO_ID.id, dir]]));
+    const cachingReader = createWorkflowRunReader({ ...store, gitCacheFor: () => cache });
+    expect(await cachingReader.listRunIds(REPO_ID, REF)).toEqual(["run-c"]);
+    expect((await cachingReader.readRunEvents(REPO_ID, REF, "run-c")).map((e) => e.type)).toEqual(["RunStarted"]);
+    expect(touched.length).toBeGreaterThan(0);
   });
 
   test("tail returns only the last N events by seq, in both forms", async () => {

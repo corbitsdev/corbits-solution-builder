@@ -108,6 +108,14 @@ export function createWorkflowRunReader(
     }
   }
 
+  // The store's per-repo cache, when it offers one: a pack and its index
+  // load once per repo instead of on every read (isomorphic-git loads the
+  // whole pack to read one object). Refs are never cached.
+  function cacheOptions(repoId: RepoId): { cache?: object } {
+    const cache = repoStore.gitCacheFor?.(repoId);
+    return cache ? { cache } : {};
+  }
+
   async function listRunIds(repoId: RepoId, ref: string): Promise<string[]> {
     const dir = repoDirOrNull(repoId);
     if (dir === null) return [];
@@ -120,6 +128,7 @@ export function createWorkflowRunReader(
         dir,
         oid,
         filepath: WORKFLOW_RUN_RUNS_PREFIX,
+        ...cacheOptions(repoId),
       });
     } catch (cause) {
       if (cause instanceof git.Errors.NotFoundError) return [];
@@ -145,9 +154,10 @@ export function createWorkflowRunReader(
     const oid = await resolveRefOrNull(dir, ref);
     if (oid === null) return [];
     const runDir = `${WORKFLOW_RUN_RUNS_PREFIX}/${runId}`;
+    const cached = cacheOptions(repoId);
     let runTree: Awaited<ReturnType<typeof git.readTree>>;
     try {
-      runTree = await git.readTree({ fs, dir, oid, filepath: runDir });
+      runTree = await git.readTree({ fs, dir, oid, filepath: runDir, ...cached });
     } catch (cause) {
       if (cause instanceof git.Errors.NotFoundError) return [];
       throw cause;
@@ -169,7 +179,7 @@ export function createWorkflowRunReader(
       );
     }
     if (combined !== undefined) {
-      const blob = await git.readBlob({ fs, dir, oid: combined.oid });
+      const blob = await git.readBlob({ fs, dir, oid: combined.oid, ...cached });
       const source = `${runDir}/${WORKFLOW_RUN_EVENTS_FILE}`;
       const events: WorkflowRunEvent[] = [];
       // A sealed log is written in seq order; the tail is its last lines.
@@ -183,7 +193,7 @@ export function createWorkflowRunReader(
     const eventsDir = `${runDir}/${WORKFLOW_RUN_EVENTS_DIR}`;
     let tree: Awaited<ReturnType<typeof git.readTree>>;
     try {
-      tree = await git.readTree({ fs, dir, oid, filepath: eventsDir });
+      tree = await git.readTree({ fs, dir, oid, filepath: eventsDir, ...cached });
     } catch (cause) {
       if (cause instanceof git.Errors.NotFoundError) return [];
       throw cause;
@@ -198,7 +208,7 @@ export function createWorkflowRunReader(
     const events: WorkflowRunEvent[] = [];
     for (const { entry, seq } of chosen) {
       const path = `${eventsDir}/${entry.path}`;
-      const blob = await git.readBlob({ fs, dir, oid: entry.oid });
+      const blob = await git.readBlob({ fs, dir, oid: entry.oid, ...cached });
       const parsed = parseEventObject(
         new TextDecoder().decode(blob.blob),
         path,

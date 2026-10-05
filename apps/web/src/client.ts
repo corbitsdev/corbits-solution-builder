@@ -12,6 +12,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
+import { singleFlight } from "./single-flight.ts";
 import { DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
 import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
@@ -1445,13 +1446,15 @@ export const api = {
       installerFailure(cause);
     }
   },
-  decisions: async () => {
+  // Single-flight (#764): the fold reads every project's workflow run, so a
+  // poll tick or bell nudge while one is outstanding reuses it.
+  decisions: singleFlight(async () => {
     try {
       return { decisions: await openDecisions(createHubTransport()) };
     } catch (cause) {
       installerFailure(cause);
     }
-  },
+  }),
   /**
    * What the workspace has spent on inference since the hub process last
    * started -- `packages/embed-hub/src/spend.ts`'s `GET /spend`, mounted on

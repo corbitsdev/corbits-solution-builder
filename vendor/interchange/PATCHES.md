@@ -388,3 +388,20 @@ client.
 
 **Upstream-able.** Yes; a bounded read of a run's latest events belongs in
 Interchange's hub API.
+
+## `packages/hub-sessions/src/repo-store/types.ts`, `repo-store/store.ts`, `workflow-run-reader.ts` — the run reader shares the store's git cache
+
+**Why.** Solution Builder issue #764: isomorphic-git loads a whole pack file
+to read one object, and the run reader passed no cache, so every run listing
+and every events read re-read and re-inflated the repository's pack on the
+hub's main thread. With polls from several projects, every request waited
+about three seconds behind that work.
+
+**What changed.** `RepoStore` gains an optional `gitCacheFor(repoId)` that the
+store implements with its existing bounded per-directory cache (already
+invalidated after a received pack). The run reader threads it through every
+`readTree`/`readBlob`; refs stay uncached. A test checks the cache is used.
+
+**Upstream-able.** Yes; a reader that re-reads packs per call is a defect in
+any deployment with long-lived runs.
+
