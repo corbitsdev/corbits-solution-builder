@@ -85,11 +85,6 @@ import { askKind, delegationTarget, requirementsRequest, routedLine } from "./me
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
-/** The newest unsuperseded node of a kind, or null. */
-function newestOfKind(nodes: readonly ArtifactNode[], kind: string): ArtifactNode | null {
-  return nodes.filter((node) => node.kind === kind && node.supersededByNodeId === null).sort((a, b) => b.version - a.version || Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
-}
-
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
   const byReviewer = new Map<string, ArtifactNode>();
   for (const node of nodes) {
@@ -104,6 +99,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import { PRD_FOR_PEOPLE_KIND } from "../../prd-for-people.ts";
+import { useProjectDesignPictures, usePrdForPeople } from "./use-prd-for-people.ts";
 import {
   EvaluatorStance,
   OpeningScreen,
@@ -608,6 +604,11 @@ export function StageWorkspace({
 
   // The stage's companion documents (#345): named in a message, they go along with it.
   const [stageDocuments, setStageDocuments] = useState<MentionedDocument[]>([]);
+  // The PRD for people (#740) is kept current at every stage: written when
+  // it is missing or older than the PRD or the design, and never otherwise.
+  const prdForPeople = usePrdForPeople({ projectId: detail.project.id, tenantId, nodes: detail.nodes, approvedInputs: openingDispatch.stage6Material, onDocumentsChanged: onChanged });
+  // Its pictures, for reading it from the strip at any stage.
+  const peoplePictures = useProjectDesignPictures(tenantId, detail.nodes, artifacts.activeNode?.kind === PRD_FOR_PEOPLE_KIND);
   useEffect(() => {
     setStageDocuments([]);
   }, [stage, detail.project.id]);
@@ -898,7 +899,7 @@ export function StageWorkspace({
               paneClassName="artifact-page"
             />
           ) : (
-            <Markdown source={artifacts.activeContent} />
+            <Markdown source={artifacts.activeContent} {...(artifacts.activeNode.kind === PRD_FOR_PEOPLE_KIND && peoplePictures ? { images: peoplePictures } : {})} />
           )}
         </div>
       </div>
@@ -1327,8 +1328,9 @@ export function StageWorkspace({
               .filter((node) => node.kind === "product_requirements" && node.supersededByNodeId === null)
               .sort((a, b) => b.version - a.version)[0] ?? null
           }
-          peopleNode={newestOfKind(detail.nodes, PRD_FOR_PEOPLE_KIND)}
-          designNode={newestOfKind(detail.nodes, "design_artifact")}
+          people={prdForPeople.people}
+          sendPeople={prdForPeople.send}
+          designHtml={prdForPeople.designHtml}
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
