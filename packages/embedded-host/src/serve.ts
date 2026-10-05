@@ -422,10 +422,13 @@ export async function serveHost(options: ServeOptions): Promise<void> {
           },
         });
       }
+      const contentType = contentTypeFor(selected);
       return new Response(file, {
         headers: {
-          "content-type": contentTypeFor(selected),
-          "cache-control": "no-store",
+          "content-type": contentType,
+          // A film loops for as long as the window is busy (#746); it is
+          // kept for a day rather than fetched again on every loop.
+          "cache-control": contentType.startsWith("video/") ? "public, max-age=86400" : "no-store",
           "content-security-policy": CSP,
         },
       });

@@ -21,7 +21,8 @@ describe("createHubTransport", () => {
 
     const body = await createHubTransport().fetch<{ id: string }>("GET", "/api/me");
     expect(body).toEqual({ id: "u1" });
-    expect(calls).toEqual([{ url: "/api/me", init: { method: "GET", credentials: "same-origin" } }]);
+    // Every request carries a ceiling (#746), so a hung connection frees itself.
+    expect(calls).toEqual([{ url: "/api/me", init: { method: "GET", credentials: "same-origin", signal: expect.any(AbortSignal) } }]);
   });
 
   test("posts JSON to the hub and keeps same-origin credentials", async () => {

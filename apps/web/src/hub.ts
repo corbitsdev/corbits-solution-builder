@@ -21,18 +21,27 @@ export { ApiError };
  * The installer package and the run fold/signal modules are driven by this,
  * not by a second client of the hub.
  */
+/** Longer than any healthy call, including a build's packaging and a workflow's deploy-and-wait (#746). */
+export const HUB_REQUEST_CEILING_MS = 5 * 60_000;
+
 export function createHubTransport(): Transport {
   return {
     async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
       let response: Response;
       try {
-        const init: RequestInit = { method, credentials: hubCredentials() };
+        // A ceiling on every request (#746): a hung connection frees
+        // itself and is said as such, rather than holding one of the
+        // browser's few connections to the host forever.
+        const init: RequestInit = { method, credentials: hubCredentials(), signal: AbortSignal.timeout(HUB_REQUEST_CEILING_MS) };
         if (body !== undefined) {
           init.headers = { "content-type": "application/json" };
           init.body = JSON.stringify(body);
         }
         response = await fetch(`${hubOrigin()}${path}`, init);
-      } catch {
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "TimeoutError") {
+          throw new ApiError(0, "host_timeout", "The host did not answer in time. Try again; if it keeps happening, restart the host.");
+        }
         throw new ApiError(
           0,
           "host_unreachable",

@@ -5,11 +5,12 @@
  * so the person never sees a stage briefly flash to something the workflow
  * never said.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../client.js";
 import { describeFailure } from "./failure-message.ts";
 import { describeReplay } from "./replay-notice.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
+import { singleFlight, withinBound } from "../../single-flight.ts";
 
 export type WorkflowViewState = {
   /** Null while unresolved; the workflow's word once it has one. */
@@ -47,6 +48,9 @@ export type WorkflowViewState = {
 // wrong decision (nothing here gates `decide`).
 const viewSnapshots = new Map<string, ProjectWorkflowView>();
 
+/** How long a person-triggered refresh may hold the busy flag before letting go (#746). */
+const REFRESH_BUSY_LIMIT_MS = 20_000;
+
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
   const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -55,19 +59,28 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
-  const reload = useCallback(async () => {
-    const next = await api.projectWorkflowView(projectId).catch(() => null);
-    if (next && next.stage >= 1) {
-      setView(next);
-      viewSnapshots.set(projectId, next);
-    }
-    return next;
-  }, [projectId]);
+  // Single-flight (#746): a poll tick while a read is outstanding reuses
+  // it, so a slow host costs one connection, never one per tick until the
+  // browser's per-origin limit stalls every request to the host.
+  const reload = useMemo(
+    () =>
+      singleFlight(async () => {
+        const next = await api.projectWorkflowView(projectId).catch(() => null);
+        if (next && next.stage >= 1) {
+          setView(next);
+          viewSnapshots.set(projectId, next);
+        }
+        return next;
+      }),
+    [projectId],
+  );
 
   const refresh = useCallback(async () => {
     setRefreshingAfterAction(true);
     try {
-      await reload();
+      // The busy flag lets go after a bound (#746); the read's result
+      // still lands through `reload` when it comes.
+      await withinBound(reload(), REFRESH_BUSY_LIMIT_MS);
     } finally {
       setRefreshingAfterAction(false);
     }
