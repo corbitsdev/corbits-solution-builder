@@ -15,6 +15,7 @@
  * lives). Nothing here is a product API.
  */
 import { timingSafeEqual } from "node:crypto";
+import { beginRequest, endRequest } from "./request-watch.ts";
 import { extname, join } from "node:path";
 import { asksForInterfaceFile, missingInterfaceFile } from "./interface-files.js";
 import { mkdir, stat } from "node:fs/promises";
@@ -388,7 +389,17 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       // Hono, at their own paths with no prefix; everything else is the built
       // interface.
       if (url.pathname.startsWith("/api/") || url.pathname === "/status") {
-        return app.fetch(request);
+        // Timed (#762): a request slower than two seconds is logged with
+        // its path, and the heartbeat names what is in flight during a stall.
+        const watch = beginRequest(request.method, url.pathname);
+        try {
+          const response = await app.fetch(request);
+          endRequest(watch, response.status, (line) => console.log(line));
+          return response;
+        } catch (cause) {
+          endRequest(watch, "failed", (line) => console.log(line));
+          throw cause;
+        }
       }
 
       const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
