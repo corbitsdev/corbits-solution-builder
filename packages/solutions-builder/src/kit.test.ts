@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { agentById } from "./kit.js";
+import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
+import { SELECTABLE_TARGETS } from "./targets.js";
 
 describe("Experience designer prompt", () => {
   test("requires the mockup to fit the width it is read at, not a wide monitor", () => {
@@ -37,5 +38,56 @@ describe("Architect prompt", () => {
     const prompt = agentById("architect")!.system;
     expect(prompt).toContain("Every entry's `cites` array is non-empty");
     expect(prompt).toContain("even when nothing in it changed");
+  });
+});
+
+// #354: the estimator priced the stack but never the delivery targets, and
+// claimed stage 8, whose specialist is the build-supervisor.
+describe("Estimator prompt", () => {
+  test("serves stage 7 only; stage 8 belongs to the build-supervisor", () => {
+    expect(agentById("estimator")!.stages).toEqual([7]);
+    expect(agentFor(7).id).toBe("estimator");
+    expect(agentFor(8).id).toBe("build-supervisor");
+  });
+
+  test("keeps its prompt key: prompt text changed, no versioning mechanism exists for that", () => {
+    expect(agentById("estimator")!.promptKey).toBe("sb-prompt-estimator-v1");
+  });
+
+  test("prices the plan's declared targets, never one it chooses itself", () => {
+    const prompt = agentById("estimator")!.system;
+    expect(prompt).toContain("Price the plan's declared `targets` entries");
+    expect(prompt).toContain("the same entries stage 8\npasses to `publish_workspace`");
+    expect(prompt).toContain("never a target you choose yourself");
+    expect(prompt).toContain('Price the stack the plan\'s "## Stack" block records');
+  });
+
+  test("names every picker candidate with whether the platform exercises it", () => {
+    const prompt = agentById("estimator")!.system;
+    for (const entry of SELECTABLE_TARGETS) {
+      // Assert on the entry's own rendered line: bare "exercised" is a
+      // substring of "not exercised", so a prompt-wide contains check passes
+      // even when a verified target is misreported (#710 review).
+      const line = prompt.split("\n").find((l) => l.includes(entry.target) && l.includes(entry.label));
+      expect(line).toBeDefined();
+      if (entry.verified) {
+        expect(line!).toContain("exercised");
+        expect(line!).not.toContain("not exercised");
+      } else {
+        expect(line!).toContain("not exercised");
+      }
+    }
+  });
+
+  test("requires one Forecast line per target, with a named human cost that is never zero", () => {
+    const prompt = agentById("estimator")!.system;
+    expect(prompt).toContain("Then one line per declared target");
+    expect(prompt).toContain("whether the platform exercises it");
+    expect(prompt).toContain("names its human verification cost instead; that cost is never zero");
+  });
+
+  test("asks which target the approval is for when several targets price differently", () => {
+    const prompt = agentById("estimator")!.system;
+    expect(prompt).toContain("when the plan declares more than one target and\nthe figure differs materially by target, ask which target the approval is for");
   });
 });
