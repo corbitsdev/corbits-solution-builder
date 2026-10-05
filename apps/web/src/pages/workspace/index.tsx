@@ -267,7 +267,10 @@ export function StageWorkspace({
   const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  // A composed opening is mail the app wrote, not words of the person's to
+  // read an ask off: the specialist is drafting, whatever the mail says.
+  const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  useBusyWhile(busy, specialistActivity(stage, pendingAsk));
 
   const openingDispatch = useOpeningDispatch({
     detail,
