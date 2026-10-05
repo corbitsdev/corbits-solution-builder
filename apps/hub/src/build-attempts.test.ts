@@ -51,6 +51,7 @@ describe("assembleBuildPrompt", () => {
     expect(assembleBuildPrompt(input)).toContain("README.md, at the top level, is for the person who installs and runs the application");
     expect(assembleBuildPrompt(input)).toContain("docs/USER-MANUAL.md is for the people who use the application");
     expect(assembleBuildPrompt({ ...input, language: "British English" })).toContain("written in British English.");
+    expect(assembleBuildPrompt(input)).toContain("has a shebang line and its executable bit set");
   });
 
   test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {
