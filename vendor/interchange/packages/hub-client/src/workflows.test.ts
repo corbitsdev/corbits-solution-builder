@@ -352,6 +352,16 @@ describe("listWorkflowRuns", () => {
 });
 
 describe("readWorkflowRunEvents", () => {
+  test("passes a tail as the query, and leaves it off otherwise", async () => {
+    const { transport, calls } = createMockTransport(() => ({ runId: "run_1", events: [] }));
+    await readWorkflowRunEvents(transport, TENANT_ID, DEPLOYMENT_ID, "run_1", { tail: 32 });
+    await readWorkflowRunEvents(transport, TENANT_ID, DEPLOYMENT_ID, "run_1", { tail: 0 });
+    expect(calls.map((call) => call.path)).toEqual([
+      `/api/tenants/${TENANT_ID}/workflows/${DEPLOYMENT_ID}/runs/run_1/events?tail=32`,
+      `/api/tenants/${TENANT_ID}/workflows/${DEPLOYMENT_ID}/runs/run_1/events`,
+    ]);
+  });
+
   test("GETs the run events endpoint and returns the parsed projection", async () => {
     const projection = {
       runId: "run_1",

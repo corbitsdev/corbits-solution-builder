@@ -65,6 +65,13 @@ import {
 } from "../workflow-run-trigger";
 import { jsonResponse } from "../openapi";
 
+/** `?tail=N` on the run events route: a positive integer, else nothing. */
+function parseTail(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 // Request body for the general workflow deploy. The definition is CODE-SOURCED:
 // `source` names where its bytes come from and `entry` the `interchange.workflow`
 // module the sidecar evaluates; the hub installs + probes + gates + freezes it
@@ -821,7 +828,7 @@ export function createWorkflowRoutes({
       tags: ["Workflows"],
       summary: "Read a workflow run's event log",
       description:
-        "Returns the seq-ordered event projection (RunStarted, StepStarted, StepCompleted, SignalAwaited, RunCompleted, etc.) for a single run. The full event log is returned in ascending seq order; an unknown run returns an empty list.",
+        "Returns the seq-ordered event projection (RunStarted, StepStarted, StepCompleted, SignalAwaited, RunCompleted, etc.) for a single run. The full event log is returned in ascending seq order; an unknown run returns an empty list. `?tail=N` returns only the last N events by seq, reading only those from the run's repository; a value that is not a positive integer is ignored.",
       responses: {
         200: jsonResponse("Seq-ordered run events", WorkflowRunEventsResponse),
         404: jsonResponse("Workflow deployment not found", ErrorResponse),
@@ -845,6 +852,7 @@ export function createWorkflowRoutes({
         workflowRunRepoId(anchorRunId, tenant.domain),
         WORKFLOW_RUN_REF,
         runId,
+        { tail: parseTail(c.req.query("tail")) },
       );
       return c.json({ runId, events: events.map(formatRunEvent) });
     },
