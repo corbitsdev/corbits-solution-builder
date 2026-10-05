@@ -25,6 +25,9 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Banner, Button, Mark, notify, stageName, type NoticeAction } from "./components.jsx";
+
+/** How often the decision queue is re-read when nothing nudges it (#764). */
+const DECISIONS_POLL_MS = 30_000;
 import { keepUntilInstalled, shouldShowOnboarding } from "./onboarding-gate.ts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
@@ -685,7 +688,10 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 5_000);
+    // Every half minute (#764): the fold reads every active project's
+    // workflow run, which is the host's costliest read; a mailbox event still
+    // refreshes the bell at once.
+    const timer = setInterval(() => void refresh(), DECISIONS_POLL_MS);
     return () => clearInterval(timer);
   }, [refresh]);
 
