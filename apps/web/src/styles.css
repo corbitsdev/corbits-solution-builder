@@ -4807,9 +4807,12 @@ button[aria-disabled="true"] {
 
 /* A desktop screen in a browser window (#264): drawn at 1280 by 800 and
    scaled to the width it is shown in, so it reads in landscape at its real
-   proportions. One window per screen, stacked. */
+   proportions. One window per screen; two or more side by side once the
+   pane has room for windows at least 560px wide, rather than one full-width
+   window over empty space at the right. */
 .desktop-rack {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
   gap: var(--space-5);
   padding: var(--space-2) 0 var(--space-3);
 }
