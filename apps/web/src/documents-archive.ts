@@ -42,7 +42,8 @@ export const DOCUMENT_KINDS = [
 
 const KIND_ORDER = new Map<string, number>(DOCUMENT_KINDS.map((kind, index) => [kind, index]));
 
-function slug(text: string): string {
+/** A file-name-safe form of a title: lower case, hyphens, never empty. */
+export function slug(text: string): string {
   return (
     text
       .toLowerCase()
