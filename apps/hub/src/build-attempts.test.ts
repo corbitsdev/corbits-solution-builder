@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { assembleBuildPrompt, nextAttemptNumber } from "./build-attempts.js";
+import { assembleBuildPrompt, nextAttemptNumber, parseGitLog, workspaceReportAt } from "./build-attempts.js";
+import { mkdtemp, writeFile as writeFileAsync, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { safeWorkspacePath } from "./build-attempts.js";
 import { CONTINUE_EXCLUDES } from "./corbits-exec.js";
 
@@ -41,6 +44,12 @@ describe("assembleBuildPrompt", () => {
       last = at;
     }
     expect(prompt).not.toContain("earlier attempt");
+  });
+
+  test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {
+    const prompt = assembleBuildPrompt(input);
+    expect(prompt).toContain('Name the plan task every commit is for in its subject, as "(Task N)"');
+    expect(prompt).toContain("Keep STATUS.md at the root");
   });
 
   test("a continued attempt is told the earlier work is in the directory", () => {
@@ -88,5 +97,45 @@ describe("seeded workspace files", () => {
   test("the prompt tells the worker to read AGENTS.md first when files are seeded", () => {
     const prompt = assembleBuildPrompt({ planText: "plan", requirementsText: "", designText: "", stackBlock: "", target: "web", planRef: "a@1", continuing: false, files: [{ path: "AGENTS.md", content: "x" }, { path: "build-plan.md", content: "plan" }] });
     expect(prompt).toContain("as files: AGENTS.md, build-plan.md. Read AGENTS.md first");
+  });
+});
+
+// #697: the progress record is read out of the directory, never inferred.
+describe("workspace report", () => {
+  test("parses git log lines into commits, oldest first, keeping tabs inside a subject", () => {
+    expect(parseGitLog("abc\t2026-10-05T00:35:00+01:00\tfeat: seed (Task 22)\ndef\t2026-10-05T00:36:00+01:00\tdocs: a\tb\n")).toEqual([
+      { hash: "abc", at: "2026-10-05T00:35:00+01:00", subject: "feat: seed (Task 22)" },
+      { hash: "def", at: "2026-10-05T00:36:00+01:00", subject: "docs: a\tb" },
+    ]);
+    expect(parseGitLog("")).toEqual([]);
+  });
+
+  test("reads STATUS.md and QUESTIONS.md and the repository's commits from a directory", async () => {
+    const directory = await mkdtemp(joinPath(tmpdir(), "sb-report-"));
+    try {
+      await writeFileAsync(joinPath(directory, "STATUS.md"), "# Build status\n\n## Task 1: scaffold\n");
+      const git = async (...args: string[]) => {
+        const run = Bun.spawn(["git", ...args], { cwd: directory, stdout: "ignore", stderr: "ignore", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+        await run.exited;
+      };
+      await git("init", "-q");
+      await git("add", "STATUS.md");
+      await git("commit", "-q", "-m", "feat: scaffold (Task 1)");
+      const report = await workspaceReportAt(directory);
+      expect(report.status).toContain("## Task 1: scaffold");
+      expect(report.questions).toBeNull();
+      expect(report.commits.map((commit) => commit.subject)).toEqual(["feat: scaffold (Task 1)"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("a directory without a repository reports no commits rather than failing", async () => {
+    const directory = await mkdtemp(joinPath(tmpdir(), "sb-report-"));
+    try {
+      expect(await workspaceReportAt(directory)).toEqual({ commits: [], status: null, questions: null });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
