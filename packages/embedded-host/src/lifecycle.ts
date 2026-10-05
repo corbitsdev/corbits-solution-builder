@@ -9,6 +9,8 @@
  * is inferred from a wall-clock gap in its own heartbeat, so the status can say
  * "the host was asleep between X and Y" rather than implying continuous work.
  */
+import { observeTick } from "./request-watch.ts";
+
 export type HostState = "starting" | "ready" | "stopped";
 
 const HEARTBEAT_MS = 5_000;
@@ -41,6 +43,9 @@ export function startHeartbeat(): void {
   heartbeat = setInterval(() => {
     const now = Date.now();
     const gap = now - previous;
+    // How late this tick ran is how long the event loop could not get to
+    // it (#762): a stall is said at once, and a resource line once a minute.
+    if (gap <= SLEEP_THRESHOLD_MS) observeTick(Math.max(0, gap - HEARTBEAT_MS), (line) => console.log(line), now);
     if (gap > SLEEP_THRESHOLD_MS) {
       status.sleepGaps.push({
         from: new Date(previous).toISOString(),
