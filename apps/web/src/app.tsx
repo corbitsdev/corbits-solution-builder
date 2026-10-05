@@ -25,6 +25,7 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Banner, Button, Mark, notify, stageName, type NoticeAction } from "./components.jsx";
+import { keepUntilInstalled, shouldShowOnboarding } from "./onboarding-gate.ts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu, downloadDocuments } from "./pages/project-menu.jsx";
@@ -88,11 +89,9 @@ function initialView(): View {
  * while an admission that it is taking longer than it should.
  */
 /** The hub's "install first" conflict is not a failure of the request: there is nothing yet. */
-function emptyUntilInstalled<T>(empty: T): (cause: unknown) => T {
-  return (cause) => {
-    if (cause instanceof ApiFailure && cause.detail.install) return empty;
-    throw cause;
-  };
+/** A read the hub refused as not-installed keeps what the app holds (#754). */
+function keepIfUninstalled(cause: unknown): null {
+  return keepUntilInstalled(cause, (reason) => reason instanceof ApiFailure && reason.detail.install === true);
 }
 
 function Booting({ offline }: { offline: boolean }) {
@@ -583,13 +582,16 @@ export function App() {
       // install, an uninstalled workspace is an empty one.
       const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
       const [decisionsResult, projectsResult, tenantIdResult] = await Promise.all([
-        api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
-        api.projects().catch(emptyUntilInstalled({ projects: [] })),
+        api.decisions().catch(keepIfUninstalled),
+        api.projects().catch(keepIfUninstalled),
         api.workspaceTenantId().catch(() => null),
       ]);
       setStatus(statusResult);
-      setDecisions(decisionsResult.decisions);
-      setProjects(projectsResult.projects);
+      // A refused read says nothing about what there is (#754): a restarted
+      // host still checking the workspace answers one poll that way, and an
+      // empty list in its place sent an open project to onboarding.
+      if (decisionsResult) setDecisions(decisionsResult.decisions);
+      if (projectsResult) setProjects(projectsResult.projects);
       setProviders(providersResult.providers);
       setApiKeyProviders(providersResult.apiKeyProviders);
       setOauthCandidates(providersResult.oauthCandidates);
@@ -875,7 +877,7 @@ export function App() {
   // Inference is required — the product cannot draft a stage without it, so
   // step 1 is not skippable. Only the first-project step can be deferred.
   const inferenceConnected = providers.some((provider) => provider.status === "ready");
-  const showOnboarding = !inferenceConnected || (projects.length === 0 && !skippedSetup);
+  const showOnboarding = shouldShowOnboarding({ inferenceConnected, projectCount: projects.length, skippedSetup, inProject: view === "project" });
 
   if (showOnboarding) {
     return (
