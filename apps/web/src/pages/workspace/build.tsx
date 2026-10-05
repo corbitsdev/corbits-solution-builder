@@ -496,23 +496,26 @@ export function BuildPanel({
               </Banner>
             ) : null}
             <div className="document-tools">
-              <Button variant="primary" loading={busy === "start"} disabled={!!running || busy !== null} onClick={() => void start()}>
-                Start the build attempt
-              </Button>
-              <Button
-                variant="primary"
-                loading={busy === "continue"}
-                disabled={!!running || busy !== null || lastEnded === null}
-                onClick={() => lastEnded && void start(lastEnded.attempt)}
-              >
-                {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
-              </Button>
-              <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
-                Cancel the build attempt
-              </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-                Approve and continue
-              </Button>
+              {!cancellable ? (
+                <Button variant="primary" loading={busy === "start"} disabled={busy !== null} onClick={() => void start()}>
+                  {lastEnded ? "Start a new attempt" : "Start the build attempt"}
+                </Button>
+              ) : null}
+              {!cancellable && lastEnded ? (
+                <Button variant="primary" loading={busy === "continue"} disabled={busy !== null} onClick={() => void start(lastEnded.attempt)}>
+                  {`Continue from attempt ${String(lastEnded.attempt)}`}
+                </Button>
+              ) : null}
+              {cancellable ? (
+                <Button variant="destructive" loading={busy === "cancel"} disabled={busy !== null} onClick={() => void cancel(cancellable.attempt)}>
+                  Cancel the build attempt
+                </Button>
+              ) : null}
+              {canApprove ? (
+                <Button variant="primary" loading={approving} disabled={!address} onClick={onApprove}>
+                  Approve and continue
+                </Button>
+              ) : null}
             </div>
             {attempts.length > 0 ? (
               <div className="ev">
