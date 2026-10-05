@@ -46,6 +46,7 @@ export const ARTIFACT_KINDS = [
   "audience_package",
   "audience_deck",
   "product_requirements",
+  "prd_for_people",
   "build_plan",
   "engineering_review",
   "cost_approval",
@@ -71,6 +72,8 @@ export const ARTIFACT_STAGE: Readonly<Record<ArtifactKind, number>> = {
   audience_deck: 5,
   /** What stages 1 to 4 agreed, gathered into the one document the plan is written against. */
   product_requirements: 6,
+  /** The requirements told for a person to read, with the design's screens beside the overview (#737); never the PRD's substitute. */
+  prd_for_people: 6,
   build_plan: 6,
   engineering_review: 6,
   cost_approval: 7,
