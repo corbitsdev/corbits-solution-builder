@@ -19,6 +19,7 @@ import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
 import { LANGUAGES, SUPPORTED_OUTPUT_LANGUAGES, type LanguageId, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { APP_VERSION } from "@solutions-builder/app/manifest";
 import {
   api,
   ApiFailure,
@@ -910,7 +911,7 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
         ) : null}
         {status ? (
           <Row label="Version">
-            <span className="v">internal-beta</span>
+            <span className="v">{APP_VERSION}</span>
           </Row>
         ) : null}
       </div>
