@@ -3693,6 +3693,9 @@ button[aria-disabled="true"] {
 .thread-scroll {
   position: relative;
   display: grid;
+  /* The wrapper takes the column's flexible row, or the composer sits
+     under a short thread with the rest of the column empty beneath it. */
+  flex: 1;
   min-height: 0;
 }
 
