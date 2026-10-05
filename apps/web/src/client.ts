@@ -12,6 +12,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
+import { DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
 import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -2030,6 +2031,35 @@ export const api = {
         ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
         ...(target ? { target } : {}),
       });
+    }),
+  /**
+   * Records a stakeholder's slides drawn again in the browser (#760) as the
+   * next version of that stakeholder's audience_deck: the file as a data URL,
+   * superseding the recorded one, with the package it was drawn from as its
+   * source. The package itself is untouched.
+   */
+  persistAudienceDeck: (projectId: string, deck: { variant: string; title: string; dataUri: string; sourceVersionIds: string[] }) =>
+    asWorkspaceOwner(async (transport) => {
+      const previousHead = await artifactGraphFor(transport, projectId)
+        .then((graph) => graph.nodes.filter((node) => node.kind === "audience_deck" && node.stage === 5 && node.variant === deck.variant && node.supersededByNodeId === null).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0])
+        .catch(() => undefined);
+      const artifact = await installerCreateArtifact(transport, projectId, {
+        title: deck.title,
+        content: deck.dataUri,
+        metadata: {
+          sb: {
+            projectId,
+            kind: "audience_deck",
+            stage: 5,
+            variant: deck.variant,
+            mediaType: DECK_MEDIA_TYPE,
+            sourceVersionIds: deck.sourceVersionIds,
+            provenance: { producer: "host" as const },
+            ...(previousHead ? { supersedes: previousHead.id } : {}),
+          },
+        },
+      });
+      return { artifactId: artifact.id, versionId: artifact.id, contentHash: `${artifact.id}@${String(artifact.version)}` };
     }),
   /**
    * Records stage 6's product requirements document (#328): the

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ArtifactNode } from "../../client.ts";
-import { packageForDeck, recordedDeckFileName } from "./deck-reader.tsx";
+import { packageForDeck, recordedDeckFileName, redrawSummary } from "./deck-reader.tsx";
 
 function node(overrides: Partial<ArtifactNode> & Pick<ArtifactNode, "id" | "kind" | "createdAt">): ArtifactNode {
   return {
@@ -47,5 +47,16 @@ describe("recordedDeckFileName", () => {
   test("gives the recorded file its extension once", () => {
     expect(recordedDeckFileName("Slides for Brian")).toBe("Slides for Brian.pptx");
     expect(recordedDeckFileName("slides.PPTX")).toBe("slides.PPTX");
+  });
+});
+
+// #760: the redraw says what it recorded and what it could not read.
+describe("redrawSummary", () => {
+  test("names the stakeholder, says the exports now hand out this file, and carries the notices", () => {
+    expect(redrawSummary("Joe Filerman", false, null)).toBe(
+      "Slides for Joe Filerman were redrawn with the current design and recorded as the newest version; Save as PPTX and Open in Google Slides now hand out this file.",
+    );
+    expect(redrawSummary("Joe Filerman", true, "no connected provider has an image model, so slides were built without pictures")).toContain("could not be read");
+    expect(redrawSummary("Joe Filerman", true, "no connected provider has an image model, so slides were built without pictures")).toContain("No connected provider has an image model, so slides were built without pictures.");
   });
 });
