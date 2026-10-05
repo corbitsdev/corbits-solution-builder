@@ -26,7 +26,8 @@ import {
 } from "@corbits/react-ui";
 import { useEffect, useState, type ReactElement } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo } from "../client.js";
-import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
+import { Banner, Button, downloadArtifact, stageName, type NoticeAction } from "../components.jsx";
+import { useBusyWhile } from "../use-busy.ts";
 import { Dictated } from "../dictation.jsx";
 import { downloadProjectDocuments, saveBlob } from "../documents-archive.ts";
 import { assembleBundle, bundleFileName } from "../project-export.js";
@@ -59,7 +60,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */
-export function downloadDocuments(project: MenuProject): Promise<{ message: string; complete: boolean }> {
+export function downloadDocuments(project: MenuProject): Promise<{ message: string; complete: boolean; saveAgain?: () => void }> {
   return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob });
 }
 
@@ -82,7 +83,7 @@ export function ProjectMenu({
   align?: "start" | "end";
   onChanged: () => void;
   onError: (cause: unknown) => void;
-  onNotice: (message: string, complete?: boolean) => void;
+  onNotice: (message: string, complete?: boolean, action?: NoticeAction) => void;
   /** The project is gone; a host showing it should leave. */
   onDeleted?: () => void;
   onMenuOpenChange?: (open: boolean) => void;
@@ -118,12 +119,20 @@ export function ProjectMenu({
     setInfoOpen(true);
   }, [infoRequest]);
 
-  const act = async (work: () => Promise<unknown>) => {
+  // Work the menu starts says what it is doing on the busy strip (#748):
+  // building the document package draws every design screen and takes
+  // seconds, which otherwise looks like nothing happening.
+  const [acting, setActing] = useState<string | null>(null);
+  useBusyWhile(acting !== null, acting ?? undefined);
+  const act = async (work: () => Promise<unknown>, doing: string | null = null) => {
+    setActing(doing);
     try {
       await work();
       onChanged();
     } catch (cause) {
       onError(cause);
+    } finally {
+      setActing(null);
     }
   };
 
@@ -153,9 +162,9 @@ export function ProjectMenu({
           <MenuItem
             onSelect={() =>
               void act(async () => {
-                const { message, complete } = await downloadDocuments(project);
-                onNotice(message, complete);
-              })
+                const { message, complete, saveAgain } = await downloadDocuments(project);
+                onNotice(message, complete, saveAgain ? { label: "Save again", onClick: saveAgain } : undefined);
+              }, "Building the document package")
             }
           >
             Download documents…

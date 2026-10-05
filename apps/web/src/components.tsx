@@ -578,9 +578,12 @@ export function downloadArtifact(content: string, filename: string): void {
 }
 
 /** A finished action's result; one that did only part of its work is not shown as a success. */
-export function notify(message: string, complete = true): void {
-  if (complete) toast.success(message);
-  else toast(message);
+export type NoticeAction = { label: string; onClick: () => void };
+
+export function notify(message: string, complete = true, action?: NoticeAction): void {
+  const options = action ? { action } : undefined;
+  if (complete) toast.success(message, options);
+  else toast(message, options);
 }
 
 /** What the specialists can read, or a zip of it: the same list the Projects page and the Artifacts tab accept. */
