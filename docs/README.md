@@ -8,8 +8,7 @@ Canonical docs, in reading order:
 - [IMPLEMENTATION.md](IMPLEMENTATION.md): stack, paths and environment
   variables, credentials, selected scripts.
 
-`plans/` holds historical proposals. `8270-native-gates.md` is executed; its
-file lists describe deleted host code — read current source for behavior.
+`plans/` holds historical proposals and should not be treated as current behavior — read current source.
 Diagrams in docs are informative, not normative.
 
 `internal-beta/` was deleted in the hard cutover. Anything that still names
