@@ -25,6 +25,8 @@ export function buildDocumentsRule(language: string = DEFAULT_DOCUMENT_LANGUAGE)
     `${USER_MANUAL_PATH} is for the people who use the application. Write it in clear, easy-to-understand, non-technical prose: one section per screen or task, saying what the person sees and what to do. Put pictures of the screens in it. Make the pictures from the running application: capture each screen with a headless browser at 1280 pixels wide, draw a visible highlight (a rounded rectangle in one bright color, with a short label) around the area or button the step refers to, save each as a PNG under ${MANUAL_IMAGES_DIR}/, and reference it from the manual with a caption.`,
     ``,
     `Both documents describe what was built, never what was planned and dropped. They are part of the build: the archive is checked for them.`,
+    ``,
+    `A script the README or package.json tells anyone to run directly has a shebang line and its executable bit set: chmod +x it and commit it that way (git add --chmod=+x), so it runs as unpacked.`,
   ].join("\n");
 }
 

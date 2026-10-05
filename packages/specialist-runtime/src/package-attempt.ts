@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, stat, symlink } from "node:fs/promises";
+import { chmod, mkdtemp, open, rm, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { hashFiles, shippedFiles, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
@@ -64,6 +64,8 @@ export type DeliveryManifestContent = {
   fileCount: number;
   truncated: boolean;
   generatedAt: string;
+  /** Scripts the packaging had to make executable (#744): shebang files the worker left without the bit. */
+  scriptsMadeExecutable?: string[];
   /** What `verify.ts` established about this archive; absent only for a
    *  manifest written before #129. */
   verification?: DeliveryVerificationContent;
@@ -127,6 +129,33 @@ export async function tarDirectory(cwd: string, files: readonly string[], root?:
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Makes every shipped file that begins with a shebang executable (#744):
+ * a worker writes a script and forgets the bit, and the archive carries
+ * modes as they are. Returns the paths it had to fix; a file already
+ * executable, or not a script, is left alone.
+ */
+export async function ensureExecutableScripts(dir: string, files: readonly string[]): Promise<string[]> {
+  const fixed: string[] = [];
+  for (const path of files) {
+    const absolute = join(dir, path);
+    const info = await stat(absolute).catch(() => null);
+    if (!info?.isFile() || (info.mode & 0o111) !== 0) continue;
+    const handle = await open(absolute, "r").catch(() => null);
+    if (!handle) continue;
+    try {
+      const head = Buffer.alloc(2);
+      const { bytesRead } = await handle.read(head, 0, 2, 0);
+      if (bytesRead < 2 || head[0] !== 0x23 || head[1] !== 0x21) continue;
+    } finally {
+      await handle.close();
+    }
+    await chmod(absolute, info.mode | 0o111);
+    fixed.push(path);
+  }
+  return fixed.sort();
 }
 
 /** The folder an archive unpacks into, from its file name: `build.tar.gz` → `build`. */
@@ -257,6 +286,7 @@ export async function packageAttempt(input: {
   const targets = [...(input.targets ?? [])];
   const maxBytes = input.maxBytes ?? FALLBACK_MAX_ARCHIVE_BYTES;
   const files = await shippedFiles(input.dir, exclude);
+  const scriptsMadeExecutable = await ensureExecutableScripts(input.dir, files);
   const bytes = await tarDirectory(input.dir, files, root);
   if (bytes.byteLength > maxBytes) {
     throw new Error(
@@ -267,6 +297,7 @@ export async function packageAttempt(input: {
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const manifest = await buildManifest(input.attempt, input.dir, files, { fileName, sizeBytes: bytes.byteLength, sha256, root });
+  if (scriptsMadeExecutable.length > 0) manifest.scriptsMadeExecutable = scriptsMadeExecutable;
   const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { exclude, targets }, input.dir, input.ranOn ?? "sidecar");
   return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }
