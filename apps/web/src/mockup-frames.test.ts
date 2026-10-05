@@ -45,7 +45,8 @@ describe("framedMockupShots", () => {
   test("the slide builders capture through the framer", async () => {
     for (const file of ["./deck-save.ts", "./pages/audiences.tsx", "./documents-archive.ts"]) {
       const source = await Bun.file(new URL(file, import.meta.url)).text();
-      expect(source).toContain("framedMockupShots");
+      // Drawn through the framer, directly or through the session's cache (#751).
+      expect(source).toMatch(/cachedFramedMockupShots|framedMockupShots/);
       expect(source).not.toMatch(/[^d]mockupShots\(/);
     }
   });
