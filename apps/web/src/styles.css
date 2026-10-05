@@ -1078,11 +1078,14 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-y: auto;
 }
 
-/* The send-back picker a hold on send raises: floats above the composer,
-   anchored to it rather than the viewport. The composer scrolls its own
-   overflow (#160), which would clip the picker above it, so it stops while
-   the picker is open. */
-.composer:has(> .sbpick) {
+/* The send-back picker a hold on send raises, and the evaluator's notes,
+   float above the composer, anchored to it rather than the viewport. The
+   composer scrolls its own overflow (#160), which would clip them above it,
+   so it stops while either is open (#210). */
+.composer:has(> .sbpick),
+.composer:has(.evaluator-stance[data-open]),
+.composer:has(.evaluator-stance:hover),
+.composer:has(.evaluator-stance:focus-within) {
   overflow: visible;
 }
 
@@ -2249,7 +2252,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   position: absolute;
   left: 0;
   bottom: calc(100% + var(--space-2));
-  z-index: 30;
+  z-index: 60;
   width: min(48ch, 80vw);
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--wb-border-strong);
@@ -2259,7 +2262,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-family: var(--wb-font-ui);
   font-size: 0.8125rem;
   line-height: 1.45;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+  box-shadow:
+    0 12px 32px color-mix(in srgb, var(--wb-foreground) 18%, transparent),
+    0 2px 6px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
 }
 
 .evaluator-notes ul {
