@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, STAGE6_PEOPLE_ROLE_KEY, type ArtifactNode } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { useBusyWhile } from "../../use-busy.ts";
-import { PRD_FOR_PEOPLE_KIND, composePeopleBrief, mockupKey } from "../../prd-for-people.ts";
+import { PRD_FOR_PEOPLE_KIND, cleanPeopleDocument, composePeopleBrief, mockupKey } from "../../prd-for-people.ts";
 import { screenNamesOf, type MockupShot } from "../../mockup-shots.ts";
 import { framedMockupShots } from "../../mockup-frames.ts";
 import { IDLE_COMPANION, type CompanionState } from "./companion-state.ts";
@@ -161,7 +161,7 @@ export function usePrdForPeople({
     recoveredFor.current = peopleNode.id;
     void api
       .artifactContent(tenantId, peopleNode.id)
-      .then((result) => setPeople((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev)))
+      .then((result) => setPeople((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: cleanPeopleDocument(result.content), recorded: true } : prev)))
       .catch(() => undefined);
   }, [people.status, peopleNode, tenantId]);
 
@@ -197,7 +197,8 @@ export function usePrdForPeople({
       });
       if (!thread) return;
       const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
-      if (reply) setPeople((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply: reply.body } : prev));
+      // The reply as the document (#742): without the writer's word about it.
+      if (reply) setPeople((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply: cleanPeopleDocument(reply.body) } : prev));
     };
     void check();
     const subscription = subscribeMailbox(tenantId, () => void check());

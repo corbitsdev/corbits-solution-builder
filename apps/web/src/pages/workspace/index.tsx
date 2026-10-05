@@ -98,7 +98,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
-import { PRD_FOR_PEOPLE_KIND } from "../../prd-for-people.ts";
+import { PRD_FOR_PEOPLE_KIND, cleanPeopleDocument } from "../../prd-for-people.ts";
 import { useProjectDesignPictures, usePrdForPeople } from "./use-prd-for-people.ts";
 import {
   EvaluatorStance,
@@ -899,7 +899,7 @@ export function StageWorkspace({
               paneClassName="artifact-page"
             />
           ) : (
-            <Markdown source={artifacts.activeContent} {...(artifacts.activeNode.kind === PRD_FOR_PEOPLE_KIND && peoplePictures ? { images: peoplePictures } : {})} />
+            <Markdown source={artifacts.activeNode.kind === PRD_FOR_PEOPLE_KIND ? cleanPeopleDocument(artifacts.activeContent) : artifacts.activeContent} {...(artifacts.activeNode.kind === PRD_FOR_PEOPLE_KIND && peoplePictures ? { images: peoplePictures } : {})} />
           )}
         </div>
       </div>

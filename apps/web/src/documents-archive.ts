@@ -15,7 +15,7 @@ import type { MockupShot, Shooter } from "./mockup-shots.ts";
 import { frameLabel, frameMockup, framedMockupShots } from "./mockup-frames.ts";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { slug } from "./slug.ts";
-import { PRD_FOR_PEOPLE_FILE, PRD_FOR_PEOPLE_KIND, mockupKey, resolveMockupReferences } from "./prd-for-people.ts";
+import { PRD_FOR_PEOPLE_FILE, PRD_FOR_PEOPLE_KIND, cleanPeopleDocument, mockupKey, resolveMockupReferences } from "./prd-for-people.ts";
 
 /** Where the design's screens go, as pictures (#336). */
 export const MOCKUPS_FOLDER = "mockups";
@@ -172,6 +172,8 @@ export async function assembleDocumentsArchive(
       skipped.push(`${documentName(node.kind)}${node.variant ? ` for ${node.variant}` : ""}`);
       continue;
     }
+    // The PRD for people goes out without any word about itself (#742).
+    if (node.kind === PRD_FOR_PEOPLE_KIND) content = cleanPeopleDocument(content);
     const name = documentFileName(node, content);
     zip.file(name, DATA_URL.test(content) ? bytesOf(content) : content);
     files.push({ name, node });

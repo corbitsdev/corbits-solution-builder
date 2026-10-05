@@ -16,7 +16,7 @@ import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
 import { useArchiveRoot } from "./workspace/build-attempts.ts";
 import { useProjectDesignPictures } from "./workspace/use-prd-for-people.ts";
-import { PRD_FOR_PEOPLE_KIND } from "../prd-for-people.ts";
+import { PRD_FOR_PEOPLE_KIND, cleanPeopleDocument } from "../prd-for-people.ts";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -332,7 +332,7 @@ function ArtifactReader({
               style={{ background: "#fff" }} // not-our-surface: a generated mockup is its own page
             />
           ) : (
-            <Markdown source={content} {...(node.kind === PRD_FOR_PEOPLE_KIND && pictures ? { images: pictures } : {})} />
+            <Markdown source={node.kind === PRD_FOR_PEOPLE_KIND ? cleanPeopleDocument(content) : content} {...(node.kind === PRD_FOR_PEOPLE_KIND && pictures ? { images: pictures } : {})} />
           )
         ) : (
           <p className="inline-note">This version could not be read.</p>
