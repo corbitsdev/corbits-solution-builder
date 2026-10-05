@@ -17,6 +17,7 @@ import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { WaitingTips } from "./waiting-tips.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
+import { useZenGarden } from "../../zen-garden-setting.ts";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
  *  as a system boundary line (`stage-events.ts`'s `switchEvents`) — dropped
@@ -206,13 +207,18 @@ export function StageConversation({
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
   const opening = pending && !messages.some((message) => message.author === "agent");
+  // Before the first reply the busy line alone says who is working and on
+  // what; the "Working on it…" row would repeat it. The row stands in only
+  // while the zen garden holds that line at the foot of the window instead.
+  const garden = useZenGarden();
+  const workingRow = pending && (!opening || garden === "on");
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
     // A turn in flight has no row of its own yet, so the transcript would sit
     // unchanged after the person hits send. This is the one message the thread
     // shows that the host has not recorded.
-    if (pending) {
+    if (workingRow) {
       list.push({
         id: "pending",
         role: "agent",
@@ -221,7 +227,7 @@ export function StageConversation({
       });
     }
     return eventMessages(list, events);
-  }, [messages, pending, events]);
+  }, [messages, workingRow, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);

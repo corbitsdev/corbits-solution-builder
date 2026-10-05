@@ -30,7 +30,7 @@ describe("the zen garden busy indicator", () => {
 
   test("the workspace counts a specialist turn in flight and a thread still loading", () => {
     const index = read("./pages/workspace/index.tsx");
-    expect(index).toContain("useBusyWhile(busy, specialistActivity(stage, askKind(");
+    expect(index).toContain("useBusyWhile(busy, specialistActivity(stage, pendingAsk));");
     expect(index).toContain('useBusyWhile(!threadLoaded, "Opening the conversation");');
   });
 
@@ -45,7 +45,7 @@ describe("the zen garden busy indicator", () => {
     // #113: what the work is, under the clock, in a live region of its own.
     expect(garden).toContain('<p className="zen-garden-doing" role="status" aria-live="polite">');
     expect(garden).toContain("{visible && label ? label : null}");
-    expect(read("./pages/workspace/index.tsx")).toContain("useBusyWhile(busy, specialistActivity(stage, askKind(");
+    expect(read("./pages/workspace/index.tsx")).toContain("useBusyWhile(busy, specialistActivity(stage, pendingAsk));");
   });
 
   // #120: a grip along the top edge sets the height by drag or keyboard,
