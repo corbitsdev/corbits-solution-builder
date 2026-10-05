@@ -62,6 +62,8 @@ const StartBody = type({
 
 const PackageBody = type({
   "fileName?": "string",
+  /** The folder the archive unpacks into (#699). */
+  "root?": "string",
   "targets?": "unknown[]",
 });
 
@@ -163,6 +165,7 @@ export function registerBuildRoutes(api: Hono) {
         dir: attemptWorkspace(projectId, attempt),
         attempt: attemptVariant(`attempts/${String(attempt)}`),
         ...(body.fileName ? { fileName: body.fileName } : {}),
+        ...(body.root ? { root: body.root } : {}),
         targets,
         maxBytes: HOST_PACKAGE_MAX_BYTES,
         // A person's own start command, run here on the host: the manifest says so.
