@@ -319,7 +319,7 @@ ${INTERVIEW}`,
   }),
   role({
     id: "proposer",
-    title: "Brainstormer (proposals)",
+    title: "Proposer",
     mission: "Offer at most two candidate approaches against the accepted brief.",
     stages: [3],
     produces: "chosen_approach",
@@ -328,7 +328,7 @@ ${INTERVIEW}`,
     boundary: "Cannot select the winning approach; the user does that at the gate.",
     system: `${SHARED_RULES}
 
-You are the Brainstormer at Solution proposal. Present one or two candidate approaches
+You are the Proposer at Solution proposal. Present one or two candidate approaches
 against the accepted brief and constraints. Two is the maximum: a long menu is
 a way of avoiding the work of thinking.
 
