@@ -63,7 +63,9 @@ export function completedDocuments(nodes: readonly ArtifactNode[]): ArtifactNode
     if (!KIND_ORDER.has(node.kind) || node.supersededByNodeId !== null) continue;
     const key = lineageOf(node);
     const held = newest.get(key);
-    if (!held || node.version > held.version) newest.set(key, node);
+    // Within one artifact a higher version is newer; across artifacts (a
+    // redrawn deck beside the one it replaced) the later one is (#766).
+    if (!held || (held.artifactId === node.artifactId ? node.version > held.version : Date.parse(node.createdAt) > Date.parse(held.createdAt))) newest.set(key, node);
   }
   return [...newest.values()].sort(
     (a, b) =>
@@ -159,6 +161,8 @@ export async function assembleDocumentsArchive(
   frame: (shot: MockupShot) => Promise<Uint8Array> = frameMockup,
   /** Says which step is under way (#751), for the busy strip. */
   progress: (doing: string) => void = () => undefined,
+  /** A stakeholder's slides as drawn now (#766), as a data URL; null keeps the recorded file. Absent means the recorded file. */
+  currentDeck: ((deck: ArtifactNode) => Promise<string | null>) | null = null,
 ): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
   const files: { name: string; node: ArtifactNode }[] = [];
@@ -178,6 +182,14 @@ export async function assembleDocumentsArchive(
       continue;
     }
     let content = held.content;
+    // Slides go out as the app draws them now (#766): the Slides tab and
+    // the Concept approval exports draw from the package with the current
+    // design, so the recorded file can be older than what the person sees.
+    if (node.kind === "audience_deck" && currentDeck) {
+      progress(`Drawing slides for ${node.variant ?? node.title}`);
+      const drawn = await currentDeck(node);
+      if (drawn) content = drawn;
+    }
     // The PRD for people goes out without any word about itself (#742).
     if (node.kind === PRD_FOR_PEOPLE_KIND) content = cleanPeopleDocument(content);
     const name = documentFileName(node, content);
@@ -229,13 +241,15 @@ export async function assembleDocumentsArchive(
 }
 
 export type DocumentsArchiveDeps = {
-  projectView: (projectId: string) => Promise<{ project: { title: string }; tenantId: string; nodes: ArtifactNode[] }>;
+  projectView: (projectId: string) => Promise<{ project: { title: string; policy?: unknown }; tenantId: string; nodes: ArtifactNode[] }>;
   artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
   save: (blob: Blob, name: string) => void;
   /** Draws the design's screens; the session's cached drawing when absent. */
   shoot?: Shooter;
   /** Says which step is under way (#751), for the busy strip. */
   onProgress?: (doing: string) => void;
+  /** Builds a stakeholder's slides as drawn now (#766), given the project; absent means the recorded files. */
+  currentDeck?: (project: { projectId: string; tenantId: string; projectTitle: string; policy: unknown; nodes: readonly ArtifactNode[] }) => (deck: ArtifactNode) => Promise<string | null>;
 };
 
 /** Saves the browser's download of a Blob under `name`. */
@@ -258,6 +272,7 @@ export async function downloadProjectDocuments(projectId: string, deps: Document
     deps.shoot ?? cachedFramedMockupShots,
     frameMockup,
     deps.onProgress ?? (() => undefined),
+    deps.currentDeck ? deps.currentDeck({ projectId, tenantId: detail.tenantId, projectTitle: detail.project.title, policy: detail.project.policy ?? null, nodes: detail.nodes }) : null,
   );
   const name = documentsArchiveName(detail.project.title);
   if (archive.files.length === 0) return { message: `${detail.project.title} has no finished documents yet.`, complete: false };

@@ -30,6 +30,7 @@ import { Banner, Button, downloadArtifact, stageName, type NoticeAction } from "
 import { useBusyWhile } from "../use-busy.ts";
 import { Dictated } from "../dictation.jsx";
 import { downloadProjectDocuments, saveBlob } from "../documents-archive.ts";
+import { currentDeckBuilder } from "../deck-current.ts";
 import { assembleBundle, bundleFileName } from "../project-export.js";
 import { formatUsage } from "../project-usage.js";
 import { ProjectSettingsDialog } from "./project-settings.jsx";
@@ -61,7 +62,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
 
 /** The finished documents as one zip (#323); the notice says what went in. */
 export function downloadDocuments(project: MenuProject, onProgress?: (doing: string) => void): Promise<{ message: string; complete: boolean; saveAgain?: () => void }> {
-  return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob, ...(onProgress ? { onProgress } : {}) });
+  return downloadProjectDocuments(project.id, { projectView: api.projectView, artifactContent: api.artifactContent, save: saveBlob, currentDeck: currentDeckBuilder, ...(onProgress ? { onProgress } : {}) });
 }
 
 export function ProjectMenu({
