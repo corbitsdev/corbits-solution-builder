@@ -31,7 +31,7 @@ import {
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { AudiencePackages } from "../audiences.jsx";
+import { AudienceGate, AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, CopyButton, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
@@ -1029,6 +1029,20 @@ export function StageWorkspace({
               </span>
             </div>
           ) : null}
+          {/* Stage 5's gate, the quorum tally included, sits here too (#725). */}
+          {stage === 5 ? (
+            <AudienceGate
+              detail={detail}
+              tenantId={tenantId}
+              workflowView={workflowView}
+              canApprove={approveAllowed}
+              approving={approving || workflow.refreshingAfterAction}
+              approveReason={workflowView?.allowed.approveReason ?? null}
+              lastRefusal={workflowView?.lastRefusal ?? null}
+              onApprove={() => void approve()}
+              onChanged={() => void refreshWorkflow()}
+            />
+          ) : null}
         </>
       }
       {...(draftRefs ? { draftRefs } : {})}
@@ -1240,11 +1254,6 @@ export function StageWorkspace({
                   void refreshWorkflow();
                   void loadThread();
                 }}
-                onApprove={approve}
-                approving={approving || workflow.refreshingAfterAction}
-                canApprove={approveAllowed}
-                approveReason={workflowView?.allowed.approveReason ?? null}
-                lastRefusal={workflowView?.lastRefusal ?? null}
                 workflowView={workflowView}
                 onStakeholdersSaved={() => void openReviewNow()}
               />

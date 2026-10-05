@@ -4740,18 +4740,6 @@ button[aria-disabled="true"] {
   width: 56cqw;
 }
 
-/* Stage 5's gate row: the tally on the left, Approve and continue on the
-   right, its reason beside it (#240). */
-.audience-gate {
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.audience-gate > .inline-note:first-child {
-  margin-right: auto;
-}
-
 .slide-footer {
   position: absolute;
   left: 5cqw;

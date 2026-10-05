@@ -17,7 +17,7 @@ import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
@@ -99,9 +99,13 @@ async function awaitPackageReply(
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
 /** A role's name as a person reads it. */
+/** The stakeholder named "You": the person themselves. */
+function isYou(entry: { name: string }): boolean {
+  return entry.name.trim().toLowerCase() === "you";
+}
+
 /** The person's own entry — the stakeholder named "You" — ahead of everyone else, the rest as listed. */
 function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
-  const isYou = (entry: T) => entry.name.trim().toLowerCase() === "you";
   return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
 }
 
@@ -357,11 +361,6 @@ export function AudiencePackages({
   detail,
   tenantId,
   onChanged,
-  onApprove,
-  approving,
-  canApprove,
-  approveReason,
-  lastRefusal,
   workflowView,
   onStakeholdersSaved,
   messages = [],
@@ -372,15 +371,6 @@ export function AudiencePackages({
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
-  /** Persists the specialist's latest reply as this stage's approved draft and advances. */
-  onApprove: () => void;
-  approving: boolean;
-  /** The project workflow's own verdict — the only gate on the Approve button. */
-  canApprove: boolean;
-  /** Why `canApprove` is false, or null once it is true (`ProjectWorkflowView.allowed.approveReason`). */
-  approveReason: ApproveReason | null;
-  /** `ProjectWorkflowView.lastRefusal` — carries the quorum breakdown when `approveReason` is `quorum_not_met`. */
-  lastRefusal: DecisionRecord | null;
   /** The project workflow's own view -- `audienceDecisions`/`stage5Quorum`
    *  are the quorum tally's ONE source (CL-8870), never artifact metadata. */
   workflowView: ProjectWorkflowView | null;
@@ -735,35 +725,13 @@ export function AudiencePackages({
     };
   }, [content, selected?.id, selected?.variant, selected?.title, previewRole, detail.project.title, designHtml, designRef]);
 
-  // The quorum tally is the workflow's own view -- `stage5Quorum`, folded by
-  // `foldProjectWorkflow` from the `audiencePolicy` an `open_review` captured
-  // and the votes recorded since (CL-8870). Never re-derived here; before a
-  // review has opened it is null, so the display falls back to the policy's
-  // own `audienceQuorum` (the "must proceed" count the editor above shows).
+  // The votes are the workflow's own view (CL-8870), never re-derived here.
+  // The tally and the gate they open live above the chat box (`AudienceGate`).
   const votesByAudience = workflowView?.audienceDecisions ?? {};
-  const requiredQuorum = workflowView?.stage5Quorum?.required ?? quorum;
-  const proceeded = workflowView?.stage5Quorum?.proceeded ?? 0;
-  const blockedBy = workflowView?.stage5Quorum?.blocked ?? [];
   // A vote cast on an earlier version of a stakeholder's package is neither
   // a proceed nor a block: the workflow lists it as stale and it needs a
   // new decision (#50).
-  const staleBy = workflowView?.stage5Quorum?.stale ?? [];
-  const staleVoters = new Set(staleBy);
-  // The workflow's own verdict -- never recomputed here (`approveReasonText`
-  // is the one place that translates `approveReason` to copy).
-  const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
-  // `allowed.approve` only gates on a review being open; the reducer's own
-  // quorum verdict holds the button until an approve could be committed.
-  const quorumMet = workflowView?.stage5Quorum?.met === true;
-  const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
-  const quorumReason = quorumMet
-    ? null
-    : blockedBy.length > 0
-      ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
-      : staleBy.length > 0
-        ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
-        : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
-  const approveReasonDisplay = reason ?? quorumReason;
+  const staleVoters = new Set(workflowView?.stage5Quorum?.stale ?? []);
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -890,26 +858,6 @@ export function AudiencePackages({
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {/* The gate and the button it opens, together at the top (#240): a
-              person who has just proceeded reads the tally and acts on it here
-              rather than under the packages and slides. */}
-          <div className="button-row audience-gate">
-            {requiredQuorum > 0 ? (
-              <p className="inline-note">
-                {proceeded} of {requiredQuorum} required have proceeded.
-              </p>
-            ) : null}
-            <Button
-              variant="primary"
-              loading={approving}
-              disabled={!canApprove || packages.length === 0 || !quorumMet}
-              doing="Approving the packages and opening the next stage"
-              onClick={onApprove}
-            >
-              Approve and continue
-            </Button>
-            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
-          </div>
           <Tabs
             label="Stakeholder packages"
             active={selected?.variant ?? ""}
@@ -1035,6 +983,113 @@ export function AudiencePackages({
           ) : null}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Stage 5's gate (#725), above the chat box like every other stage's: the
+ * quorum tally and Approve and continue. The workflow's verdict is the only
+ * gate, and `approveReasonText` the one translation of it. When the person
+ * is the only stakeholder, the one click records their proceed and then
+ * approves -- the two decisions the chip popover and this button would
+ * otherwise take one at a time, in that order; the reducer still judges
+ * each. With more stakeholders the button is held until the quorum is met.
+ */
+export function AudienceGate({
+  detail,
+  tenantId,
+  workflowView,
+  canApprove,
+  approving,
+  approveReason,
+  lastRefusal,
+  onApprove,
+  onChanged,
+}: {
+  detail: ProjectDetail;
+  tenantId: string;
+  workflowView: ProjectWorkflowView | null;
+  /** `allowed.approve`: a review is open. The quorum is judged separately below. */
+  canApprove: boolean;
+  approving: boolean;
+  approveReason: ApproveReason | null;
+  lastRefusal: DecisionRecord | null;
+  onApprove: () => void;
+  onChanged: () => void;
+}) {
+  const [proceeding, setProceeding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const policy = (detail.project.policy ?? {}) as Policy;
+  const audiences = youFirst(policy.audiences ?? []);
+  const packages = packagesByStakeholder(detail.nodes, audiences);
+  if (packages.length === 0) return null;
+
+  // Before a review has opened `stage5Quorum` is null, so the count falls
+  // back to the policy's own quorum, the "must proceed" the editor shows.
+  const requiredQuorum = workflowView?.stage5Quorum?.required ?? policy.audienceQuorum ?? 0;
+  const proceeded = workflowView?.stage5Quorum?.proceeded ?? 0;
+  const blockedBy = workflowView?.stage5Quorum?.blocked ?? [];
+  const staleBy = workflowView?.stage5Quorum?.stale ?? [];
+  const quorumMet = workflowView?.stage5Quorum?.met === true;
+  const solo = audiences.length === 1 && isYou(audiences[0]!) && requiredQuorum <= 1;
+  const waiting = Math.max(requiredQuorum - proceeded, 0);
+  const reason =
+    (approveReason ? approveReasonText(approveReason, lastRefusal) : null) ??
+    (quorumMet
+      ? null
+      : blockedBy.length > 0
+        ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
+        : staleBy.length > 0
+          ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
+          : `Waiting for ${waiting} stakeholder${waiting === 1 ? "" : "s"} to proceed.`);
+
+  const proceedAndApprove = async () => {
+    const own = packages[0]!;
+    if (!own.variant) return;
+    setProceeding(true);
+    setError(null);
+    try {
+      if (!quorumMet) {
+        const reviewed = await packageRefOf(own, (nodeId) => api.artifactContent(tenantId, nodeId).then((result) => result.content));
+        const result = await recordAudienceVote(audienceApprovalDeps, {
+          projectId: detail.project.id,
+          stage: workflowView?.stage ?? 5,
+          audience: own.variant,
+          decision: "proceed",
+          note: "",
+          decisionId: `dec-${crypto.randomUUID()}`,
+          package: reviewed,
+        });
+        if (!result.ok) throw new Error(`That decision was refused: ${stageRefusalMessage(result.reason)}`);
+        onChanged();
+      }
+      onApprove();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setProceeding(false);
+    }
+  };
+
+  return (
+    <div className="stage-action composer-approve">
+      <span className="composer-approve-lead">
+        <span>{solo ? "You're the only stakeholder. Happy with it?" : requiredQuorum > 0 ? `${proceeded} of ${requiredQuorum} have proceeded.` : "Happy with it?"}</span>
+        {!solo && reason ? <span>{reason}</span> : null}
+        {error ? <span role="alert">{error}</span> : null}
+      </span>
+      <span className="approve">
+        <Button
+          variant="ghost"
+          loading={approving || proceeding}
+          disabled={!canApprove || (!solo && !quorumMet)}
+          onClick={solo ? () => void proceedAndApprove() : onApprove}
+        >
+          <Check aria-hidden="true" />
+          Approve and continue
+        </Button>
+      </span>
     </div>
   );
 }
