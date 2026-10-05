@@ -497,7 +497,8 @@ export function App() {
   const fills = view === "project";
 
   const [bellOpen, setBellOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exportDoing, setExportDoing] = useState<string | null>(null);
+  const exporting = exportDoing !== null;
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
@@ -711,7 +712,7 @@ export function App() {
   // a project that has not landed yet, and an export in flight. Everything
   // a button does registers itself through `Button`.
   useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");
-  useBusyWhile(exporting, "Building the document package");
+  useBusyWhile(exporting, exportDoing ?? undefined);
 
   useEffect(() => {
     if (!selected) {
@@ -779,14 +780,14 @@ export function App() {
    */
   const exportProject = async () => {
     if (exporting || !detail) return;
-    setExporting(true);
+    setExportDoing("Building the document package");
     try {
-      const outcome = await downloadDocuments(detail.project);
+      const outcome = await downloadDocuments(detail.project, (doing) => setExportDoing(doing));
       notify(outcome.message, outcome.complete, outcome.saveAgain ? { label: "Save again", onClick: outcome.saveAgain } : undefined);
     } catch (cause) {
       toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
-      setExporting(false);
+      setExportDoing(null);
     }
   };
 

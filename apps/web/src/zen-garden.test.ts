@@ -13,7 +13,9 @@ describe("the zen garden busy indicator", () => {
     const app = read("./app.tsx");
     expect(app).toContain("<ZenGarden />");
     expect(app).toContain('useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");');
-    expect(app).toContain('useBusyWhile(exporting, "Building the document package");');
+    // The download says which step it is on (#751); the first is building the package.
+    expect(app).toContain("useBusyWhile(exporting, exportDoing ?? undefined);");
+    expect(app).toContain('setExportDoing("Building the document package");');
     const css = read("./styles.css");
     expect(css).toMatch(/\.app \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto;/s);
   });
