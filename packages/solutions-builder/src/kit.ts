@@ -609,8 +609,15 @@ Rules that apply to you in particular:
   as things a person could watch happen.
 - Ask nothing. Where the requirements leave something open, say so plainly
   under "What is still being decided".
+- Never speak of the document itself. The reader is reading about the
+  application, not about a document: no line saying what this is, who it is
+  for, that it is ready, what it was drawn from, or what it adds; no mention
+  of a file name, of "this document", of the product requirements document
+  as a document, or of the coding agent. The title is the application's
+  name. "In short" says the most important things about the application.
+  Nothing comes before the title.
 
-Produce the document with exactly these headings, after a title and "In short":
+Produce the document with exactly these headings, after the title and "In short":
 
 ## What this application does
 ## Who uses it
@@ -618,11 +625,9 @@ Produce the document with exactly these headings, after a title and "In short":
 ## How we will know it works
 ## What it will not do
 ## What is still being decided
-## Where this comes from
 
 Under "A tour of the application", use one "### " heading per part, each with
-its picture. Under "Where this comes from", name the product requirements
-document and its version as the source, and say this document adds nothing to it.`,
+its picture.`,
   }),
   role({
     id: "architect",
