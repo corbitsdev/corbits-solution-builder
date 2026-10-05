@@ -28,6 +28,7 @@ import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { summarizeVerification, type VerificationItem, type VerificationReport } from "./delivery.js";
+import { requiredDocumentItems } from "./build-documents.js";
 import { verifyApiTarget, verifyWebTarget } from "./target-verify.js";
 import { classifyTarget, type TargetVerification } from "./targets.js";
 
@@ -247,7 +248,10 @@ export async function verifyArchive(input: {
   const extracted = await extractArchive(input.archiveBytes);
   let compared: { items: VerificationItem[]; extras: number };
   try {
-    compared = compareArchiveToManifest(input.manifest, await hashTree(input.root ? join(extracted, input.root) : extracted, input.exclude));
+    const held = await hashTree(input.root ? join(extracted, input.root) : extracted, input.exclude);
+    compared = compareArchiveToManifest(input.manifest, held);
+    // The two documents every build ships (#733), checked on the archive itself.
+    compared.items.push(...requiredDocumentItems(new Set(held.map((entry) => entry.path))));
   } finally {
     await rm(extracted, { recursive: true, force: true });
   }

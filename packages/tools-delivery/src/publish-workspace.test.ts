@@ -35,6 +35,8 @@ async function fixtureWorkspace(): Promise<string> {
   await mkdir(join(attempt, "node_modules", "dep"), { recursive: true });
   await writeFile(join(attempt, "src", "index.ts"), "export const x = 1;\n");
   await writeFile(join(attempt, "README.md"), "# fixture\n");
+  await mkdir(join(attempt, "docs"), { recursive: true });
+  await writeFile(join(attempt, "docs", "USER-MANUAL.md"), "# Using it\n");
   await writeFile(join(attempt, "node_modules", "dep", "index.js"), "module.exports = 1;\n");
   await mkdir(join(attempt, ".corbits", "hooks"), { recursive: true });
   await writeFile(join(attempt, ".corbits", "hooks", "solution-builder-turns.sh"), "#!/bin/sh\n");
@@ -88,7 +90,7 @@ describe("publish_workspace (fallback path)", () => {
       const { manifest } = parsed;
       expect(manifest.attempt).toBe("attempt-2");
       // The bridge's hook directory is the host's plumbing, never shipped or listed.
-      expect(manifest.files.map((file) => file.path)).toEqual(["README.md", "server.ts", "src/index.ts"]);
+      expect(manifest.files.map((file) => file.path)).toEqual(["README.md", "docs/USER-MANUAL.md", "server.ts", "src/index.ts"]);
       expect(manifest.archive.sizeBytes).toBe(parsed.sizeBytes);
 
       const verification = manifest.verification!;
@@ -96,8 +98,12 @@ describe("publish_workspace (fallback path)", () => {
       expect(verification.report.manifestNodeId).toBe(`sha256:${manifest.archive.sha256}`);
       expect(verification.items.map((item) => [item.path, item.status, item.checkedBy])).toEqual([
         ["README.md", "verified", "tool"],
+        ["docs/USER-MANUAL.md", "verified", "tool"],
         ["server.ts", "verified", "tool"],
         ["src/index.ts", "verified", "tool"],
+        // The two documents every build ships, checked on the archive itself.
+        ["README.md", "verified", "tool"],
+        ["docs/USER-MANUAL.md", "verified", "tool"],
         ["target:web", "verified", "tool"],
       ]);
       expect(verification.targets[0]?.transcript).toContain("port " + String(port) + " opened.");

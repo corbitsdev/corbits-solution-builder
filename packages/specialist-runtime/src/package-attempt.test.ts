@@ -10,6 +10,8 @@ async function fixtureTree(): Promise<string> {
   await mkdir(join(dir, "node_modules", "dep"), { recursive: true });
   await writeFile(join(dir, "src", "index.ts"), "export const x = 1;\n");
   await writeFile(join(dir, "README.md"), "# hi\n");
+  await mkdir(join(dir, "docs"), { recursive: true });
+  await writeFile(join(dir, "docs", "USER-MANUAL.md"), "# Using it\n");
   await writeFile(join(dir, "node_modules", "dep", "index.js"), "module.exports = 1;\n");
   return dir;
 }
@@ -52,11 +54,11 @@ describe("packageAttempt", () => {
       const packaged = await packageAttempt({ dir, attempt: "attempt-1", fileName: "agentic-agency-attempt-1.tar.gz", root: "agentic-agency-attempt-1", ranOn: "host" });
       expect(packaged.fileName).toBe("agentic-agency-attempt-1.tar.gz");
       expect(packaged.manifest.archive.root).toBe("agentic-agency-attempt-1");
-      expect(packaged.manifest.files.map((file) => file.path)).toEqual(["README.md", "src/index.ts"]);
+      expect(packaged.manifest.files.map((file) => file.path)).toEqual(["README.md", "docs/USER-MANUAL.md", "src/index.ts"]);
       expect(packaged.verification.complete).toBe(true);
       expect(packaged.manifest.verification?.archiveExtras).toBe(0);
       const bytes = Buffer.from(packaged.dataUri.slice(packaged.dataUri.indexOf(",") + 1), "base64");
-      expect(entriesOf(bytes)).toEqual(["agentic-agency-attempt-1/README.md", "agentic-agency-attempt-1/src/index.ts"]);
+      expect(entriesOf(bytes)).toEqual(["agentic-agency-attempt-1/README.md", "agentic-agency-attempt-1/docs/USER-MANUAL.md", "agentic-agency-attempt-1/src/index.ts"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -69,6 +71,24 @@ describe("packageAttempt", () => {
       expect(packaged.fileName).toBe("build.tar.gz");
       expect(packaged.manifest.archive.root).toBe("build");
       expect(packaged.verification.complete).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// #733: a build without its two documents is recorded as incomplete.
+describe("the documents every build ships", () => {
+  test("a missing user manual is a missing docs item, and the verification is incomplete", async () => {
+    const dir = await fixtureTree();
+    try {
+      await rm(join(dir, "docs"), { recursive: true, force: true });
+      const packaged = await packageAttempt({ dir, attempt: "attempt-1" });
+      expect(packaged.verification.complete).toBe(false);
+      expect(packaged.verification.failed).toContain("docs/USER-MANUAL.md");
+      const item = packaged.manifest.verification?.items.find((entry) => entry.path === "docs/USER-MANUAL.md");
+      expect(item).toMatchObject({ category: "docs", required: true, status: "missing", checkedBy: "tool" });
+      expect(packaged.manifest.verification?.items.find((entry) => entry.path === "README.md" && entry.category === "docs")).toMatchObject({ status: "verified", checkedBy: "tool" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
