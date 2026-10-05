@@ -51,7 +51,7 @@ import { repairedStackDraft } from "./stack-repair.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { ArrowLeft, Flame, Send, Undo2 } from "lucide-react";
+import { ArrowLeft, Check, Flame, Send, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -1004,7 +1004,27 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
-      rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+      rows={
+        <>
+          {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {/* Stage 4's gate sits above the box like every document stage's
+              (#720), not at the end of the design pane's tools row. The
+              workflow's verdict is its only gate. */}
+          {stage === 4 && approveAllowed ? (
+            <div className="stage-action composer-approve">
+              <span className="composer-approve-lead">
+                <span>{detail.soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
+              </span>
+              <span className="approve">
+                <Button variant="ghost" loading={approving || workflow.refreshingAfterAction} onClick={() => void approve()}>
+                  <Check aria-hidden="true" />
+                  {detail.soloApproval ? "Approve and continue" : "Send for approval"}
+                </Button>
+              </span>
+            </div>
+          ) : null}
+        </>
+      }
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1195,10 +1215,8 @@ export function StageWorkspace({
               detail={detail}
               tenantId={tenantId}
               onChanged={() => void refreshWorkflow()}
-              onApprove={approve}
               onRevise={(prompt) => send(prompt)}
               latestReply={latestDesign}
-              canApprove={approveAllowed}
             />
           )}
         </StagePanes>
@@ -1352,23 +1370,17 @@ function DesignPanel({
   detail,
   tenantId,
   onChanged,
-  onApprove,
   onRevise,
   latestReply,
-  canApprove,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
-  /** Persists the specialist's latest reply and advances to stage 5. */
-  onApprove: () => Promise<unknown>;
   /** Sends free-form feedback text to the stage-4 specialist's mail thread. */
   onRevise: (prompt: string) => Promise<unknown>;
   /** The specialist's latest unpersisted reply — the mockup, before approval. */
   latestReply: ChatMessage | null;
-  /** The project workflow's own verdict — the only gate on the Approve button. */
-  canApprove: boolean;
 }) {
   // The design history is just this project's `design_artifact` nodes —
   // already on `detail`, so no route of its own is needed to read it. Under
@@ -1431,11 +1443,6 @@ function DesignPanel({
         feedbackByNode={new Map<string, FoldedFeedback>()}
         contentByNode={contentByNode}
         tenantId={tenantId}
-        approval={{
-          soloApproval: detail.soloApproval,
-          canApprove,
-          onApprove: () => onApprove(),
-        }}
         revise={(_feedback, prompt) => onRevise(prompt)}
         onChanged={() => {
           void load();

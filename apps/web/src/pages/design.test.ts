@@ -28,13 +28,15 @@ describe("stage 4 design pane", () => {
     expect(page).not.toContain("design-reviewing");
   });
 
-  test("iframe preview, approve, and comment stay", () => {
+  test("iframe preview and comment stay; approve sits above the chat box, not in the tools row (#720)", () => {
     expect(page).toContain("<DesignFrames");
     expect(page).toContain('paneClassName="design-preview"');
     // The frames themselves, and their sandbox, live in the shared module (#101).
     expect(read("../design-frames.tsx")).toContain('sandbox=""');
-    expect(page).toContain("Approve and continue");
-    expect(page).toContain("Send for approval");
+    expect(page).not.toContain("Approve and continue");
+    expect(page).not.toContain("approval.");
+    const workspace = read("./workspace/index.tsx");
+    expect(workspace).toContain('{stage === 4 && approveAllowed ? (\n            <div className="stage-action composer-approve">');
     expect(page).toContain("Add this comment");
     expect(page).toContain("Submit feedback and generate the next version");
     expect(page).toContain('data-tour="design-submit"');
