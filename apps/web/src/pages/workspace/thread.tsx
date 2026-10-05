@@ -12,6 +12,7 @@ import { answersDraft, segmentsIn } from "./choices.js";
 import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
+import { sendBackCueIdOf } from "./send-back-cue.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { WaitingTips } from "./waiting-tips.tsx";
@@ -36,7 +37,8 @@ export function withoutSwitchMarker(message: ChatMessage): string {
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
 function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
-  return messages.map((message) => {
+  // A send-back cue is shown as its event line (`cueEvents`), not as a turn.
+  return messages.filter((message) => !(message.author === "me" && sendBackCueIdOf(message.subject))).map((message) => {
     const body = withoutSwitchMarker(message);
     return {
       id: message.id,
@@ -256,7 +258,14 @@ export function StageConversation({
                   key={message.id}
                   className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}
                 >
-                  {event.text}
+                  {event.body ? (
+                    <details className="bubble-fold">
+                      <summary>{event.text}</summary>
+                      <MessageBody text={event.body} />
+                    </details>
+                  ) : (
+                    event.text
+                  )}
                 </div>
               );
             }

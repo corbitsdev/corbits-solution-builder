@@ -71,7 +71,7 @@ import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionSelect } from "./artifact-strip.tsx";
-import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
+import { cueEvents, stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -381,6 +381,7 @@ export function StageWorkspace({
     () => [
       ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
       ...switchEvents(foldedMessages),
+      ...cueEvents(foldedMessages),
       ...routedEvents,
     ],
     [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],

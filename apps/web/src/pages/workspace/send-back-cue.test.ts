@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DecisionRecord, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
-import { sendBackResumeCue } from "./send-back-cue.ts";
+import { sendBackCueIdOf, sendBackResumeCue } from "./send-back-cue.ts";
 
 function sendBack(target: number, id = "dec_1", reason?: string): DecisionRecord {
   return {
@@ -33,7 +33,8 @@ describe("sendBackResumeCue", () => {
     expect(cue!.body).toContain("This stage was sent back: The approved build plan has no Stack section.");
     expect(cue!.body).toContain("FR-1");
     expect(cue!.body.indexOf("FR-1")).toBeLessThan(cue!.body.indexOf("This stage was sent back"));
-    expect(cue!.body).toContain("[ref:dec_6]");
+    expect(cue!.subject).toBe("[sent-back:dec_6] Build plan");
+    expect(cue!.body).not.toContain("[ref:");
     expect(cue!.body).not.toContain("attempts/");
   });
 
@@ -42,10 +43,21 @@ describe("sendBackResumeCue", () => {
   });
 
   test("a cue already in the thread is never repeated, and a newer send-back gets its own", () => {
-    const sent = { body: "This stage was sent back: x [ref:dec_a]" };
+    const sent = { body: "This stage was sent back: x", subject: "[sent-back:dec_a] Solution proposal" };
     expect(sendBackResumeCue({ stage: 3, decisions: [sendBack(3, "dec_a")], messages: [sent], requirements: [] })).toBeNull();
     const again = sendBackResumeCue({ stage: 3, decisions: [sendBack(3, "dec_a"), sendBack(3, "dec_b", "again")], messages: [sent], requirements: [] });
     expect(again?.marker).toBe("dec_b");
+  });
+
+  test("a cue sent before the marker moved to the subject still counts as sent", () => {
+    const legacy = { body: "This stage was sent back: x [ref:dec_a]" };
+    expect(sendBackResumeCue({ stage: 3, decisions: [sendBack(3, "dec_a")], messages: [legacy], requirements: [] })).toBeNull();
+  });
+
+  test("the subject's id is read back, and only from a subject", () => {
+    expect(sendBackCueIdOf("[sent-back:dec_9] Build and test")).toBe("dec_9");
+    expect(sendBackCueIdOf("[opening:p:3] Solution proposal")).toBeNull();
+    expect(sendBackCueIdOf(undefined)).toBeNull();
   });
 
   test("a refused send-back is not a send-back", () => {
@@ -56,6 +68,6 @@ describe("sendBackResumeCue", () => {
   test("stage 8 keeps its fresh-attempt instruction", () => {
     const cue = sendBackResumeCue({ stage: 8, decisions: [sendBack(8, "dec_8", "tests fail.")], messages: [{ body: "x" }], requirements: [] });
     expect(cue!.body).toContain("attempts/<n+1>/");
-    expect(cue!.body).toContain("[ref:dec_8]");
+    expect(cue!.subject).toBe("[sent-back:dec_8] Build and test");
   });
 });

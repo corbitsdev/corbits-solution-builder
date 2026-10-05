@@ -392,6 +392,23 @@
   overflow: auto;
 }
 
+/* An event line standing for a mail the app sent (#708): the line is the
+   summary; the exact words open under it in the body's own type. */
+.conv .conv-event .bubble-fold > summary {
+  cursor: pointer;
+}
+
+.conv .conv-event .bubble-fold > :not(summary) {
+  font-family: var(--wb-font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  color: var(--wb-foreground);
+  margin-top: var(--space-2);
+  max-height: 360px;
+  overflow: auto;
+}
+
 .conv [data-slot="message-bubble"] {
   display: flex;
   flex-direction: column;

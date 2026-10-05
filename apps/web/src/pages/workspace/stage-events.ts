@@ -12,6 +12,7 @@ import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { stageName } from "../../components.jsx";
 import { handoffMarkerOf } from "./use-model-handoff.ts";
+import { sendBackCueIdOf } from "./send-back-cue.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -20,6 +21,8 @@ export type StageEvent = {
   readonly text: string;
   /** "boundary" gets the hairline rule the stage's first line carries. */
   readonly tone: "boundary" | "line";
+  /** The exact mail the line stands for, opened on demand. */
+  readonly body?: string;
 };
 
 /** The lines one stage's conversation shows, in time order after the
@@ -122,6 +125,26 @@ export function switchEvents(messages: readonly ChatMessage[]): StageEvent[] {
     const lines = message.body.split("\n").filter((line) => line.trim().length > 0);
     const secondLine = lines[1]?.trim();
     out.push({ id: `ev:switch:${id}`, at: message.at, text: secondLine || "This stage continued on a different model.", tone: "boundary" });
+  }
+  return out;
+}
+
+/**
+ * #708: the resume cue the app mails a specialist after a send-back, read
+ * back off the sent mail as a quiet line rather than a turn in the person's
+ * name. The decision's own "Returned" line says what happened; this one says
+ * the specialist was told, with the exact words behind a disclosure. Gated
+ * on `author === "me"` like `switchEvents`, for the same reason.
+ */
+export function cueEvents(messages: readonly ChatMessage[]): StageEvent[] {
+  const out: StageEvent[] = [];
+  const seenIds = new Set<string>();
+  for (const message of messages) {
+    if (message.author !== "me") continue;
+    const id = sendBackCueIdOf(message.subject);
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+    out.push({ id: `ev:cue:${id}`, at: message.at, text: "The specialist was told the stage came back", tone: "line", body: message.body });
   }
   return out;
 }

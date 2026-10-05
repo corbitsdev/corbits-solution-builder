@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { eventMessages, stageEvents } from "./stage-events.ts";
+import { cueEvents, eventMessages, stageEvents } from "./stage-events.ts";
 import type { ArtifactNode } from "../../client.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 
@@ -84,6 +84,14 @@ describe("stageEvents", () => {
       "Problem discovery",
       "Turn aborted",
     ]);
+  });
+});
+
+describe("cueEvents", () => {
+  test("a send-back cue the app mailed becomes one line carrying its exact words, once", () => {
+    const cue = { id: "m1", author: "me" as const, at: "2026-01-01T12:00:00.000Z", subject: "[sent-back:d9] Solution proposal", body: "This stage was sent back: tighten it." };
+    const events = cueEvents([cue, { ...cue, id: "m2" }, { ...cue, id: "m3", author: "agent" as const }, { id: "m4", author: "me" as const, at: "", body: "plain" }]);
+    expect(events).toEqual([{ id: "ev:cue:d9", at: "2026-01-01T12:00:00.000Z", text: "The specialist was told the stage came back", tone: "line", body: "This stage was sent back: tighten it." }]);
   });
 });
 

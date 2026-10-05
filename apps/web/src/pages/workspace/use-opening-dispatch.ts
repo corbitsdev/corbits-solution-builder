@@ -306,7 +306,7 @@ export function useOpeningDispatch({
     if (!cue || cueInFlightRef.current === cue.marker) return;
     cueInFlightRef.current = cue.marker;
     void api
-      .sendStageMail(tenantId, agentAddress, { body: cue.body })
+      .sendStageMail(tenantId, agentAddress, { body: cue.body, subject: cue.subject })
       .then(() => reloadThread())
       .catch(() => {
         // Not marked as sent: the next thread or view change retries.
