@@ -254,6 +254,13 @@ export type BridgeOutcome = {
 };
 
 /** One build attempt as the host records it (`apps/hub/src/build-attempts.ts`). */
+/** What an attempt's directory records of the worker's own progress (#697). */
+export type BuildWorkspaceReport = {
+  commits: { hash: string; at: string; subject: string }[];
+  status: string | null;
+  questions: string | null;
+};
+
 export type BuildAttempt = {
   attempt: number;
   /** `detached`: a worker an earlier run of the host started is still alive, known only by its process group. `lost`: started, never recorded as ended, and gone. */
@@ -1199,7 +1206,7 @@ export const api = {
       body: JSON.stringify({ prompt, ...(continueFrom === undefined ? {} : { continueFrom }) }),
     }),
   buildAttempt: (projectId: string, attempt: number) =>
-    request<{ attempt: BuildAttempt; log: string; prompt: string | null }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
+    request<{ attempt: BuildAttempt; log: string; prompt: string | null; workspaceReport?: BuildWorkspaceReport }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
   cancelBuildAttempt: (projectId: string, attempt: number) =>
     request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
   /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
