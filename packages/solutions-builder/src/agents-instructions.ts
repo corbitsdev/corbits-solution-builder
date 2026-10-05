@@ -13,6 +13,8 @@ export type AgentsFiles = {
   readonly design: string | null;
   readonly mockups: string | null;
   readonly plan: string | null;
+  /** The PRD written for people (#737), when the package has it: named so the agent knows it is not a source. */
+  readonly people?: string | null;
 };
 
 /** The PRD's acceptance-criterion ids, as minted: "AC-1 through AC-45", a list when they are not one run, or null when it has none. */
@@ -56,6 +58,7 @@ export function agentsInstructions(files: AgentsFiles, requirementsMarkdown: str
     "   Context only. They MUST NOT introduce functionality that is absent",
     "   from or explicitly excluded by the PRD.",
     "",
+    ...(files.people ? [`${files.people} tells the same requirements for a person to read. It adds`, `nothing to ${files.requirements} and is not a source; build from ${files.requirements}.`, ""] : []),
     "If two documents conflict, follow the higher-priority document.",
     "",
     "Do not invent product behavior to resolve ambiguity.",
