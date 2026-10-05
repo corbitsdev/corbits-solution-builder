@@ -2,16 +2,16 @@
  * How a design is framed for reading: each phone screen in an iPhone of its
  * own (#101), each desktop screen in a browser window (#264), and the rest
  * of the document in the pane. "As designed" follows the designer's own
- * surface marks; the selector can force a whole design into a phone or a
- * desktop window, or show it plain in the pane.
+ * surface marks; the selector can put every screen in a phone or in a
+ * desktop window instead, or show the design plain in the pane.
  */
 import { useEffect, useRef, useState } from "react";
 import { DESKTOP_WINDOW, DesktopFrame } from "./desktop-frame.tsx";
 import { fitDesignScale, measureDesignWidth } from "./design-measure.ts";
 import { IPHONE_17_PRO, IPhoneFrame } from "./iphone-frame.tsx";
-import { PHONE_VIEWPORT_WIDTH, splitPhoneSurfaces, splitSurfaces, type PhoneSurface } from "./phone-surfaces.ts";
+import { splitSurfaces, type PhoneSurface } from "./phone-surfaces.ts";
 
-export type FrameMode = "auto" | "phone" | "desktop" | "narrow" | "pane";
+export type FrameMode = "auto" | "phone" | "desktop" | "pane";
 
 export type FramedDesign = {
   readonly phones: readonly PhoneSurface[];
@@ -21,26 +21,19 @@ export type FramedDesign = {
 
 export function framedDesign(content: string, mode: FrameMode, title: string): FramedDesign {
   if (mode === "pane") return { phones: [], desktops: [], main: content };
-  if (mode === "phone") {
-    // The phone screens in phones and everything else in the pane, as
-    // before #264; a design with no phone screens goes whole into one phone.
-    const split = splitPhoneSurfaces(content);
-    return split.phones.length > 0
-      ? { phones: split.phones, desktops: [], main: split.main }
-      : { phones: [{ id: "whole", title, html: content }], desktops: [], main: null };
-  }
-  if (mode === "desktop") return { phones: [], desktops: [{ id: "whole", title, html: content }], main: null };
-  if (mode === "narrow") {
-    // Every screen in a phone, the desktop ones included (#417): the stage 4
-    // prompt asks each screen to lay out at the phone width too, and this is
-    // where a person checks that it does. An unmarked design goes in whole.
-    const split = splitSurfaces(content);
-    return split.phones.length > 0 || split.desktops.length > 0
-      ? { phones: [...split.desktops, ...split.phones], desktops: [], main: split.main }
-      : { phones: [{ id: "whole", title, html: content }], desktops: [], main: null };
-  }
   const split = splitSurfaces(content);
-  if (split.phones.length > 0 || split.desktops.length > 0) return split;
+  const screens = [...split.desktops, ...split.phones];
+  if (mode === "phone" || mode === "desktop") {
+    // A forced frame is one frame per screen, whatever surface the designer
+    // marked it for (#417, #714): the stage 4 prompt asks each screen to lay
+    // out at the phone width too, and a desktop window shows a phone screen
+    // at its full width. Picking a device never stacks every screen into one
+    // frame; only an unmarked design goes in whole.
+    const framed = screens.length > 0 ? screens : [{ id: "whole", title, html: content }];
+    const main = screens.length > 0 ? split.main : null;
+    return mode === "phone" ? { phones: framed, desktops: [], main } : { phones: [], desktops: framed, main };
+  }
+  if (screens.length > 0) return split;
   return { phones: [], desktops: [], main: content };
 }
 
@@ -50,7 +43,6 @@ export function FrameSelect({ value, onChange }: { value: FrameMode; onChange: (
       <option value="auto">Frame: as designed</option>
       <option value="desktop">{DESKTOP_WINDOW.name}</option>
       <option value="phone">{IPHONE_17_PRO.name}</option>
-      <option value="narrow">Every screen at {String(PHONE_VIEWPORT_WIDTH)}px</option>
       <option value="pane">Pane</option>
     </select>
   );

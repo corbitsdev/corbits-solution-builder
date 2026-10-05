@@ -109,13 +109,19 @@ describe("desktop surfaces", () => {
     expect(split.desktops[0]!.html).not.toContain("overflow-x:hidden");
   });
 
-  test("every screen at phone width puts the desktop screens in phones too, notes still in the pane (#417)", () => {
-    const framed = framedDesign(desktop, "narrow", "Inteva");
+  test("iPhone forced puts the desktop screens in phones too, one each, notes still in the pane (#417, #714)", () => {
+    const framed = framedDesign(desktop, "phone", "Inteva");
     expect(framed.desktops).toEqual([]);
     expect(framed.phones.map((screen) => screen.id)).toEqual(["screen-projects", "screen-review"]);
     expect(framed.main).toContain("design-notes");
-    const plain = "<!doctype html><html><body><p>hi</p></body></html>";
-    expect(framedDesign(plain, "narrow", "Plain")).toEqual({ phones: [{ id: "whole", title: "Plain", html: plain }], desktops: [], main: null });
+  });
+
+  test("Desktop window forced puts each marked screen in a window of its own, notes still in the pane (#714)", () => {
+    const framed = framedDesign(design, "desktop", "Workout Log");
+    expect(framed.phones).toEqual([]);
+    expect(framed.desktops.map((screen) => screen.id)).toEqual(["screen-capture", "phone-2"]);
+    expect(framed.main).toContain("screen-admin");
+    expect(framed.main).not.toContain("Review queue");
   });
 
   test("as designed puts desktop screens in windows; the phone-only split leaves them in the pane", () => {
@@ -126,7 +132,7 @@ describe("desktop surfaces", () => {
     expect(splitPhoneSurfaces(desktop).phones).toEqual([]);
   });
 
-  test("Desktop window forced puts the whole design in one window", () => {
+  test("Desktop window forced puts an unmarked design in one window whole", () => {
     const plain = "<!doctype html><html><body><p>Plain</p></body></html>";
     expect(framedDesign(plain, "desktop", "Plain")).toEqual({ phones: [], desktops: [{ id: "whole", title: "Plain", html: plain }], main: null });
   });
