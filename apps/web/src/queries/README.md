@@ -8,8 +8,10 @@ key is spelled.
 
 A clock is a backstop of 30 s or more, never the mechanism; the stream
 invalidates. The mailbox and inbox streams the app already holds open are
-where a reply, a run event or a decision first shows up, so that is what
-marks a query stale. Nothing refetches in a hidden tab
+where a reply first shows up, so that is what marks a query stale. A
+workflow decision is a signal to the run and never lands on the mailbox
+stream, so a decision's effect on the workflow view is read by that view's
+own poll, not by a mailbox nudge. Nothing refetches in a hidden tab
 (`refetchIntervalInBackground: false`); a return to the tab refetches what
 is stale (`refetchOnWindowFocus: true`).
 
