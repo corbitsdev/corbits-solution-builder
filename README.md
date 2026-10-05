@@ -38,21 +38,14 @@ Solution Builder launch URL: http://127.0.0.1:PORT/?token=...
 
 The window opens on an empty workspace. Connect a provider in Settings — an
 API key, a sign-in with ChatGPT or xAI, or a local endpoint that speaks the
-OpenAI protocol — to draft with real agents, or in another terminal run:
-
-```bash
-bun run seed:demo
-```
-
-for a project already through stages 1 and 2, with a decision waiting at
-stage 3.
+OpenAI protocol — to draft with real agents.
 
 To run the desktop shell instead of the browser (`bun run dev:desktop`) or
 build it (`bun run desktop:build`), you also need the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust and
 Xcode command line tools on macOS). `bun run check` is the full gate, run
-before a commit; every script, including
-these, is listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
+before a commit; selected scripts, including
+these, are listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
 
 ## Read next
 
@@ -61,9 +54,9 @@ these, is listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the components, the layout of
   the repository, and how this sits on Interchange.
 - [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md): the stack, paths and
-  environment variables, credentials, every script.
+  environment variables, credentials, selected scripts.
 - [AGENTS.md](AGENTS.md): conventions for working in this repository,
-  including the rules the code enforces.
+  including the rules review enforces.
 
 ## Licensing
 

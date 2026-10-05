@@ -102,11 +102,15 @@ Closing the window does not stop the process. Only an explicit stop does.
 
 ## Embedded packages versus remote
 
-A desktop embed cannot assume npm. `scripts/embed-workflow-closure.ts`
-snapshots the vendored `@intx/*` `dist/` trees, `@solutions-builder/app`,
-`@solutions-builder/tools-deck` and `@solutions-builder/tools-delivery` into
-`packages/installer/src/workflow-closure-embed.ts`. `install()` reads that
-snapshot and writes the files into the workflow asset as workspace members.
+A desktop embed cannot assume npm. `scripts/closure-pack.ts` builds the
+dependency closure once — the vendored `@intx/*` `dist/` trees,
+`@solutions-builder/app`, `@solutions-builder/tools-deck` and
+`@solutions-builder/tools-delivery` plus the runtime npm dependencies they
+import — and `scripts/pack-closure-static.ts` (`bun run assets:pack-closure`)
+writes that set as static `.tgz` files plus a manifest under
+`apps/web/public/closure/`. `install()` reads that snapshot through
+`packages/installer/src/workflow-closure.ts` and writes the files into the
+workflow asset as workspace members.
 The sidecar resolves `workspace:*` from the same git pack. The web bundle
 has no `node:fs`; the snapshot is what makes client-driven install possible
 on the embedded hub.
@@ -168,9 +172,9 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `desktop:build` | `.app` and `.dmg`; signed and notarised when the Apple env vars are set, unsigned otherwise (see "Releasing the desktop app") |
 | `sidecar:build` | Compile the host to one self-contained binary |
 | `typecheck` | `tsc --noEmit`, strict |
-| `check` | The gate: typecheck, unit tests (ours and the vendored ones we rely on) and `check:build` |
+| `check` | The gate: `check:static` (typecheck + unit tests) and `check:build` |
+| `check:static` | `typecheck` plus the unit tests |
 | `check:build` | `ui:build`, so a change that breaks the interface build fails the gate |
-| `seed:demo` | A project with a decision waiting |
 | `walk` | Render every screen with fixtures for review |
 | `vendor:build` | Emit `dist/` for the vendored packages, which the sidecar needs since it runs without `intx-src`; runs on `bun install` |
 | `postinstall` | `vendor:build`, so a fresh `bun install` leaves `dist/` in place without a separate step |

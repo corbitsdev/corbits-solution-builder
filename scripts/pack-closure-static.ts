@@ -1,7 +1,7 @@
 /**
  * Writes the shared workflow closure to static `.tgz` files plus a manifest,
  * shipped next to the web app rather than embedded in the JS bundle
- * (`packages/installer/src/workflow-closure-embed.ts`, unchanged by this
+ * (`packages/installer/src/workflow-closure.ts`, unchanged by this
  * script — see CL-8334/CL-8381).
  *
  * The packed set is identical to `scripts/pack-registry-asset.ts`'s
