@@ -386,6 +386,9 @@ export function BuildPanel({
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
       if (!address || !attempt.outcome) return;
+      // Packaging an attempt that is already recorded (#727) writes a
+      // newer archive and manifest, which take over from the earlier ones.
+      const repackaged = attemptRecorded(detail.nodes, attempt.attempt);
       // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
       // The archive and the one folder it unpacks into are named for the
@@ -412,6 +415,7 @@ export function BuildPanel({
           probeSkipped: probe.skipped,
           forecast,
           verification: packaged.verification,
+          ...(repackaged ? { repackaged: true } : {}),
         }),
       });
       await Promise.all([load(), refreshAttempts()]);
@@ -423,7 +427,9 @@ export function BuildPanel({
   const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
   const freshness = useMemo(() => (status ? statusFreshness(messages, status, current) : null), [messages, status, current]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
-  const canRecord = current !== null && current.state === "ended" && current.outcome !== null && !attemptRecorded(detail.nodes, current.attempt);
+  const ended = current !== null && current.state === "ended" && current.outcome !== null;
+  const recorded = current !== null && attemptRecorded(detail.nodes, current.attempt);
+  const canRecord = ended && !recorded;
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
 
   return (
@@ -623,11 +629,23 @@ export function BuildPanel({
                     </Button>
                   </div>
                 ) : null}
+                {ended && recorded ? (
+                  // Already recorded (#727): the same step again, for a new
+                  // archive layout or a probe with a start command this time.
+                  <div className="document-tools">
+                    <input className="field" aria-label="Start command" placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`} value={startCommand} onChange={(event) => setStartCommand(event.target.value)} />
+                    <input className="field" aria-label="Port" placeholder="Port" inputMode="numeric" value={port} onChange={(event) => setPort(event.target.value)} style={{ maxWidth: "6rem" }} />
+                    <Button variant="secondary" loading={busy === "record"} disabled={busy !== null || !address || !!running} onClick={() => void record(current)}>
+                      Re-archive attempt {String(current.attempt)}'s files
+                    </Button>
+                    <p className="inline-note">No build runs. The directory the worker left is packaged again as it is, a new archive and manifest are written beside the earlier ones, and the supervisor is briefed on the new record.</p>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="inline-note">No attempt has been started. The worker builds in its own directory on this computer, from the frozen plan, requirements, design and stack.</p>
             )}
-            {archive ? <BuildFile node={archive} tenantId={tenantId} /> : null}
+            {archive ? <BuildFile node={archive} nodes={detail.nodes} tenantId={tenantId} /> : null}
             {status ? (
               <>
                 <h2>
