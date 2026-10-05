@@ -2583,6 +2583,28 @@ describe("GET /workflows/:anchorRunId/runs/:runId/events", () => {
     ]);
   });
 
+  test("?tail=N returns only the last N events, and a bad value is ignored", async () => {
+    const repoDirById = await buildRunRepo(WORKFLOW_RUN_REPO_ID, {
+      "runs/run-1/events/0.json": JSON.stringify({ type: "RunStarted" }),
+      "runs/run-1/events/1.json": JSON.stringify({ type: "StepStarted" }),
+      "runs/run-1/events/2.json": JSON.stringify({ type: "RunCompleted" }),
+    });
+    const app = createTestApp({
+      grants: [readGrant()],
+      repoDirById,
+      db: { deploymentRow },
+    });
+    const tailed = await app.fetch(
+      new Request(`http://localhost${base()}/${DEPLOYMENT_ID}/runs/run-1/events?tail=1`),
+    );
+    expect(tailed.status).toBe(200);
+    expect(assertBody(RunEventsBody, await tailed.json()).events.map((e) => [e.seq, e.type])).toEqual([[2, "RunCompleted"]]);
+    const ignored = await app.fetch(
+      new Request(`http://localhost${base()}/${DEPLOYMENT_ID}/runs/run-1/events?tail=zero`),
+    );
+    expect(assertBody(RunEventsBody, await ignored.json()).events).toHaveLength(3);
+  });
+
   test("returns an empty event list for an unknown run", async () => {
     const repoDirById = await buildRunRepo(WORKFLOW_RUN_REPO_ID, {
       "runs/run-1/events/0.json": JSON.stringify({ type: "RunStarted" }),

@@ -481,6 +481,7 @@ export function workflowsFor(transport: Transport, scope: string) {
     /** Every run id present in `deploymentId`'s event log: top-level runs and
      *  their loop-iteration children (`<runId>__<stepId>__<n>`). */
     runs: (deploymentId: string) => listWorkflowRuns(transport, scope, deploymentId),
-    runEvents: (deploymentId: string, runId: string) => readWorkflowRunEvents(transport, scope, deploymentId, runId),
+    /** `tail`: only the run's last N events (#757), for a reader that needs its latest word, not its history. */
+    runEvents: (deploymentId: string, runId: string, options?: { tail?: number }) => readWorkflowRunEvents(transport, scope, deploymentId, runId, options ?? {}),
   };
 }

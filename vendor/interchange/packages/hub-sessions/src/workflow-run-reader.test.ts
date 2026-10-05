@@ -78,6 +78,30 @@ describe("WorkflowRunReader", () => {
     await fs.promises.rm(dir, { recursive: true, force: true });
   });
 
+  test("tail returns only the last N events by seq, in both forms", async () => {
+    await commitFiles(dir, {
+      "runs/run-t/events/0.json": JSON.stringify({ type: "RunStarted" }),
+      "runs/run-t/events/10.json": JSON.stringify({ type: "StepCompleted" }),
+      "runs/run-t/events/2.json": JSON.stringify({ type: "StepStarted" }),
+      "runs/run-t/events/9.json": JSON.stringify({ type: "StepStarted" }),
+      "runs/run-s/events.jsonl": [
+        JSON.stringify({ seq: 0, type: "RunStarted" }),
+        JSON.stringify({ seq: 1, type: "StepStarted" }),
+        JSON.stringify({ seq: 2, type: "RunCompleted" }),
+      ].join("\n"),
+    });
+    const perEvent = await reader.readRunEvents(REPO_ID, REF, "run-t", { tail: 2 });
+    expect(perEvent.map((e) => [e.seq, e.type])).toEqual([
+      [9, "StepStarted"],
+      [10, "StepCompleted"],
+    ]);
+    const sealed = await reader.readRunEvents(REPO_ID, REF, "run-s", { tail: 1 });
+    expect(sealed.map((e) => [e.seq, e.type])).toEqual([[2, "RunCompleted"]]);
+    // A tail wider than the log, or no tail, is the whole log.
+    expect((await reader.readRunEvents(REPO_ID, REF, "run-t", { tail: 50 })).map((e) => e.seq)).toEqual([0, 2, 9, 10]);
+    expect((await reader.readRunEvents(REPO_ID, REF, "run-t")).map((e) => e.seq)).toEqual([0, 2, 9, 10]);
+  });
+
   test("returns seq-ordered events across out-of-order filenames", async () => {
     await commitFiles(dir, {
       "runs/run-1/events/0.json": JSON.stringify({

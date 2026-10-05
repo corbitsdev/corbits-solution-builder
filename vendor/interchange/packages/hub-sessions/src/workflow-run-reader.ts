@@ -60,7 +60,18 @@ export interface WorkflowRunReader {
     repoId: RepoId,
     ref: string,
     runId: string,
+    options?: ReadRunEventsOptions,
   ): Promise<WorkflowRunEvent[]>;
+}
+
+/**
+ * `tail`: return only the last N events by seq. Only those blobs are read
+ * from the repository (or only the last N lines of a sealed log are
+ * parsed), so a reader that needs the run's latest word -- is it working,
+ * parked or ended -- does not inflate a long run's whole history.
+ */
+export interface ReadRunEventsOptions {
+  tail?: number;
 }
 
 export function createWorkflowRunReader(
@@ -123,7 +134,12 @@ export function createWorkflowRunReader(
     repoId: RepoId,
     ref: string,
     runId: string,
+    options: ReadRunEventsOptions = {},
   ): Promise<WorkflowRunEvent[]> {
+    const tail =
+      typeof options.tail === "number" && Number.isInteger(options.tail) && options.tail > 0
+        ? options.tail
+        : undefined;
     const dir = repoDirOrNull(repoId);
     if (dir === null) return [];
     const oid = await resolveRefOrNull(dir, ref);
@@ -156,9 +172,9 @@ export function createWorkflowRunReader(
       const blob = await git.readBlob({ fs, dir, oid: combined.oid });
       const source = `${runDir}/${WORKFLOW_RUN_EVENTS_FILE}`;
       const events: WorkflowRunEvent[] = [];
-      for (const line of splitCombinedEventLog(
-        new TextDecoder().decode(blob.blob),
-      )) {
+      // A sealed log is written in seq order; the tail is its last lines.
+      const lines = splitCombinedEventLog(new TextDecoder().decode(blob.blob));
+      for (const line of tail === undefined ? lines : lines.slice(-tail)) {
         events.push(parseRunEventLine(line, source));
       }
       events.sort((a, b) => a.seq - b.seq);
@@ -172,11 +188,16 @@ export function createWorkflowRunReader(
       if (cause instanceof git.Errors.NotFoundError) return [];
       throw cause;
     }
+    // Only the entries wanted are read: the tree lists every event's seq
+    // in its filename, so the last N by seq are known before any blob is.
+    const wanted = tree.tree
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => ({ entry, seq: requireEventSeq(entry.path, `${eventsDir}/${entry.path}`) }))
+      .sort((a, b) => a.seq - b.seq);
+    const chosen = tail === undefined ? wanted : wanted.slice(-tail);
     const events: WorkflowRunEvent[] = [];
-    for (const entry of tree.tree) {
-      if (entry.type !== "blob") continue;
+    for (const { entry, seq } of chosen) {
       const path = `${eventsDir}/${entry.path}`;
-      const seq = requireEventSeq(entry.path, path);
       const blob = await git.readBlob({ fs, dir, oid: entry.oid });
       const parsed = parseEventObject(
         new TextDecoder().decode(blob.blob),

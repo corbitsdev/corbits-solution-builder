@@ -181,15 +181,25 @@ export async function listWorkflowRuns(
   return list.runIds;
 }
 
+/** `tail`: only the last N events by seq, read as such by the hub. */
+export interface ReadWorkflowRunEventsOptions {
+  tail?: number;
+}
+
 export async function readWorkflowRunEvents(
   transport: Transport,
   tenantId: string,
   runId: string,
   eventRunId: string,
+  options: ReadWorkflowRunEventsOptions = {},
 ): Promise<WorkflowRunEvents> {
+  const query =
+    typeof options.tail === "number" && Number.isInteger(options.tail) && options.tail > 0
+      ? `?tail=${String(options.tail)}`
+      : "";
   const raw = await transport.fetch<unknown>(
     "GET",
-    `${workflowsBasePath(tenantId)}/${runId}/runs/${eventRunId}/events`,
+    `${workflowsBasePath(tenantId)}/${runId}/runs/${eventRunId}/events${query}`,
   );
   const events = WorkflowRunEvents(raw);
   if (events instanceof type.errors) {

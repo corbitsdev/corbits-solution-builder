@@ -370,3 +370,21 @@ dependency, move `classifyResponse` into `@corbits/codex-provider`'s adapter,
 and drop this hunk of the patch, `responses-adapter.ts` and this section.
 
 **Kill date.** When `faremeter/interchange#198` is released.
+
+## `packages/hub-sessions/src/workflow-run-reader.ts`, `packages/hub-api/src/routes/workflows.ts`, `packages/hub-client/src/workflows.ts` — `tail` on the run events read
+
+**Why.** Solution Builder issue #757: the web app reads a specialist's run
+events every few seconds to say whether it is working, and the route returned
+the whole log, every blob inflated from the run's git repository. A run whose
+events each embed a large prompt made the host spend its CPU on that read and
+answer nothing else.
+
+**What changed.** `readRunEvents` takes `{ tail }` and reads only the last N
+events by seq (the per-event tree lists seqs in filenames, so only those blobs
+are read; a sealed `events.jsonl` parses only its last N lines). The route
+takes `?tail=N`, ignoring a value that is not a positive integer. The client
+takes the same option and sends the query. Tests cover reader, route and
+client.
+
+**Upstream-able.** Yes; a bounded read of a run's latest events belongs in
+Interchange's hub API.
