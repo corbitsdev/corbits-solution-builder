@@ -561,6 +561,7 @@ export function StageWorkspace({
     audiences: ((detail.project.policy ?? {}) as { audiences?: { name: string; role: string }[] }).audiences ?? [],
     designRef: designReview?.status === "approved" ? designReview.artifactId : null,
     content: artifacts.activeContent,
+    onRecorded: onChanged,
   });
   // The reader's own send-back (#248): a confirm beside its button, naming
   // the one stage the open document belongs to, never the composer's picker.

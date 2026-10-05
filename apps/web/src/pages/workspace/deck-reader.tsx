@@ -19,7 +19,7 @@ import { deckFrom, packageOutlineProblem, type Deck } from "@solutions-builder/a
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
 import { Button, downloadArtifact } from "../../components.jsx";
 import { deckDesignFor } from "../../deck-design-settings.ts";
-import { deckFileName } from "../../deck-save.ts";
+import { buildPackageDeck, deckFileName } from "../../deck-save.ts";
 import { mockupShots, placeMockups, type MockupShot } from "../../mockup-shots.ts";
 import { printHtmlDocument } from "../../print.jsx";
 import { slidesPrintHtml } from "../../slides-print.ts";
@@ -67,8 +67,10 @@ export function useRecordedDeck(args: {
   readonly designRef: string | null;
   /** The recorded file as the reader loaded it: a data: URL once it is here. */
   readonly content: string;
+  /** A redrawn deck was recorded (#760): the project's artifact graph should be re-read. */
+  readonly onRecorded?: () => void;
 }): RecordedDeckView {
-  const { node, nodes, tenantId, projectId, projectTitle, audiences, designRef, content } = args;
+  const { node, nodes, tenantId, projectId, projectTitle, audiences, designRef, content, onRecorded } = args;
   const [built, setBuilt] = useState<{ forId: string; deck: Deck | null; note: string | null }>({ forId: "", deck: null, note: null });
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -122,7 +124,7 @@ export function useRecordedDeck(args: {
       if (cancelled) return;
       const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;
       const notes = [
-        "Drawn again from the package's deck outline; the saved file is what Save as PPTX gives.",
+        "Drawn again from the package's deck outline with the current design; the saved file is what Save as PPTX gives until Redraw with the current design records it.",
         brief.failed ? "Its design documents could not be read, so this is the default look." : null,
         designHtml && shots.length === 0 ? "The design's screens could not be captured for the slides." : null,
       ].filter((line): line is string => line !== null);
@@ -162,6 +164,45 @@ export function useRecordedDeck(args: {
     }
   };
 
+  // The recorded file, drawn again with the design as it stands now (#760):
+  // the role's saved look, the uploaded design documents' theme and the
+  // approved GUI's screens, recorded as the next version of these slides.
+  const redraw = async () => {
+    if (!node || !packageId) return;
+    setExporting(true);
+    setNotice(null);
+    try {
+      const [pkg, brief, preferences, designHtml] = await Promise.all([
+        api.artifactContent(tenantId, packageId).then((result) => result.content),
+        api.deckBrief(projectId, role).then(
+          (loaded) => ({ theme: loaded.theme, failed: false }),
+          () => ({ theme: null, failed: true }),
+        ),
+        api.deckDesigns().then(
+          (loaded) => loaded as Record<string, unknown>,
+          () => ({}) as Record<string, unknown>,
+        ),
+        designRef ? api.artifactContent(tenantId, designRef).then((result) => (isHtmlDocument(result.content) ? result.content : null), () => null) : Promise.resolve(null),
+      ]);
+      const built = await buildPackageDeck({
+        projectTitle,
+        audience: variant ?? node.title,
+        role,
+        markdown: pkg,
+        design: deckDesignFor(role, preferences),
+        ...(brief.theme ? { theme: brief.theme } : {}),
+        ...(designHtml ? { mockup: { html: designHtml } } : {}),
+      });
+      await api.persistAudienceDeck(projectId, { variant: variant ?? node.title, title: node.title, dataUri: built.dataUrl, sourceVersionIds: [packageId] });
+      onRecorded?.();
+      setNotice(redrawSummary(variant ?? node.title, brief.failed, built.imagesNotice));
+    } catch (cause) {
+      toast.error(`Slides could not be redrawn: ${cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const exportMenu = node ? (
     <Menu>
       <MenuTrigger asChild>
@@ -174,9 +215,20 @@ export function useRecordedDeck(args: {
         <MenuItem onSelect={() => void exportSlides("google")}>Open in Google Slides</MenuItem>
         <MenuItem onSelect={() => void exportSlides("pptx")}>Save as PPTX</MenuItem>
         <MenuItem onSelect={() => void exportSlides("pdf")}>Save as PDF</MenuItem>
+        <MenuItem disabled={!packageId} onSelect={() => void redraw()}>
+          Redraw with the current design
+        </MenuItem>
       </MenuContent>
     </Menu>
   ) : null;
 
   return { deck: current.deck, note: current.note, exportMenu, notice };
+}
+
+/** What the redraw says when it has recorded the slides (#760). */
+export function redrawSummary(audience: string, themeFailed: boolean, imagesNotice: string | null): string {
+  const parts = [`Slides for ${audience} were redrawn with the current design and recorded as the newest version; Save as PPTX and Open in Google Slides now hand out this file.`];
+  if (themeFailed) parts.push("The design documents could not be read, so this is the role's saved look without their theme.");
+  if (imagesNotice) parts.push(`${imagesNotice[0]!.toUpperCase()}${imagesNotice.slice(1)}.`);
+  return parts.join(" ");
 }
