@@ -376,6 +376,16 @@ export type CommittedReads = {
 
 export interface RepoStore {
   /**
+   * The store's per-repository isomorphic-git memoization cache for
+   * `repoId`, for a reader that calls git.* on the repo directory itself.
+   * isomorphic-git loads a whole pack file to read one object; threading
+   * this cache through readTree/readBlob means the pack and its index load
+   * once and are reused, instead of being re-read on every call. The store
+   * drops a repo's cache after a received pack, so it never serves a stale
+   * object. Optional: a store without it reads uncached.
+   */
+  gitCacheFor?(repoId: RepoId): object;
+  /**
    * Bookkeeping primitive. Idempotent. Creates the repo directory
    * and initializes git when not already present. Not gated by
    * `authorize`: the only state it can produce is an empty repo, so

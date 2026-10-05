@@ -2168,6 +2168,7 @@ export function createRepoStore(config: CreateRepoStoreConfig): RepoStore {
   }
 
   return {
+    gitCacheFor: (repoId: RepoId) => cacheFor(getRepoDir(repoId)),
     initRepo,
     writeTree,
     writeTreePreservingPrefix,
