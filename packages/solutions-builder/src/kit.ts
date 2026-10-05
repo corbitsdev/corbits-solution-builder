@@ -14,6 +14,7 @@ import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
 import { STACK_RUBRIC } from "./stack-rubric.js";
+import { SELECTABLE_TARGETS } from "./targets.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
 export const SHARED_RULES = `
@@ -230,6 +231,20 @@ decides how much of the build is yours.
 - Option: One exists, I can point you at it
 - Option: Nothing exists yet, define it as part of this
 - Option: Not sure`;
+
+/**
+ * The delivery targets the Estimator prices, rendered out of the freeze
+ * picker's own `SELECTABLE_TARGETS`: the estimate and the picker must agree
+ * on which targets the platform actually exercises, so both read the one
+ * list rather than restating it (#354).
+ */
+const ESTIMATOR_TARGET_LINES = SELECTABLE_TARGETS.map((entry) =>
+  `- ${entry.target} ("${entry.label}"): ${
+    entry.verified
+      ? "exercised — stage 8 starts it and probes it over HTTP"
+      : "not exercised — no verification is implemented, so it is reported as not exercised"
+  }`,
+).join("\n");
 
 export const AGENT_KIT: readonly AgentRole[] = [
   role({
@@ -677,7 +692,10 @@ Distinguish a blocking finding from a suggestion. ${specialty.authority}`,
     id: "estimator",
     title: "Estimator",
     mission: "Convert the accepted plan into an honest firm estimate.",
-    stages: [7, 8],
+    // Stage 7 only: stage 8's specialist is the build-supervisor (agentFor),
+    // and nothing deploys this prompt there, so claiming 8 prices a gate record
+    // the role never sees (#354).
+    stages: [7],
     produces: "cost_approval",
     promptKey: "sb-prompt-estimator-v1",
     temperature: 0.2,
@@ -692,6 +710,11 @@ Price the stack the plan's "## Stack" block records, never one you re-derive.
 It is built on Interchange and the Corbits packages; price against what that
 reuse actually saves rather than the cost of building each primitive from
 scratch.
+
+Price the plan's declared \`targets\` entries — the same entries stage 8
+passes to \`publish_workspace\` — never a target you choose yourself. A
+delivery target is one of:
+${ESTIMATOR_TARGET_LINES}
 
 ${AGENT_ECONOMICS}
 
@@ -710,10 +733,16 @@ Under "Forecast", break the figure down by line so a budget approver can argue
 with a line rather than with a total: inference by stage and by the build's
 rounds, providers, running cost. State the currency. Give the time the same
 way, as the coding agent's wall-clock plus the gates, never as human effort.
+Then one line per declared target: what verifying and packaging that target
+costs, and whether the platform exercises it. A target the platform does not
+exercise names its human verification cost instead; that cost is never zero.
 
 An unknown quota or an unknown subscription allowance is an unknown. It is not
 zero cost, and it is not unlimited use. Say so in "Unknowns" rather than
 quietly assuming either.
+
+Under "What I need from you", when the plan declares more than one target and
+the figure differs materially by target, ask which target the approval is for.
 
 ${INTERVIEW}`,
   }),
