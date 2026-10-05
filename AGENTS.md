@@ -2,9 +2,9 @@
 
 ## Verify before asserting
 
-`bun run check` is the gate: shard and migration consistency, dependency
-boundaries, typecheck, unit tests, the interface build and the static
-interface audits. Run it before claiming anything works.
+`bun run check` is the gate: `check:static` (typecheck plus the unit tests)
+and `check:build` (the interface build). Run it before claiming anything
+works.
 Green does not mean the product is right - drive the app for anything a person
 would see.
 
@@ -83,9 +83,8 @@ and why, rather than routing around it.
 
 ## Working alongside other agents
 
-Several agents work this repository at once, each in its own worktree. What
-`.beta/` once recorded about that, kept here because it still costs someone
-an evening when forgotten:
+Several agents work this repository at once, each in its own worktree. The
+following still costs someone an evening when forgotten:
 
 - Never `git stash`. Worktrees share one stash stack, so a stash in one
   worktree can swallow another's uncommitted work. Commit a WIP instead.

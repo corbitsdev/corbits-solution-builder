@@ -1,4 +1,8 @@
-# 8270 — Native Interchange gates
+# 8270 — Native Interchange gates (EXECUTED, 2026-10-05)
+
+> Executed: the host approvals machine described below is deleted and the
+> platform primitives are in place. The host files this plan lists are gone;
+> read current source, not this plan, for behavior.
 
 Hard cutover of stage approvals to the platform's own primitives. The host's
 second approvals machine (`/submit`, `/decide`, `submitAndApprove`, the
@@ -53,7 +57,7 @@ scripts — `lib/stage-walk.ts` and `transfer-smoke.ts` deliver signals instead 
 4. Hub routes: delete `/submit`, `/decide`, `submitAndApprove`, gate commands on `/commands`, gate-delivery/alignment, `abortBuildAttempt`; worker follows the run; `projectDetail` write-on-read. Tests 1, 5 (hub side).
 5. Web: signal helpers and button rewiring; delete `submit`/`decide`. Tests 2, 4, 6 (client side).
 6. Scripts and installer test fixes; typecheck + test green for `apps/hub`, `apps/web`, `packages/*`.
-7. PR to `internal-beta`.
+7. Landed on `main`; `internal-beta` is deleted — do not target it.
 
 ## Non-goals
 
@@ -61,7 +65,7 @@ scripts — `lib/stage-walk.ts` and `transfer-smoke.ts` deliver signals instead 
 - `build.freeze` keeps its host effect (writing the frozen packet artifact). Gate 7 is crossed by `cost.approve`; the freeze is not a gate on the run.
 - `stage.draft` rounds keep the host relay: the host assembles `inference` (provider credentials) and delivers the round; that is not an approval.
 - Route-back inside the workflow (a rejected stage re-entering an earlier one): the lifecycle stays linear; `stage.select_route` is ledger-only as before.
-- Regenerating `workflow-closure-embed.ts`. It is stale and its check is not fixed here.
+- Regenerating the workflow closure snapshot. It is stale and its check is not fixed here.
 - A new host read endpoint. Authority is not read back from the host; the hub enforces it at delivery.
 
 ## Risks
