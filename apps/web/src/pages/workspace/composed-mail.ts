@@ -11,7 +11,6 @@
  * renders what this returns.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
-import { stageName } from "../../components.jsx";
 import { REQUIREMENTS_BLOCK_HEADING } from "@solutions-builder/app/requirements";
 import { namedTogether, splitMaterialMail } from "./attached-material.ts";
 
@@ -57,19 +56,27 @@ export function materialMailFold(body: string): ComposedFold | null {
 }
 
 /**
+ * A stage's opening the app composed in the person's name (#723): the
+ * briefing the specialist is sent when the stage opens. The chat does not
+ * show it; the person never typed it and the reply is the turn that counts.
+ * Stage 1's opening is the person's own problem statement and is shown.
+ */
+export function isComposedOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  if (message.author !== "me" || !message.subject) return false;
+  const opening = OPENING_SUBJECT.exec(message.subject);
+  return opening !== null && opening[1] !== "1";
+}
+
+/**
  * The fold for a person-authored message the app composed, or null for a
  * message the person wrote. Only `author === "me"` is ever inspected, so
- * nothing a specialist writes can be folded away by echoing a marker.
+ * nothing a specialist writes can be folded away by echoing a marker. An
+ * opening is never folded: stage 1's is the person's words, and the rest
+ * are not shown at all (`isComposedOpening`).
  */
 export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | "subject">): ComposedFold | null {
   if (message.author !== "me") return null;
-  const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
-  if (opening) {
-    // Stage 1's opening is the person's own problem statement, nothing
-    // composed ahead of it; a fold would hide their words behind a caption.
-    if (opening[1] === "1") return null;
-    return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
-  }
+  if (message.subject && OPENING_SUBJECT.test(message.subject)) return null;
   const material = materialMailFold(message.body);
   if (material) return material;
   // The supervisor's briefs (#695): the record of an ended attempt, and the
