@@ -3448,6 +3448,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   right: var(--space-6);
   bottom: calc(var(--space-6) + 44px + var(--space-2));
   margin: 0;
+  /* The browser gives popovers `height: fit-content`. WebKit sizes a grid
+     with that height to the whole space above the dock, then stretches the
+     rows into it; `auto` sizes it to the content. */
+  height: auto;
   border: 0;
   width: 380px;
   max-width: min(380px, calc(100vw - var(--space-8)));
