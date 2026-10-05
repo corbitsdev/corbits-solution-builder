@@ -14,6 +14,10 @@ describe("composedMailFold", () => {
     expect(fold).toEqual({ summary: "What Deliver opened with", body: "Manifest node id: art_1@1\n- a.ts — sha256 abc", lead: null });
   });
 
+  test("stage 1's opening is the person's own statement and is not folded", () => {
+    expect(composedMailFold({ author: "me", subject: "[opening:proj_1:1] Problem discovery", body: "I want to build a recipe app." })).toBeNull();
+  });
+
   test("a send-back cue shows its sentence and never its marker", () => {
     const fold = composedMailFold({ author: "me", body: "This stage was sent back: tighten it. Address it and send the whole document again as a new draft. [ref:dec_42]" });
     expect(fold).toEqual({ summary: null, body: "", lead: "This stage was sent back: tighten it. Address it and send the whole document again as a new draft." });

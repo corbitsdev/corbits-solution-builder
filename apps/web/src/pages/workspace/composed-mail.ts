@@ -65,6 +65,9 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (message.author !== "me") return null;
   const opening = message.subject ? OPENING_SUBJECT.exec(message.subject) : null;
   if (opening) {
+    // Stage 1's opening is the person's own problem statement, nothing
+    // composed ahead of it; a fold would hide their words behind a caption.
+    if (opening[1] === "1") return null;
     return { summary: `What ${stageName(Number(opening[1]!))} opened with`, body: withoutSendBackRef(message.body), lead: null };
   }
   const material = materialMailFold(message.body);
