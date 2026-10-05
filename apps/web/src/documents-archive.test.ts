@@ -124,7 +124,10 @@ describe("downloadProjectDocuments", () => {
       },
     });
     expect(saved).toEqual(["inteva-complete-documents.zip"]);
-    expect(notice).toEqual({ message: "Saved 2 documents of Inteva Complete to inteva-complete-documents.zip.", complete: true });
+    expect(notice).toEqual({ message: "Saved 2 documents of Inteva Complete to inteva-complete-documents.zip.", complete: true, saveAgain: expect.any(Function) });
+    // #748: the same package again, from a click, for a browser that held the first save back.
+    notice.saveAgain?.();
+    expect(saved).toEqual(["inteva-complete-documents.zip", "inteva-complete-documents.zip"]);
   });
 
   test("a project with nothing finished saves nothing and says so", async () => {
@@ -202,7 +205,7 @@ describe("mockups in the archive", () => {
       save: () => undefined,
       shoot: async () => shots,
     });
-    expect(notice).toEqual({ message: "Saved 1 document and 2 mockup pictures of P to p-documents.zip.", complete: true });
+    expect(notice).toEqual({ message: "Saved 1 document and 2 mockup pictures of P to p-documents.zip.", complete: true, saveAgain: expect.any(Function) });
   });
 });
 

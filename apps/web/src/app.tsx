@@ -24,7 +24,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, notify, stageName } from "./components.jsx";
+import { Banner, Button, Mark, notify, stageName, type NoticeAction } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu, downloadDocuments } from "./pages/project-menu.jsx";
@@ -281,7 +281,7 @@ export function AppBar({
    *  four omitted where the chrome renders without a live project. */
   onProjectChanged?: () => void;
   onProjectDeleted?: () => void;
-  onNotice?: (message: string, complete?: boolean) => void;
+  onNotice?: (message: string, complete?: boolean, action?: NoticeAction) => void;
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
@@ -782,7 +782,7 @@ export function App() {
     setExporting(true);
     try {
       const outcome = await downloadDocuments(detail.project);
-      notify(outcome.message, outcome.complete);
+      notify(outcome.message, outcome.complete, outcome.saveAgain ? { label: "Save again", onClick: outcome.saveAgain } : undefined);
     } catch (cause) {
       toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {

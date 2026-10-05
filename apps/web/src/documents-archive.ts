@@ -239,7 +239,7 @@ export function saveBlob(blob: Blob, name: string): void {
 }
 
 /** Downloads a project's finished documents as one zip and says what went in; `complete` is false when nothing or not everything was saved. */
-export async function downloadProjectDocuments(projectId: string, deps: DocumentsArchiveDeps): Promise<{ message: string; complete: boolean }> {
+export async function downloadProjectDocuments(projectId: string, deps: DocumentsArchiveDeps): Promise<{ message: string; complete: boolean; saveAgain?: () => void }> {
   const detail = await deps.projectView(projectId);
   const archive = await assembleDocumentsArchive(
     detail.project.title,
@@ -250,9 +250,13 @@ export async function downloadProjectDocuments(projectId: string, deps: Document
   const name = documentsArchiveName(detail.project.title);
   if (archive.files.length === 0) return { message: `${detail.project.title} has no finished documents yet.`, complete: false };
   deps.save(archive.blob, name);
+  // The save runs after seconds of work, outside the click's activation
+  // (#748); a browser that holds such a download back says nothing, so
+  // the notice offers the same file again from a click.
+  const saveAgain = () => deps.save(archive.blob, name);
   const pictures = archive.mockups.length > 0 ? ` and ${String(archive.mockups.length)} mockup picture${archive.mockups.length === 1 ? "" : "s"}` : "";
   const count = `${String(archive.files.length)} document${archive.files.length === 1 ? "" : "s"}${pictures}`;
   return archive.skipped.length > 0
-    ? { message: `Saved ${count} of ${detail.project.title} to ${name}; ${String(archive.skipped.length)} could not be read.`, complete: false }
-    : { message: `Saved ${count} of ${detail.project.title} to ${name}.`, complete: true };
+    ? { message: `Saved ${count} of ${detail.project.title} to ${name}; ${String(archive.skipped.length)} could not be read.`, complete: false, saveAgain }
+    : { message: `Saved ${count} of ${detail.project.title} to ${name}.`, complete: true, saveAgain };
 }
