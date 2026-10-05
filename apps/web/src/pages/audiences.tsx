@@ -594,7 +594,7 @@ export function AudiencePackages({
         });
         if (!deck) throw new Error("its deck outline has no slides.");
         const shots = await designShots();
-        printHtmlDocument(slidesPrintHtml(shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck, fileBase));
+        await printHtmlDocument(slidesPrintHtml(shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck, fileBase), fileBase);
       } else {
         let pptx: { dataUrl: string; filename: string };
         if (slidesSource({ hasRecordedDeck: Boolean(recorded), theme }) === "recorded" && recorded) {

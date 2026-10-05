@@ -14,13 +14,18 @@
  * (`printPage` below); no bar, and nothing served by the host.
  *
  * In the desktop app `window.print()` is the shell's own print command, which
- * the capability allows; in a browser it is the browser's.
+ * the capability allows; in a browser it is the browser's. A frame's print
+ * is nothing there, so a standalone document is handed to the shell, which
+ * opens it in a window of its own and prints that (#659).
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { Printer } from "lucide-react";
+import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 import { api, type ArtifactNode } from "./client.js";
 import { Button, documentName, stageName } from "./components.jsx";
 import { Markdown } from "./markdown.jsx";
+import { inShell } from "./shell.ts";
 
 export type PrintTarget = { node: ArtifactNode; content: string | null; tenantId: string };
 
@@ -85,16 +90,20 @@ function isPage(node: ArtifactNode): boolean {
  */
 async function printPage(node: ArtifactNode, tenantId: string, content: string | null): Promise<void> {
   const html = content ?? (await api.artifactContent(tenantId, node.id)).content;
-  printHtmlDocument(html);
+  await printHtmlDocument(html, printFileName(node));
 }
 
 /**
  * Prints one standalone HTML document from a hidden frame of its own, the
  * way a design is printed: no scripts, same-origin so the frame's print can
  * be reached, modals allowed for the dialog itself. A stakeholder's slides
- * print this way too (#232).
+ * print this way too (#232). `title` names the PDF the dialog offers.
  */
-export function printHtmlDocument(html: string): void {
+export async function printHtmlDocument(html: string, title: string): Promise<void> {
+  if (inShell()) {
+    await invoke("print_document", { html, title });
+    return;
+  }
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", "allow-same-origin allow-modals");
   iframe.style.position = "fixed";
@@ -113,7 +122,7 @@ export function printHtmlDocument(html: string): void {
 /** Opens the document for printing. `content` may be null; it is fetched then. */
 export function printArtifact(node: ArtifactNode, tenantId: string, content: string | null = null): void {
   if (isPage(node)) {
-    void printPage(node, tenantId, content);
+    void printPage(node, tenantId, content).catch((cause) => toast.error(cause instanceof Error ? cause.message : String(cause)));
     return;
   }
   set({ node, content, tenantId });

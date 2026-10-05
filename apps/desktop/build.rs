@@ -17,6 +17,7 @@ fn main() {
                 "start_at_login",
                 "set_start_at_login",
                 "quit_app",
+                "print_document",
             ]),
         ),
     )

@@ -10,6 +10,9 @@ import { queryClient } from "./queries/client.ts";
 import "@corbits/react-ui/styles.css";
 import "./styles.css";
 import { openSharedEventSource } from "./shared-event-source.ts";
+import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
+import { inShell } from "./shell.ts";
 
 // Development only, and compiled out of a production bundle: `bun run dev`
 // rebuilds the interface on every edit, and this is how the window hears about
@@ -18,6 +21,15 @@ if (import.meta.env.DEV) {
   // Through the shared source so a hidden tab holds no connection for it (#91).
   const source = openSharedEventSource("/api/dev/reload", false);
   source.addEventListener("rebuilt", () => location.reload());
+}
+
+// The desktop shell saves a download link's file to the Downloads folder and
+// says when it has; a browser shows its own download (#659).
+if (inShell()) {
+  void listen<{ name: string; success: boolean }>("download-finished", ({ payload }) => {
+    if (payload.success) toast.success(`Saved ${payload.name} to Downloads.`);
+    else toast.error(`${payload.name} could not be saved.`);
+  });
 }
 
 const root = document.getElementById("root");

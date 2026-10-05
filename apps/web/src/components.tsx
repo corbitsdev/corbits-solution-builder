@@ -565,7 +565,8 @@ export function documentName(kind: string): string {
  * dialog: a `data:` URL (a binary file, stored that way) downloads directly,
  * text content is wrapped in a blob first. Replaces the deleted
  * `POST /artifacts/:id/save`, which wrote to the host's Downloads folder —
- * the window downloads it itself now (CL-8510).
+ * the window downloads it itself now (CL-8510). In the desktop app the shell
+ * saves it to the Downloads folder and says so when it has (#659).
  */
 export function downloadArtifact(content: string, filename: string): void {
   const href = content.startsWith("data:") ? content : URL.createObjectURL(new Blob([content]));

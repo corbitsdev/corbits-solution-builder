@@ -19,6 +19,7 @@
 pub mod dictation;
 
 use std::{
+    collections::HashMap,
     error::Error,
     io::{self, BufRead, BufReader},
     path::PathBuf,
@@ -34,7 +35,8 @@ use std::os::unix::process::CommandExt;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    webview::{DownloadEvent, PageLoadEvent},
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
 const HANDSHAKE_PREFIX: &str = "Solution Builder launch URL: ";
@@ -44,6 +46,19 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+/// The files the window is saving, by the URL each came from. On macOS the
+/// finish of a download names no path, so the name is kept from its start to
+/// tell the page what landed.
+#[derive(Default)]
+struct Downloads(Mutex<HashMap<String, String>>);
+
+/// What the page hears when a file it asked to save is done.
+#[derive(Clone, serde::Serialize)]
+struct DownloadFinished {
+    name: String,
+    success: bool,
+}
 
 struct HostProcess {
     child: Mutex<Option<Child>>,
@@ -433,7 +448,60 @@ fn open_window(app: &AppHandle) -> AppResult<()> {
             let title = title.trim();
             let _ = window.set_title(if title.is_empty() { APP_TITLE } else { title });
         })
+        // A `download` link saves nothing in WKWebView until the shell says
+        // where: without this handler the webview cancels the click outright.
+        // wry has already pointed the destination at the Downloads folder,
+        // under the link's own file name, past any file already there.
+        .on_download(|webview, event| {
+            let downloads = webview.state::<Downloads>();
+            match event {
+                DownloadEvent::Requested { url, destination } => {
+                    let name = destination.file_name().and_then(|name| name.to_str());
+                    if let (Some(name), Ok(mut saving)) = (name, downloads.0.lock()) {
+                        saving.insert(url.to_string(), name.to_string());
+                    }
+                }
+                DownloadEvent::Finished { url, success, .. } => {
+                    let name = downloads
+                        .0
+                        .lock()
+                        .ok()
+                        .and_then(|mut saving| saving.remove(url.as_str()));
+                    if let Some(name) = name {
+                        let _ = webview.emit("download-finished", DownloadFinished { name, success });
+                    }
+                }
+                _ => {}
+            }
+            true
+        })
         .build()?;
+    Ok(())
+}
+
+/// Prints one standalone HTML document — a design, or a stakeholder's slides
+/// as a PDF. The page cannot: WKWebView's `window.print` prints nothing from
+/// a frame, and the shell's print command prints the whole window. So the
+/// document gets a window of its own, named for the file a saved PDF would
+/// take, which prints as soon as it has loaded and stays until it is closed.
+#[tauri::command]
+fn print_document(app: AppHandle, html: String, title: String) -> Result<(), String> {
+    if let Some(open) = app.get_webview_window("print") {
+        open.close().map_err(|error| error.to_string())?;
+    }
+    let url = tauri::Url::parse(&format!("data:text/html;charset=utf-8,{}", urlencode(&html)))
+        .map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(&app, "print", WebviewUrl::External(url))
+        .title(title)
+        .inner_size(960.0, 720.0)
+        .center()
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                let _ = webview.print();
+            }
+        })
+        .build()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -546,13 +614,15 @@ pub fn run() {
         // Dictation runs in this process: the page asks to start and stop,
         // and hears levels, transcripts and the end as events.
         .manage(dictation::Dictation::default())
+        .manage(Downloads::default())
         .invoke_handler(tauri::generate_handler![
             dictation::dictation_start,
             dictation::dictation_stop,
             dictation::dictation_open_settings,
             start_at_login,
             set_start_at_login,
-            quit_app
+            quit_app,
+            print_document
         ])
         .setup(|app| {
             // A failed start is a thing to read, not a thing to crash on.

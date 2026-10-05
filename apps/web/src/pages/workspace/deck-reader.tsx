@@ -144,7 +144,7 @@ export function useRecordedDeck(args: {
       const fileBase = deckFileName(projectTitle, variant ?? node.title).replace(/\.pptx$/, "");
       if (how === "pdf") {
         if (!current.deck) throw new Error(current.note ?? "the slides could not be drawn.");
-        printHtmlDocument(slidesPrintHtml(current.deck, fileBase));
+        await printHtmlDocument(slidesPrintHtml(current.deck, fileBase), fileBase);
       } else {
         const bytes = isDataUrl(content) ? content : (await api.artifactContent(tenantId, node.id)).content;
         downloadArtifact(bytes, recordedDeckFileName(node.title));
