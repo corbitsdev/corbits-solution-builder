@@ -9,14 +9,23 @@
  * first (its build worker needs a fresh attempts/ directory); every stage
  * needs the reason.
  *
- * Keyed on the workflow's own send-back decision id, embedded in the body,
- * so a reload never repeats it. Pure, so the rule is testable without the
- * hook: the hook only sends what this returns.
+ * Keyed on the workflow's own send-back decision id, carried in the subject
+ * (#708) the way an opening carries `[opening:…]`, so a reload never repeats
+ * it and the body stays the specialist's instruction alone. Pure, so the
+ * rule is testable without the hook: the hook only sends what this returns.
  */
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
+import { stageName } from "../../components.jsx";
 
-export type SendBackCue = { readonly marker: string; readonly body: string };
+export type SendBackCue = { readonly marker: string; readonly subject: string; readonly body: string };
+
+const SENT_BACK_SUBJECT = /^\[sent-back:([^\]]+)\]/;
+
+/** The decision id a send-back cue's subject carries, or null for any other mail. */
+export function sendBackCueIdOf(subject: string | undefined): string | null {
+  return subject ? (SENT_BACK_SUBJECT.exec(subject)?.[1] ?? null) : null;
+}
 
 /** The most recent accepted send-back that returned the project to `stage`. */
 export function latestSendBackInto(stage: number, decisions: readonly DecisionRecord[]): DecisionRecord | null {
@@ -29,8 +38,9 @@ export function latestSendBackInto(stage: number, decisions: readonly DecisionRe
 export function sendBackResumeCue(input: {
   readonly stage: number;
   readonly decisions: readonly DecisionRecord[];
-  /** The stage thread as loaded; a body carrying the marker means the cue went. */
-  readonly messages: readonly { readonly body: string }[];
+  /** The stage thread as loaded; a subject carrying the marker means the cue
+   *  went. A body carrying it is a cue sent before the marker moved (#708). */
+  readonly messages: readonly { readonly body: string; readonly subject?: string }[];
   /** The workflow-minted requirement ids. A send-back to stage 6 or earlier
    *  clears them, and the Architect may cite only these, so stage 6's cue
    *  waits until `mint_requirements` has run again and leads with the block,
@@ -40,13 +50,13 @@ export function sendBackResumeCue(input: {
   const sendBack = latestSendBackInto(input.stage, input.decisions);
   if (!sendBack) return null;
   const marker = sendBack.decisionId;
-  if (input.messages.some((message) => message.body.includes(marker))) return null;
+  if (input.messages.some((message) => sendBackCueIdOf(message.subject) === marker || message.body.includes(`[ref:${marker}]`))) return null;
   if (input.stage === 6 && input.requirements.length === 0) return null;
   const reason = sendBack.reason ?? "revise and resubmit.";
   const cue =
     input.stage === 8
-      ? `This stage was sent back: ${reason} Continue in a new attempts/<n+1>/ directory — the next empty one — rather than reusing the last attempt. [ref:${marker}]`
-      : `This stage was sent back: ${reason} Address it and send the whole document again as a new draft. [ref:${marker}]`;
+      ? `This stage was sent back: ${reason} Continue in a new attempts/<n+1>/ directory — the next empty one — rather than reusing the last attempt.`
+      : `This stage was sent back: ${reason} Address it and send the whole document again as a new draft.`;
   const body = input.stage === 6 ? `${renderRequirementsBlock(input.requirements)}\n\n${cue}` : cue;
-  return { marker, body };
+  return { marker, subject: `[sent-back:${marker}] ${stageName(input.stage)}`, body };
 }
