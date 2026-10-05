@@ -33,6 +33,7 @@ import {
   attemptPrompt,
   attemptRecord,
   attemptWorkspace,
+  attemptWorkspaceReport,
   cancelBuildAttempt,
   listAttempts,
   startBuildAttempt,
@@ -131,8 +132,8 @@ export function registerBuildRoutes(api: Hono) {
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
-    const [log, prompt] = await Promise.all([attemptLog(projectId, attempt), attemptPrompt(projectId, attempt)]);
-    return context.json({ attempt: record, log, prompt });
+    const [log, prompt, workspaceReport] = await Promise.all([attemptLog(projectId, attempt), attemptPrompt(projectId, attempt), attemptWorkspaceReport(projectId, attempt)]);
+    return context.json({ attempt: record, log, prompt, workspaceReport });
   });
 
   api.post("/projects/:id/build/attempts/:n/cancel", async (context) => {

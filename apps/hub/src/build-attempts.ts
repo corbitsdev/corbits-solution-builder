@@ -124,6 +124,11 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
         ]
       : []),
     ``,
+    // The progress record (#697): the person watching reads the plan's
+    // task numbers off the worker's own commits and status file, so the
+    // page can say how far the build got without inferring anything.
+    `Keep a progress record the person can read. Name the plan task every commit is for in its subject, as "(Task N)" or "(Tasks N, M)". Keep STATUS.md at the root of the working directory with one section per finished task, headed with the task's number and name. Your final message says which tasks are done and which are not.`,
+    ``,
     ...(input.stackBlock ? [`--- STACK (frozen; build exactly this) ---`, input.stackBlock, ``] : []),
     ...(input.requirementsText ? [`--- REQUIREMENTS ---`, input.requirementsText, ``] : []),
     ...(input.designText ? [`--- DESIGN ---`, input.designText, ``] : []),
@@ -241,6 +246,61 @@ export async function attemptLog(projectId: string, attempt: number): Promise<st
   } catch {
     return "";
   }
+}
+
+/** What an attempt's directory records of the worker's own progress (#697). */
+export type WorkspaceReport = {
+  /** The worker's commits, oldest first: hash, author date, subject. Empty without a repository. */
+  readonly commits: readonly { readonly hash: string; readonly at: string; readonly subject: string }[];
+  /** STATUS.md at the root, as the worker wrote it; null when there is none. */
+  readonly status: string | null;
+  /** QUESTIONS.md at the root; null when there is none. */
+  readonly questions: string | null;
+};
+
+const REPORT_FILE_KEEP = 60_000;
+const COMMITS_KEEP = 1_000;
+
+/** `git log` as a list, oldest first; the parser the report and its test share. */
+export function parseGitLog(text: string): WorkspaceReport["commits"] {
+  const commits: { hash: string; at: string; subject: string }[] = [];
+  for (const line of text.split("\n")) {
+    const [hash, at, ...rest] = line.split("\t");
+    if (!hash || !at) continue;
+    commits.push({ hash, at, subject: rest.join("\t") });
+  }
+  return commits;
+}
+
+/**
+ * Reads the progress record out of a working directory: the repository's
+ * log and the two files the packet asks the worker to keep. Read, never
+ * inferred: a commit subject is the worker's own claim about a task.
+ */
+export async function workspaceReportAt(directory: string): Promise<WorkspaceReport> {
+  const readText = async (name: string): Promise<string | null> => {
+    try {
+      const text = await readFile(join(directory, name), "utf8");
+      return text.length > REPORT_FILE_KEEP ? `${text.slice(0, REPORT_FILE_KEEP)}\n…` : text;
+    } catch {
+      return null;
+    }
+  };
+  let commits: WorkspaceReport["commits"] = [];
+  try {
+    const log = Bun.spawn(["git", "log", "--reverse", `--max-count=${String(COMMITS_KEEP)}`, "--format=%h%x09%aI%x09%s"], { cwd: directory, stdout: "pipe", stderr: "ignore" });
+    const text = await new Response(log.stdout).text();
+    if ((await log.exited) === 0) commits = parseGitLog(text);
+  } catch {
+    // No git, or no repository: no commits to report.
+  }
+  const [status, questions] = await Promise.all([readText("STATUS.md"), readText("QUESTIONS.md")]);
+  return { commits, status, questions };
+}
+
+/** The progress record of an attempt's directory. */
+export function attemptWorkspaceReport(projectId: string, attempt: number): Promise<WorkspaceReport> {
+  return workspaceReportAt(attemptWorkspace(projectId, attempt));
 }
 
 /** The prompt an attempt was handed, as written when it started. */
