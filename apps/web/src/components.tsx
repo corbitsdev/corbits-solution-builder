@@ -538,6 +538,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
   audience_package: "Audience package",
   audience_deck: "Slides",
   product_requirements: "Product requirements",
+  prd_for_people: "PRD for people",
   build_plan: "Build plan",
   engineering_review: "Engineering review",
   cost_approval: "Cost",

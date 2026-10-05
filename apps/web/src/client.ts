@@ -11,6 +11,7 @@ import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
 import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -885,8 +886,8 @@ const ensureStageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
  *  rather than silently deploying the architect's prompt under another name. */
 function stage6RoleFor(roleKey: string): AgentRole {
   const role =
-    roleKey === "requirements-author"
-      ? agentById("requirements-author")
+    roleKey === "requirements-author" || roleKey === "requirements-explainer"
+      ? agentById(roleKey)
       : panelPrincipals().find((entry) => entry.id === `senior-engineer-${roleKey}`);
   if (!role) throw new Error(`kit role for stage 6 key "${roleKey}" is missing`);
   return role;
@@ -1115,6 +1116,8 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
 
 /** Stage 6's requirements author, as `stage6.tsx` names it. */
 export const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
+/** The PRD for people's writer (#737): the Build plan companion that tells the requirements for a reader. */
+export const STAGE6_PEOPLE_ROLE_KEY = "requirements-explainer";
 
 /**
  * Writes one version of a stage document into the project's artifact graph.
@@ -2040,6 +2043,22 @@ export const api = {
         sourceVersionIds: [],
         title: "Product requirements",
         agentRole: stage6RoleFor(STAGE6_REQUIREMENTS_ROLE_KEY).id,
+      }),
+    ),
+  /**
+   * Records the PRD for people (#737): the requirements explainer's reply
+   * as the project's prd_for_people document, one lineage per project; a
+   * later reply supersedes. Never the PRD's lineage.
+   */
+  persistPrdForPeople: (projectId: string, content: string, sourceVersionIds: string[] = []) =>
+    asWorkspaceOwner((transport) =>
+      persistDraftOfKind(transport, projectId, {
+        stage: 6,
+        kind: PRD_FOR_PEOPLE_KIND,
+        content,
+        sourceVersionIds,
+        title: PRD_FOR_PEOPLE_TITLE,
+        agentRole: stage6RoleFor(STAGE6_PEOPLE_ROLE_KEY).id,
       }),
     ),
   /**
