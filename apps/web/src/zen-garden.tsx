@@ -14,7 +14,7 @@
  * first frame and only the clock moves. With the garden turned off in
  * Settings the strip never shows; `BusyLine` says the same in the composer.
  */
-import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import {
   STRIP_KEY_STEP,
   STRIP_MIN_HEIGHT,
@@ -64,15 +64,30 @@ export function useReducedMotion(): boolean {
  *  autoplays only a muted video, and React sets `muted` as a property that
  *  is not always in place before playback is attempted. */
 function GardenFilm({ still }: { still: boolean }) {
+  const element = useRef<HTMLVideoElement | null>(null);
+  // A film found paused or ended while the strip is up is started again
+  // (#746): a stalled fetch or a loop the browser dropped otherwise
+  // leaves one frame standing under a clock that keeps counting.
+  useEffect(() => {
+    if (still) return;
+    const timer = setInterval(() => {
+      const video = element.current;
+      if (!video || !video.paused) return;
+      void video.play().catch(() => undefined);
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [still]);
   return (
     <video
       className="zen-garden-video"
-      ref={(element) => {
-        if (element) {
-          element.muted = true;
-          element.defaultMuted = true;
+      ref={(node) => {
+        element.current = node;
+        if (node) {
+          node.muted = true;
+          node.defaultMuted = true;
         }
       }}
+      onEnded={(event) => void event.currentTarget.play().catch(() => undefined)}
       src={ZEN_GARDEN_VIDEO}
       poster={ZEN_GARDEN_POSTER}
       autoPlay={!still}

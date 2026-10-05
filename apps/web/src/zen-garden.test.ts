@@ -69,7 +69,10 @@ describe("the zen garden busy indicator", () => {
     expect(garden).toContain("{visible ? <GardenFilm still={still} /> : null}");
     expect(garden).toContain("autoPlay={!still}");
     expect(garden).toMatch(/<video[\s\S]*?\bloop\b[\s\S]*?\bmuted\b[\s\S]*?\bplaysInline\b/);
-    expect(garden).toContain("element.muted = true;");
+    expect(garden).toContain("node.muted = true;");
+    // #746: a film found paused or ended while the strip is up is started again.
+    expect(garden).toContain("if (!video || !video.paused) return;");
+    expect(garden).toContain("onEnded={(event) => void event.currentTarget.play()");
     expect(garden).toContain('window.matchMedia("(prefers-reduced-motion: reduce)")');
     expect(existsSync(join(here, "../public/zen-garden.mp4"))).toBe(true);
     expect(existsSync(join(here, "../public/zen-garden-poster.jpg"))).toBe(true);
