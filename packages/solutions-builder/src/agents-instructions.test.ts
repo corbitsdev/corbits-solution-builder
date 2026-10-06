@@ -22,6 +22,7 @@ describe("agentsInstructions", () => {
     expect(text).toContain("It MUST NOT override the PRD.");
     expect(text).toContain("Record unresolved product decisions in QUESTIONS.md");
     expect(text).toContain("Implementation is complete only when AC-1 through AC-3 pass.");
+    expect(text).toContain("A package, service or key you cannot reach is a blocker");
   });
 
   test("says what is missing rather than naming a file that is not there", () => {

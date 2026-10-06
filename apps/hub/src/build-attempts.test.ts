@@ -54,6 +54,12 @@ describe("assembleBuildPrompt", () => {
     expect(assembleBuildPrompt(input)).toContain("has a shebang line and its executable bit set");
   });
 
+  test("an unreachable dependency is a blocker, never a fallback, in the worker's own briefs too", () => {
+    const prompt = assembleBuildPrompt(input);
+    expect(prompt).toContain("A package, service or key you cannot reach is a blocker");
+    expect(prompt).toContain("never tell one to fall back");
+  });
+
   test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {
     const prompt = assembleBuildPrompt(input);
     expect(prompt).toContain('Name the plan task every commit is for in its subject, as "(Task N)"');
@@ -63,6 +69,7 @@ describe("assembleBuildPrompt", () => {
   test("a continued attempt is told the earlier work is in the directory", () => {
     const prompt = assembleBuildPrompt({ ...input, continuing: true });
     expect(prompt).toContain("An earlier attempt's work is already in the current directory");
+    expect(prompt).toContain("Its STATUS.md is a list of claims, not a record");
     expect(prompt).not.toContain("WHAT THE PERSON FOUND");
     // #789: the person's note to the worker rides in the continuation packet, ahead of the plan.
     const noted = assembleBuildPrompt({ ...input, continuing: true, continueNote: "  The dev instructions never build the web bundle, so / is a 404.\n" });

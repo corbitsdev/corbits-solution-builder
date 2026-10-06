@@ -45,6 +45,7 @@ import { followTurnLog } from "./turn-reports.js";
 import { BUILD_WORKERS, buildWorker } from "./build-worker.js";
 import { sumUsage, turnLogModels, usageCalls, type AttemptUsage } from "./build-usage.js";
 import { buildDocumentsRule, MANUAL_IMAGES_DIR, README_PATH, USER_MANUAL_PATH } from "@solutions-builder/specialist-runtime/build-documents";
+import { BUILD_DEPENDENCIES_RULE } from "@solutions-builder/specialist-runtime/build-dependencies";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
@@ -139,7 +140,7 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
     ...(input.continuing
       ? [
           ``,
-          `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over.`,
+          `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over. Its STATUS.md is a list of claims, not a record: check each against the code before you keep it.`,
         ]
       : []),
     ...(input.continuing && input.continueNote?.trim()
@@ -155,6 +156,8 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
     // The progress record (#697): the person watching reads the plan's
     // task numbers off the worker's own commits and status file, so the
     // page can say how far the build got without inferring anything.
+    BUILD_DEPENDENCIES_RULE,
+    ``,
     buildDocumentsRule(input.language),
     ``,
     `Keep a progress record the person can read. Name the plan task every commit is for in its subject, as "(Task N)" or "(Tasks N, M)". Keep STATUS.md at the root of the working directory with one section per finished task, headed with the task's number and name. Your final message says which tasks are done and which are not.`,
