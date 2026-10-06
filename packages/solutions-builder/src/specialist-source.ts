@@ -177,6 +177,10 @@ export const SPECIALIST_ENTRY_PATH = "workflow.js";
  *  never baked into `workflow.js`. */
 export const SPECIALIST_INFERENCE_SOURCE_PATH = "inference-source.js";
 
+/** The overlay the packed entry imports for the workspace's language and
+ *  design guidance, appended to its prompt. Written at deploy, like the pin. */
+export const SPECIALIST_GUIDANCE_PATH = "workspace-guidance.js";
+
 /** `sb-stage-<N>`: this specialist's workflow id, and the stem of the mail
  *  label its trigger declares (grant configuration only — the hub mints the
  *  real run address at deploy time). */
@@ -206,4 +210,9 @@ export function credentialAccess(pkg: string, credentialName: string, credential
 /** The module `workflow.js` imports its inference pin from. */
 export function inferenceSourceModule(pin: InferenceSourcePin): string {
   return `export default ${JSON.stringify(pin)};\n`;
+}
+
+/** The module `workflow.js` imports its workspace guidance from. */
+export function guidanceModule(guidance: string): string {
+  return `export default ${JSON.stringify(guidance)};\n`;
 }

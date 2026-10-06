@@ -2,9 +2,10 @@
  * Compiles each specialist package's `src/workflow.ts` into plain JS, once,
  * with `Bun.build`. `@intx/workflow` and `@intx/agent` stay external: the
  * sidecar resolves them from the closure `workflow-closure.ts` ships. Tool
- * packages stay external the same way. `./inference-source.js` stays external
- * too: the installer writes the tenant's model pin there at deploy time
- * (the same overlay `namer-source.js` is for the project workflow).
+ * packages stay external the same way. `./inference-source.js` and
+ * `./workspace-guidance.js` stay external too: the installer writes the
+ * tenant's model pin and the workspace's guidance there at deploy time (the
+ * same overlay `namer-source.js` is for the project workflow).
  *
  * The browser-driven installer cannot run `Bun.build`, so `main()` writes the
  * compiled JS under `apps/web/public/specialists/<id>/workflow.js`, fetched
@@ -44,9 +45,10 @@ export async function packSpecialist(dir: string): Promise<string> {
     external: EXTERNAL,
     plugins: [
       {
-        name: "inference-source-external",
+        name: "deploy-overlays-external",
         setup(build) {
           build.onResolve({ filter: /\/inference-source\.js$/ }, () => ({ path: "./inference-source.js", external: true }));
+          build.onResolve({ filter: /\/workspace-guidance\.js$/ }, () => ({ path: "./workspace-guidance.js", external: true }));
         },
       },
     ],

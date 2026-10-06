@@ -10,7 +10,8 @@ import { digestOf } from "./stage-approval.ts";
 import { stageName } from "./components.jsx";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
-import type { LanguageSettings } from "@solutions-builder/app/language-settings";
+import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
+import { designerGuidance } from "@solutions-builder/app/designer-settings";
 import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
 import { singleFlight } from "./single-flight.ts";
 import { DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
@@ -62,6 +63,7 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readDesignerSettings,
   readLanguageSettings,
   saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
@@ -1197,6 +1199,31 @@ async function persistDraftOfKind(
     versionId: artifact.id,
     contentHash: `${artifact.id}@${String(artifact.version)}`,
   };
+}
+
+/**
+ * The workspace's output language as guidance every specialist is deployed
+ * with (#411), so documents, replies and the text of any software it builds
+ * come out in that language. Read at deploy time off the workspace tenant;
+ * the default is American English.
+ */
+async function localizedGuidance(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string): Promise<string> {
+  const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
+  return settings ? languageGuidance(settings) : "";
+}
+
+/**
+ * A stage's own specialist's guidance: localized, and for the experience
+ * designer, with the workspace's designer settings (surface, design
+ * language) read at deploy time the same way. A changed setting makes the
+ * deployed guidance differ, so the next `ensureSpecialistDeployment`
+ * redeploys it.
+ */
+async function stageGuidance(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<string> {
+  const localized = await localizedGuidance(transport, workspaceTenantId);
+  if (stage !== 4) return localized;
+  const designer = designerGuidance(await readDesignerSettings(transport, workspaceTenantId));
+  return localized ? `${localized}\n\n${designer}` : designer;
 }
 
 export const api = {
@@ -2345,9 +2372,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const [status, packed] = await Promise.all([
+      const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
         specialistPackedWorkflow(agentFor(stage as Stage).id),
+        stageGuidance(transport, workspaceTenantId, stage as Stage),
       ]);
       // Mailing a deployment whose sidecar is not placed yet loses the
       // message: the run never starts and the stage waits on a reply that
@@ -2360,6 +2388,7 @@ export const api = {
         projectId,
         stage as Stage,
         packed,
+        guidance,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist`, placement);
@@ -2383,9 +2412,10 @@ export const api = {
   switchStageAgent: (projectId: string, stage: number, offeringId: string): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${stage}`;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const [status, packed] = await Promise.all([
+      const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
         specialistPackedWorkflow(agentFor(stage as Stage).id),
+        stageGuidance(transport, workspaceTenantId, stage as Stage),
       ]);
       const deployment = await switchSpecialistDeployment(
         transport,
@@ -2396,6 +2426,7 @@ export const api = {
         stage as Stage,
         offeringId,
         packed,
+        guidance,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} specialist on the new model`, placement);
@@ -2425,9 +2456,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const [status, packed] = await Promise.all([
+      const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
         specialistPackedWorkflow(BRIEF_EVALUATOR_ROLE.id),
+        localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
@@ -2437,6 +2469,7 @@ export const api = {
         projectId,
         1 as Stage,
         packed,
+        guidance,
         BRIEF_EVALUATOR_ROLE_KEY,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
@@ -2466,9 +2499,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const [status, packed] = await Promise.all([
+      const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
         specialistPackedWorkflow(PRODUCT_GUIDE_ROLE.id),
+        localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
@@ -2478,6 +2512,7 @@ export const api = {
         projectId,
         1 as Stage,
         packed,
+        guidance,
         PRODUCT_GUIDE_ROLE_KEY,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
@@ -2511,9 +2546,10 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const [status, packed] = await Promise.all([
+      const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
         specialistPackedWorkflow(stage6RoleFor(roleKey).id),
+        localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(
         transport,
@@ -2523,6 +2559,7 @@ export const api = {
         projectId,
         stage as Stage,
         packed,
+        guidance,
         roleKey,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);

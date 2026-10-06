@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inferenceSourceModule } from "@solutions-builder/app/specialist-source";
+import { guidanceModule, inferenceSourceModule } from "@solutions-builder/app/specialist-source";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { renderSpecialistSource } from "./specialist-deploy.js";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
@@ -64,8 +64,9 @@ const ARTIFACTS_ENTRY = `import { artifacts } from "@corbits/artifacts/sidecar-b
 // imported. Now the tree carries the members the entry resolves against.
 describe("renderSpecialistSource members", () => {
   const pin = { provider: "openai", model: "gpt-5.5" } as const;
+  const guidance = "Write in British English.";
   const render = async (stage: Stage, entry: string, roleKey = "primary") =>
-    renderSpecialistSource(await fullClosure(), "proj_1", stage, pin, roleKey, entry);
+    renderSpecialistSource(await fullClosure(), "proj_1", stage, pin, roleKey, entry, guidance);
 
   test("an entry that imports no tool ships the vendored workflow alone", async () => {
     for (const stage of [1, 2, 3, 4, 5, 6, 7, 8] as Stage[]) {
@@ -89,11 +90,13 @@ describe("renderSpecialistSource members", () => {
     expect(dependenciesOf(bound)["@corbits/artifacts"]).toBe("workspace:*");
   });
 
-  test("the rendered entry is the packed file, and the pin is the overlay", async () => {
+  test("the rendered entry is the packed file, and the pin and guidance are the overlays", async () => {
     const files = await render(1, BARE_ENTRY);
     expect(files["packages/specialist/workflow.js"]).toBe(BARE_ENTRY);
     expect(files["packages/specialist/inference-source.js"]).toBe(inferenceSourceModule(pin));
+    expect(files["packages/specialist/workspace-guidance.js"]).toBe(guidanceModule(guidance));
     expect(files["packages/specialist/workflow.js"]).not.toContain("gpt-5.5");
+    expect(files["packages/specialist/workflow.js"]).not.toContain(guidance);
   });
 
   // #41 step 5: the packed entry for a role is identical across projects;
@@ -105,8 +108,8 @@ describe("renderSpecialistSource members", () => {
       [1, BARE_ENTRY],
       [9, DELIVERY_ENTRY],
     ] as [Stage, string][]) {
-      const one = await renderSpecialistSource(closure, "proj_1", stage, pin, "primary", entry);
-      const two = await renderSpecialistSource(closure, "proj_2", stage, pin, "primary", entry);
+      const one = await renderSpecialistSource(closure, "proj_1", stage, pin, "primary", entry, guidance);
+      const two = await renderSpecialistSource(closure, "proj_2", stage, pin, "primary", entry, guidance);
       const path = "packages/specialist/workflow.js";
       expect(one[path]).toBe(two[path]);
       expect(one[path]).toBe(entry);

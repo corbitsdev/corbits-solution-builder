@@ -4,7 +4,7 @@ import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, st
 import { visibleCatalog } from "./visible-catalog.js";
 import { sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
-import { SPECIALIST_ENTRY_PATH } from "@solutions-builder/app/specialist-source";
+import { SPECIALIST_ENTRY_PATH, SPECIALIST_GUIDANCE_PATH, guidanceModule } from "@solutions-builder/app/specialist-source";
 
 const TENANT = {
   id: "tnt_ws",
@@ -205,32 +205,47 @@ describe("leadingOffering", () => {
   });
 });
 
-// #103: the packed entry a live specialist runs is compared against what
-// this role packs today.
+// #103: the packed entry a live specialist runs, and the workspace guidance
+// beside it, are compared against what this role packs and reads today.
 describe("specialistEntryIsCurrent", () => {
   const packed = "export default defineWorkflow({ id: \"sb-stage-4\" });\n";
+  const guidance = "Write in American English.";
 
-  function transportWithEntry(deployed: string | null): Transport {
-    const blob = `/api/tenants/${TENANT.id}/assets/ast_1/blob?path=${encodeURIComponent(`packages/specialist/${SPECIALIST_ENTRY_PATH}`)}`;
+  function transportWithTree(entry: string | null, deployedGuidance: string | null): Transport {
+    const blobPath = (file: string) => `/api/tenants/${TENANT.id}/assets/ast_1/blob?path=${encodeURIComponent(`packages/specialist/${file}`)}`;
+    const blobs = new Map([
+      [blobPath(SPECIALIST_ENTRY_PATH), entry],
+      [blobPath(SPECIALIST_GUIDANCE_PATH), deployedGuidance],
+    ]);
     return {
       async fetch<T>(method: string, path: string): Promise<T> {
-        if (method === "GET" && path === blob) {
-          if (deployed === null) throw new ApiError(404, "not_found", "no such blob");
-          return { content: btoa(String.fromCharCode(...new TextEncoder().encode(deployed))) } as T;
+        if (method === "GET" && blobs.has(path)) {
+          const content = blobs.get(path);
+          if (content === null || content === undefined) throw new ApiError(404, "not_found", "no such blob");
+          return { content: btoa(String.fromCharCode(...new TextEncoder().encode(content))) } as T;
         }
         throw new Error(`unexpected ${method} ${path}`);
       },
     } as Transport;
   }
 
-  const check = (deployed: string | null) => specialistEntryIsCurrent(transportWithEntry(deployed), TENANT.id, "ast_1", packed);
+  const check = (entry: string | null, deployedGuidance: string | null = guidanceModule(guidance)) =>
+    specialistEntryIsCurrent(transportWithTree(entry, deployedGuidance), TENANT.id, "ast_1", packed, guidance);
 
-  test("current when the deployed entry is the packed file", async () => {
+  test("current when the deployed entry is the packed file and the guidance is today's", async () => {
     expect(await check(packed)).toBe(true);
   });
 
   test("stale when the packed entry has moved on since the deploy", async () => {
     expect(await check(packed.replace("sb-stage-4", "sb-stage-4-old"))).toBe(false);
+  });
+
+  test("stale when the workspace guidance has changed since the deploy", async () => {
+    expect(await check(packed, guidanceModule("Write in British English."))).toBe(false);
+  });
+
+  test("stale when the entry was deployed without guidance", async () => {
+    expect(await check(packed, null)).toBe(false);
   });
 
   test("an entry that cannot be read back is not a reason to redeploy", async () => {

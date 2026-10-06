@@ -3,11 +3,12 @@ import { defineWorkflow, step } from "@intx/workflow";
 import { deliveryVerifier } from "./index.ts";
 import { systemPrompt } from "./prompt.ts";
 import SOURCE from "./inference-source.js";
+import GUIDANCE from "./workspace-guidance.js";
 import { deliver } from "@solutions-builder/tools-delivery/sidecar-bundle";
 
 const AGENT = defineAgent({
   id: deliveryVerifier.id,
-  systemPrompt,
+  systemPrompt: GUIDANCE ? `${systemPrompt}\n\n${GUIDANCE}` : systemPrompt,
   tools: [deliver],
   capabilities: [],
   inference: { sources: [SOURCE] },

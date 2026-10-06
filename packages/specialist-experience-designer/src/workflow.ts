@@ -3,10 +3,11 @@ import { defineWorkflow, step } from "@intx/workflow";
 import { experienceDesigner } from "./index.ts";
 import { systemPrompt } from "./prompt.ts";
 import SOURCE from "./inference-source.js";
+import GUIDANCE from "./workspace-guidance.js";
 
 const AGENT = defineAgent({
   id: experienceDesigner.id,
-  systemPrompt,
+  systemPrompt: GUIDANCE ? `${systemPrompt}\n\n${GUIDANCE}` : systemPrompt,
   tools: [],
   capabilities: [],
   inference: { sources: [SOURCE] },

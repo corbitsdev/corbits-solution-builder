@@ -60,6 +60,15 @@ describe("specialist pack", () => {
     }
   });
 
+  // The installer writes both overlays beside every entry; a package that
+  // stops importing the guidance would silently drop the workspace's language.
+  test("every packed entry imports the model pin and the workspace guidance as overlays", () => {
+    for (const [id, packed] of Object.entries(files)) {
+      expect({ id, pin: packed.includes('from "./inference-source.js"') }).toEqual({ id, pin: true });
+      expect({ id, guidance: packed.includes('from "./workspace-guidance.js"') }).toEqual({ id, guidance: true });
+    }
+  });
+
   test("only the delivery verifier carries a tool: deliver", () => {
     for (const role of AGENT_KIT) {
       const expected = role.id === agentFor(DELIVERY_STAGE).id ? { deck: false, posix: false, delivery: true, artifacts: false } : { deck: false, posix: false, delivery: false, artifacts: false };
