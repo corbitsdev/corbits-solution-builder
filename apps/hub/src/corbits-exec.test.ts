@@ -193,7 +193,8 @@ describe("runBuildAttempt", () => {
   onlyOnPosix("the placed hook is executable and the packet is ignored by git", async () => {
     const workspace = join(root, "ok");
     const hook = await stat(join(workspace, ".corbits/hooks/solution-builder-turns.sh"));
-    expect(hook.mode & 0o111).toBe(0o111);
+    // The worker runs as this user, so only the owner bit is required; a strict umask clears the rest.
+    expect(hook.mode & 0o100).toBe(0o100);
     expect(await readFile(join(workspace, ".corbits/.gitignore"), "utf8")).toContain("solution-builder-prompt.md");
   });
 
