@@ -75,6 +75,7 @@ import { ArtifactStrip, VersionSelect } from "./artifact-strip.tsx";
 import { cueEvents, stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { sendBackCueIdOf } from "./send-back-cue.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
+import { useSpecialistBriefing } from "./use-specialist-briefing.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
@@ -496,6 +497,23 @@ export function StageWorkspace({
     modelName: activeModel?.canonicalName ?? null,
     reloadThread: loadThread,
   });
+  // Whether the live specialist has its briefing at all (#804): when its
+  // own thread holds mail and no opening, hand-off or record-carrying cue,
+  // the stage cannot be approved, and one click briefs it by hand.
+  const briefing = useSpecialistBriefing({
+    tenantId,
+    projectId: detail.project.id,
+    stage,
+    address: agentAddress,
+    addresses: agent.addresses,
+    threadLoaded,
+    messages: foldedMessages,
+    draft: draftMessage,
+    nodes: detail.nodes,
+    reviews: workflowView?.reviews ?? {},
+    reloadThread: loadThread,
+  });
+  const specialistUnbriefed = briefing.state === "unbriefed";
   // Stage 8's attempts live on the host (`apps/hub/src/build-attempts.ts`);
   // the panel drives them and the gate reads whether the recorded archive
   // is the current attempt's.
@@ -962,7 +980,7 @@ export function StageWorkspace({
               attachNote={attachNote}
               onSubmit={() => void approve()}
               soloApproval={detail.soloApproval}
-              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded && !specialistUnbriefed}
               busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
               draftOpen={draftOpen}
               newer={artifacts.newerVersion}
@@ -1046,7 +1064,7 @@ export function StageWorkspace({
               detail={detail}
               tenantId={tenantId}
               workflowView={workflowView}
-              canApprove={approveAllowed}
+              canApprove={approveAllowed && !specialistUnbriefed}
               approving={approving || workflow.refreshingAfterAction}
               approveReason={workflowView?.allowed.approveReason ?? null}
               lastRefusal={workflowView?.lastRefusal ?? null}
@@ -1211,6 +1229,17 @@ export function StageWorkspace({
           {modelHandoff.error}
         </Banner>
       ) : null}
+      {specialistUnbriefed ? (
+        <Banner
+          tone="warning"
+          title={`${agentFor(stage as Stage).title} was started without the project's record`}
+          action={{ label: briefing.sending ? "Briefing…" : "Brief the specialist now", onClick: () => void briefing.brief() }}
+        >
+          Its replies so far were written without the approved documents or the earlier conversation, so this stage cannot be approved until it has them.
+          The briefing sends everything approved before this stage and the current draft, the same content a hand-off carries.
+          {briefing.error ? ` It could not be sent: ${briefing.error}` : ""}
+        </Banner>
+      ) : null}
 
       {/* Bottom right, over the canvas: always to hand, never a band of the
           window given to one sentence. */}
@@ -1284,7 +1313,7 @@ export function StageWorkspace({
           onOpenSettings={onOpenSettings}
           onApprove={approve}
           approving={approving || workflow.refreshingAfterAction}
-          canApprove={approveAllowed}
+          canApprove={approveAllowed && !specialistUnbriefed}
           strip={stripEl}
           reader={reader}
           stageEvents={events}
