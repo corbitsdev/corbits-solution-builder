@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { briefSubject, composedMailFold, isComposedOpening, withoutSendBackRef } from "./composed-mail.ts";
+import { briefSubject, composedMailFold, isAppBrief, isComposedOpening, withoutSendBackRef } from "./composed-mail.ts";
 import { composeMaterialMail } from "./attached-material.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 
@@ -74,10 +74,12 @@ describe("composedMailFold on the supervisor's briefs", () => {
     expect(composedMailFold({ author: "agent", body: "Build attempt 1 is still running; x\n\nbody" })).toBeNull();
   });
 
-  test("a brief sent under its subject marker is the app's, not the person's (CL-9940)", () => {
+  test("a brief is the app's by its subject marker, never by its body (CL-9940)", () => {
     const body = "Build attempt 3 is still running; write an interim build status from this record, as of turn 14 at 1:15 AM.\n\n## What the worker has reported so far\n- lines";
-    expect(composedMailFold({ author: "me", subject: briefSubject(3), body })?.byApp).toBe(true);
-    expect(composedMailFold({ author: "me", subject: body.slice(0, 60), body })?.byApp).toBeUndefined();
-    expect(composedMailFold({ author: "me", subject: briefSubject(3), body: "Make the brief shorter." })).toBeNull();
+    expect(isAppBrief({ author: "me", subject: briefSubject(3) })).toBe(true);
+    expect(isAppBrief({ author: "me", subject: body.slice(0, 60) })).toBe(false);
+    expect(isAppBrief({ author: "me" })).toBe(false);
+    expect(isAppBrief({ author: "agent", subject: `Re: ${briefSubject(3)}` })).toBe(false);
+    expect(isAppBrief({ author: "agent", subject: briefSubject(3) })).toBe(false);
   });
 });

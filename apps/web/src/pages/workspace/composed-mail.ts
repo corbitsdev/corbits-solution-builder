@@ -21,12 +21,11 @@ export type ComposedFold = {
   readonly body: string;
   /** A line shown outside the fold: the cue's or the ask's own sentence. */
   readonly lead: string | null;
-  /** The app wrote it, not the person: the chat must not label it as theirs. */
-  readonly byApp?: true;
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
 const BRIEF_SUBJECT = /^\[brief:\d+\]/;
+const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /**
  * The subject a supervisor brief is sent under (CL-9940). A person's own
@@ -35,7 +34,6 @@ const BRIEF_SUBJECT = /^\[brief:\d+\]/;
 export function briefSubject(attempt: number): string {
   return `[brief:${String(attempt)}] Build attempt ${String(attempt)}`;
 }
-const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /** The send-back cue's sentence, its marker gone. */
 export function withoutSendBackRef(body: string): string {
@@ -79,6 +77,16 @@ export function isComposedOpening(message: Pick<ChatMessage, "author" | "subject
 }
 
 /**
+ * A brief the app sent the Build supervisor under its subject marker
+ * (CL-9940). The chat does not show it: the person never wrote it, and the
+ * Build evidence pane already shows the record it is made from. A brief
+ * sent before the marker existed is still folded (`composedMailFold`).
+ */
+export function isAppBrief(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject !== undefined && BRIEF_SUBJECT.test(message.subject);
+}
+
+/**
  * The fold for a person-authored message the app composed, or null for a
  * message the person wrote. Only `author === "me"` is ever inspected, so
  * nothing a specialist writes can be folded away by echoing a marker. An
@@ -92,13 +100,10 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (material) return material;
   // The supervisor's briefs (#695): the record of an ended attempt, and the
   // progress of a running one. The chat shows the line that says which; the
-  // worker's turn lines and the record stay behind the fold. A brief sent
-  // before CL-9940 has no subject marker: it still folds, but stays labelled
-  // as the person's, since its body alone cannot prove the app wrote it.
+  // worker's turn lines and the record stay behind the fold.
   const brief = /^(Build attempt \d+ (?:is still running|has ended)[^\n]*)\n/.exec(message.body);
   if (brief) {
-    const fold = { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
-    return message.subject && BRIEF_SUBJECT.test(message.subject) ? { ...fold, byApp: true } : fold;
+    return { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
   }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);

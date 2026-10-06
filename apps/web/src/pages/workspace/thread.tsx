@@ -284,13 +284,13 @@ export function StageConversation({
               );
             }
             const text = messageText(message);
+            const you = message.role === "user";
+            const draft = you ? null : (draftRefs.get(message.id) ?? null);
             const source = byId.get(message.id);
             const composed = source ? composedMailFold(source) : null;
-            const you = message.role === "user" && !composed?.byApp;
-            const draft = message.role === "user" ? null : (draftRefs.get(message.id) ?? null);
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
-                <span className="who conv-who">{you ? "You" : composed?.byApp ? "Solution Builder" : who}</span>
+                <span className="who conv-who">{you ? "You" : who}</span>
                 <div className="bubble">
                   {composed ? (
                     <ComposedMail fold={composed} />
