@@ -24,3 +24,11 @@ describe("specialistActivity by ask", () => {
     expect(specialistActivity(6)).toBe("Architect is writing the build plan");
   });
 });
+
+// #768: a brief to the Build supervisor is answered with a status, not a draft.
+describe("specialistActivity for the Build supervisor", () => {
+  test("a brief is a status being written; a change asked of it redrafts the status", () => {
+    expect(specialistActivity(8, "status")).toBe("Build supervisor is writing the build status");
+    expect(specialistActivity(8, "redraft")).toBe("Build supervisor is redrafting the build status");
+  });
+});

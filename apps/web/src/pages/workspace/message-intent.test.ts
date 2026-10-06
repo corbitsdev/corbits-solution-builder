@@ -42,3 +42,12 @@ describe("delegationTarget", () => {
     expect(delegationTarget("make the Gantt wider", 6)).toBeNull();
   });
 });
+
+// #768: the app's briefs to the Build supervisor are their own kind of ask.
+describe("askKind for supervisor briefs", () => {
+  test("a progress brief and a record brief are status asks, whatever draft exists", () => {
+    expect(askKind("Build attempt 1 is still running; write an interim build status from this record, as of turn 185 at 1:34 AM.", true)).toBe("status");
+    expect(askKind("Build attempt 2 has ended and its work is recorded. Write the build status from this record.", false)).toBe("status");
+    expect(askKind("Build attempt notes from the person", true)).toBe("redraft");
+  });
+});
