@@ -56,8 +56,9 @@ export function TargetPicker({
         How will this be used?
       </p>
       <p className="inline-note">
-        Choose how the finished build will be used. Only a command-line check is actually run
-        today — the others are honest about not being verified yet.
+        Choose how the finished build will be used. A website or a service is started and
+        checked when the build is published. A terminal command or an installable app is
+        not checked yet.
       </p>
       <div className="grid gap-2">
         {SELECTABLE_TARGETS.map((option) => (
