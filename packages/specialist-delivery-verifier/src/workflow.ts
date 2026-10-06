@@ -1,17 +1,15 @@
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step } from "@intx/workflow";
+import { INFERENCE_SOURCE, specialistPrompt } from "@solutions-builder/specialist-shared/deploy-overlays";
 import { deliveryVerifier } from "./index.ts";
-import { systemPrompt } from "./prompt.ts";
-import SOURCE from "./inference-source.js";
-import GUIDANCE from "./workspace-guidance.js";
 import { deliver } from "@solutions-builder/tools-delivery/sidecar-bundle";
 
 const AGENT = defineAgent({
   id: deliveryVerifier.id,
-  systemPrompt: GUIDANCE ? `${systemPrompt}\n\n${GUIDANCE}` : systemPrompt,
+  systemPrompt: specialistPrompt(deliveryVerifier),
   tools: [deliver],
   capabilities: [],
-  inference: { sources: [SOURCE] },
+  inference: { sources: [INFERENCE_SOURCE] },
 });
 
 export default defineWorkflow({

@@ -1,16 +1,14 @@
 import { defineAgent } from "@intx/agent";
 import { defineWorkflow, step } from "@intx/workflow";
+import { INFERENCE_SOURCE, specialistPrompt } from "@solutions-builder/specialist-shared/deploy-overlays";
 import { namer } from "./index.ts";
-import { systemPrompt } from "./prompt.ts";
-import SOURCE from "./inference-source.js";
-import GUIDANCE from "./workspace-guidance.js";
 
 const AGENT = defineAgent({
   id: namer.id,
-  systemPrompt: GUIDANCE ? `${systemPrompt}\n\n${GUIDANCE}` : systemPrompt,
+  systemPrompt: specialistPrompt(namer),
   tools: [],
   capabilities: [],
-  inference: { sources: [SOURCE] },
+  inference: { sources: [INFERENCE_SOURCE] },
 });
 
 export default defineWorkflow({
