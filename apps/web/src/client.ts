@@ -278,6 +278,13 @@ export type BuildAttempt = {
   workspace: string;
   /** Who told the worker to stop, when the host did: a cancel, or the host's own stop. Absent from a host before it was recorded. */
   endedBy?: "cancel" | "host_stop" | null;
+  /**
+   * What the attempt has spent so far (#785): every inference call in the
+   * worker's own log over the attempt's window, and the models its turns
+   * name. Null for a worker that keeps no such log; absent from a host
+   * before it was counted.
+   */
+  usage?: { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; source: string; models: string[] } | null;
 };
 
 /** The frozen material the host assembles the worker's prompt from. */
