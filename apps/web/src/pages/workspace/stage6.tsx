@@ -50,8 +50,8 @@ const PAGES: readonly { key: string; label: string }[] = [
 
 /**
  * Stage 6's requirements author and four panel principals, each a real,
- * lazily-deployed agent (CL-8737) -- distinct from `ProductRequirements`/
- * `PanelReviews`, which read a persisted artifact these agents never write.
+ * lazily-deployed agent (CL-8737) -- distinct from `PanelReviews`, which
+ * reads a persisted artifact these agents never write.
  * A reply here lives only in its own mail thread, read back with
  * `readStageThread`, so a missing or failed reply never touches
  * `workflowView.allowed.approve` or the plan itself.
