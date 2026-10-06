@@ -1466,6 +1466,23 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
+/* The build page's one toolbar (#787) and the probe fields under it: a row
+   that wraps, the note on a line of its own. */
+.build-actions,
+.build-probe {
+  margin-left: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.build-probe .field {
+  flex: 1 1 16rem;
+}
+.build-probe .inline-note {
+  flex-basis: 100%;
+}
+
 /* Every control in a document's header is one size: 32px tall, the same
    inset, the same 14px glyph before its label. Buttons, selects and the
    changes toggle came in at three heights and two type sizes. */

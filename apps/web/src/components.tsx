@@ -100,6 +100,8 @@ export function Button({
   doing?: string;
   /** Anchors the first-run tour. */
   "data-tour"?: string;
+  /** Why the control is disabled, or what it does, on hover (#787). */
+  title?: string;
 }) {
   const inert = disabled || loading;
   // A loading button is the one mark most actions make, and the busy

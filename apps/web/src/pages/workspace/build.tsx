@@ -456,8 +456,17 @@ export function BuildPanel({
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const ended = current !== null && current.state === "ended" && current.outcome !== null;
   const recorded = current !== null && attemptRecorded(detail.nodes, current.attempt);
-  const canRecord = ended && !recorded;
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
+  // The one toolbar every action lives in (#787): each button keeps its
+  // place and is disabled, never hidden, when it does not apply. Record
+  // acts on the attempt in view once it has ended; once recorded, the
+  // same button archives it again.
+  const recordable = ended ? current : null;
+  const recordLabel = recordable
+    ? recorded
+      ? `Re-archive attempt ${String(recordable.attempt)}'s files`
+      : `Record attempt ${String(recordable.attempt)} and brief the supervisor`
+    : "Record the attempt and brief the supervisor";
 
   return (
     <StagePanes
@@ -533,14 +542,21 @@ export function BuildPanel({
                 </button>
               </Banner>
             ) : null}
-            <div className="document-tools">
-              <Button variant="primary" loading={busy === "start"} disabled={!!running || busy !== null} onClick={() => void start()}>
-                Start the build attempt
+            <div className="document-tools build-actions">
+              <Button
+                variant={attempts.length === 0 ? "primary" : "secondary"}
+                loading={busy === "start"}
+                disabled={!!running || busy !== null}
+                {...(attempts.length === 0 ? {} : { title: "A new attempt in a fresh directory, from the frozen plan alone; earlier attempts' directories are kept." })}
+                onClick={() => void start()}
+              >
+                {attempts.length === 0 ? "Start the build attempt" : "Restart the build from the beginning"}
               </Button>
               <Button
                 variant="primary"
                 loading={busy === "continue"}
                 disabled={!!running || busy !== null || lastEnded === null}
+                title={lastEnded ? `A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included.` : "Nothing has ended yet to continue from."}
                 onClick={() => lastEnded && void start(lastEnded.attempt)}
               >
                 {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
@@ -548,10 +564,40 @@ export function BuildPanel({
               <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
                 Cancel the build attempt
               </Button>
+              <Button
+                variant={recordable && !recorded ? "primary" : "secondary"}
+                loading={busy === "record"}
+                disabled={!recordable || busy !== null || !address || !!running}
+                title={
+                  recordable
+                    ? recorded
+                      ? "No build runs. The directory the worker left is packaged again as it is, a new archive and manifest are written beside the earlier ones, and the supervisor is briefed on the new record."
+                      : "Packages the directory the worker left into an archive, records it as the build evidence, and briefs the supervisor, who writes the build status."
+                    : "Enabled once the attempt in view has ended."
+                }
+                onClick={() => recordable && void record(recordable)}
+              >
+                {recordLabel}
+              </Button>
               <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
                 Approve and continue
               </Button>
             </div>
+            {attempts.length > 0 ? (
+              // What the record step probes, beside the button that uses it.
+              <div className="document-tools build-probe">
+                <input
+                  className="field"
+                  aria-label="Start command"
+                  placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
+                  value={startCommand}
+                  disabled={!recordable}
+                  onChange={(event) => setStartCommand(event.target.value)}
+                />
+                <input className="field" aria-label="Port" placeholder="Port" inputMode="numeric" value={port} disabled={!recordable} onChange={(event) => setPort(event.target.value)} style={{ maxWidth: "6rem" }} />
+                <p className="inline-note">Filled in, the record step starts the build with this command and probes the port; left blank, the brief says the target was not probed.</p>
+              </div>
+            ) : null}
             {attempts.length > 0 ? (
               <div className="ev">
                 {attempts.map((entry) => {
@@ -649,48 +695,8 @@ export function BuildPanel({
                 ) : null}
                 {current.state === "ended" && current.outcome?.available && current.outcome.finalText.trim().length === 0 ? (
                   // Ended with nothing to report: what is in the directory is
-                  // still there, and the way on is to continue from it.
-                  <div className="document-tools">
-                    <p className="inline-note">The worker ended without a report. Its directory is kept; a new attempt can continue from it.</p>
-                    <Button variant="primary" loading={busy === "continue"} disabled={!!running || busy !== null} onClick={() => void start(current.attempt)}>
-                      Continue from attempt {String(current.attempt)}'s directory
-                    </Button>
-                  </div>
-                ) : null}
-                {canRecord ? (
-                  <div className="document-tools">
-                    <input
-                      className="field"
-                      aria-label="Start command"
-                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
-                      value={startCommand}
-                      onChange={(event) => setStartCommand(event.target.value)}
-                    />
-                    <input
-                      className="field"
-                      aria-label="Port"
-                      placeholder="Port"
-                      inputMode="numeric"
-                      value={port}
-                      onChange={(event) => setPort(event.target.value)}
-                      style={{ maxWidth: "6rem" }}
-                    />
-                    <Button variant="primary" loading={busy === "record"} disabled={busy !== null || !address} onClick={() => void record(current)}>
-                      Record attempt {String(current.attempt)} and brief the supervisor
-                    </Button>
-                  </div>
-                ) : null}
-                {ended && recorded ? (
-                  // Already recorded (#727): the same step again, for a new
-                  // archive layout or a probe with a start command this time.
-                  <div className="document-tools">
-                    <input className="field" aria-label="Start command" placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`} value={startCommand} onChange={(event) => setStartCommand(event.target.value)} />
-                    <input className="field" aria-label="Port" placeholder="Port" inputMode="numeric" value={port} onChange={(event) => setPort(event.target.value)} style={{ maxWidth: "6rem" }} />
-                    <Button variant="secondary" loading={busy === "record"} disabled={busy !== null || !address || !!running} onClick={() => void record(current)}>
-                      Re-archive attempt {String(current.attempt)}'s files
-                    </Button>
-                    <p className="inline-note">No build runs. The directory the worker left is packaged again as it is, a new archive and manifest are written beside the earlier ones, and the supervisor is briefed on the new record.</p>
-                  </div>
+                  // still there, and the way on is to continue from it, above.
+                  <p className="inline-note">The worker ended without a report. Its directory is kept; "Continue from attempt {String(current.attempt)}" starts from it.</p>
                 ) : null}
               </>
             ) : (
