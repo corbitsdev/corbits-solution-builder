@@ -1071,6 +1071,14 @@
   font-weight: 600;
   margin: 0 0 0.5rem;
 }
+/* The attempt's directory (#781): a long path, broken anywhere rather than overflowing. */
+.build-directory {
+  margin: 0 0 0.75rem;
+}
+.build-directory code {
+  word-break: break-all;
+  user-select: all;
+}
 .build-meter {
   display: flex;
   height: 0.5rem;

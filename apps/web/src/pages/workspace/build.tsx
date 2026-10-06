@@ -163,6 +163,8 @@ function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" |
   if (attempt.state === "unavailable") return { label: "could not run", tone: "error" };
   const outcome = attempt.outcome;
   if (!outcome) return { label: "ended", tone: "info" };
+  if (attempt.endedBy === "host_stop") return { label: "ended by the host stopping", tone: "warning" };
+  if (attempt.endedBy === "cancel") return { label: "cancelled", tone: "warning" };
   if (outcome.signal) return { label: `ended by ${outcome.signal}`, tone: "warning" };
   // An exit status is reported, never coloured: zero is not evidence the
   // build is right, and a person reads the record, not a tick.
@@ -566,6 +568,9 @@ export function BuildPanel({
               <>
                 <h2>Build progress</h2>
                 <p className="build-headline">{progressHeadline(current, progress)}</p>
+                <p className="inline-note build-directory">
+                  Attempt {String(current.attempt)}'s directory on this computer: <code>{current.workspace}</code>
+                </p>
                 {progress.tasks.length > 0 ? (
                   <>
                     <div className="build-meter" role="img" aria-label={`${String(progress.committed)} of ${String(progress.tasks.length)} tasks committed, ${String(progress.started)} under way`}>

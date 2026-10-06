@@ -123,13 +123,16 @@ export function taskProgress(tasks: readonly PlanTask[], report: BuildWorkspaceR
 
 const list = (numbers: readonly number[]): string => numbers.map(String).join(", ");
 
+/** The exit status of a process that ended on SIGTERM: 128 plus the signal's number. */
+const SIGTERM_EXIT = 143;
+
 /**
  * One line that says whether the build finished and how far it got: the
  * attempt's own state and exit, then the task count. "Finished" is the
  * worker ending on its own with an exit status of zero; whether what it
  * built is right is the supervisor's status and the person's review.
  */
-export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome">, progress: BuildProgress): string {
+export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome" | "endedBy">, progress: BuildProgress): string {
   const total = progress.tasks.length;
   const unnamed = progress.tasks.filter((task) => task.state === "unnamed").map((task) => task.number);
   const tally =
@@ -138,16 +141,22 @@ export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome"
       : `${String(progress.commits)} commit${progress.commits === 1 ? "" : "s"} (the plan has no numbered task list to count against)`;
   if (attempt.state === "running") return `Not finished. The worker is still working, with ${tally}.`;
   if (attempt.state === "detached") return `Not finished. The worker is still running from before the host restarted, with ${tally}.`;
-  if (attempt.state === "lost") return `Not finished. The host was stopped and the worker is gone, leaving ${tally}. A new attempt can continue from its directory.`;
+  if (attempt.state === "lost") return `Not finished. The host was stopped and the worker is gone, leaving ${tally}. A new attempt can continue from its directory, below.`;
   if (attempt.state === "unavailable") return `Not started: the coding agent could not run.`;
   const outcome = attempt.outcome;
   if (!outcome) return `Ended, with ${tally}.`;
-  if (outcome.signal) return `Not finished. The attempt was ended by ${outcome.signal}, leaving ${tally}. A new attempt can continue from its directory.`;
+  // Who stopped it, when the host knows: the exit alone reads as a crash.
+  if (attempt.endedBy === "host_stop") return `Not finished. The host was stopped while the worker was running, which ended it, leaving ${tally}. Nothing went wrong with the work; a new attempt can continue from its directory, below.`;
+  if (attempt.endedBy === "cancel") return `Not finished. The attempt was cancelled, leaving ${tally}. A new attempt can continue from its directory, below.`;
+  if (outcome.signal) return `Not finished. The attempt was ended by ${outcome.signal}, leaving ${tally}. A new attempt can continue from its directory, below.`;
   if (outcome.exitStatus === 0) {
     const all = total > 0 && progress.committed === total;
     return `${all ? "Finished" : "The worker finished"}: it exited 0 after ${String(outcome.turns ?? "?")} turns, with ${tally}. Whether the work is right is for the supervisor's status and your review.`;
   }
-  return `Not finished. The worker stopped with exit status ${String(outcome.exitStatus ?? "?")}, leaving ${tally}. A new attempt can continue from its directory.`;
+  // 143 is 128 + SIGTERM: the worker was told to stop and said so in its
+  // exit, which a host that stopped before #781 recorded without the why.
+  if (outcome.exitStatus === SIGTERM_EXIT) return `Not finished. The worker was told to stop (exit status 143, which is what a host stop or a cancel sends), leaving ${tally}. A new attempt can continue from its directory, below.`;
+  return `Not finished. The worker stopped with exit status ${String(outcome.exitStatus ?? "?")}, leaving ${tally}. A new attempt can continue from its directory, below.`;
 }
 
 /** How many open items QUESTIONS.md lists: its top-level bullets. */

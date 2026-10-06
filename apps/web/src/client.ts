@@ -274,7 +274,10 @@ export type BuildAttempt = {
   endedAt: string | null;
   continuedFrom: number | null;
   outcome: BridgeOutcome | null;
+  /** The worker's directory on the host's computer; a new attempt can continue from it. */
   workspace: string;
+  /** Who told the worker to stop, when the host did: a cancel, or the host's own stop. Absent from a host before it was recorded. */
+  endedBy?: "cancel" | "host_stop" | null;
 };
 
 /** The frozen material the host assembles the worker's prompt from. */
