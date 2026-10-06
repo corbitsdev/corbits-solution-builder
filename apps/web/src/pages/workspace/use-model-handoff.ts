@@ -140,7 +140,7 @@ export function isHandoffMessage(message: Pick<ChatMessage, "author" | "body">):
   return message.author === "me" && isHandoffBody(message.body);
 }
 
-/** The subject marker of a briefing sent by hand (#803), to a specialist found without the record. */
+/** The subject marker of a briefing sent by hand (#804), to a specialist found without the record. */
 const BRIEFING_SUBJECT = /^\[briefing:[^\]]+:\d+\]/;
 
 /**
