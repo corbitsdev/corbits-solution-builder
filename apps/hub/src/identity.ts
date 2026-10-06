@@ -30,11 +30,12 @@ export const IDENTITY: HostIdentity = {
   globalTokenKey: "solutionsBuilderToken",
   // The shell's IPC schemes (the webview calls the shell over `ipc:` on macOS
   // and `http://ipc.localhost` elsewhere; meaningless to a browser, which has
-  // neither, and harmless there), plus `https:` so `provider-catalog.ts`'s
-  // `discoverModels` can validate a candidate API key by calling the
-  // provider's own `/models` endpoint directly — the hub never calls out to
-  // a third-party inference endpoint on the tenant's behalf.
-  connectSrcExtra: ["ipc:", "http://ipc.localhost", "https:"],
+  // neither, and harmless there), plus `https:` and loopback `http:` so
+  // `provider-catalog.ts`'s `discoverModels` can validate a candidate API
+  // key by calling the provider's own `/models` endpoint directly — the hub
+  // never calls out to a third-party inference endpoint on the tenant's
+  // behalf.
+  connectSrcExtra: ["ipc:", "http://ipc.localhost", "https:", "http://localhost:*", "http://127.0.0.1:*"],
   interfaceBuildHint: "bun run ui:build",
   ownerEmail: "owner@solutions-builder.local",
   ownerName: "You",
