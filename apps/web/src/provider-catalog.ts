@@ -403,10 +403,7 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new ProviderRejectedError(
-      response.status,
-      `The provider rejected this key (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : "."}`,
-    );
+    throw new ProviderRejectedError(response.status, rejectionMessage(response.status, detail));
   }
   const body = (await response.json().catch(() => null)) as { data?: { id?: string }[] } | null;
   const ids = (body?.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
@@ -415,6 +412,19 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
     throw new Error("This key works, but the provider did not list any model this product can use.");
   }
   return serving;
+}
+
+// OpenAI and Anthropic both put a readable reason in `error.message`; the
+// raw body is a fallback for providers that do not.
+export function rejectionMessage(status: number, detail: string): string {
+  const prefix = `The provider rejected this key (HTTP ${status})`;
+  if (!detail) return `${prefix}.`;
+  let message = detail.slice(0, 200);
+  try {
+    const parsed = JSON.parse(detail) as { error?: { message?: unknown } } | null;
+    if (typeof parsed?.error?.message === "string") message = parsed.error.message;
+  } catch {}
+  return `${prefix}: ${message}`;
 }
 
 /** Whether a discovery failure means the credential is sealed (401/403) rather than something else (unreachable, bad response, ...). */

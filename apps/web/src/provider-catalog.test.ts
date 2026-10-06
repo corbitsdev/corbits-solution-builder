@@ -5,6 +5,7 @@ import {
   isSealedCredentialFailure,
   missingOAuthModels,
   ProviderRejectedError,
+  rejectionMessage,
   requireDiscoveredModels,
 } from "./provider-catalog.ts";
 
@@ -58,5 +59,22 @@ describe("missingOAuthModels", () => {
 
   test("is empty for a provider that is not a sign-in", () => {
     expect(missingOAuthModels("anthropic", [])).toEqual([]);
+  });
+});
+
+describe("rejectionMessage", () => {
+  test("shows the provider's error.message when the body has one", () => {
+    const body = '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}';
+    expect(rejectionMessage(401, body)).toBe("The provider rejected this key (HTTP 401): invalid x-api-key");
+  });
+
+  test("falls back to the start of the raw body", () => {
+    expect(rejectionMessage(502, `Bad Gateway ${"x".repeat(300)}`)).toBe(
+      `The provider rejected this key (HTTP 502): Bad Gateway ${"x".repeat(188)}`,
+    );
+  });
+
+  test("says only the status for an empty body", () => {
+    expect(rejectionMessage(500, "")).toBe("The provider rejected this key (HTTP 500).");
   });
 });
