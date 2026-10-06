@@ -436,7 +436,21 @@ export async function downloadBuild(tenantId: string, node: ArtifactNode): Promi
  * The completed build, as the person accepted it: one archive of the
  * attempt's workspace. Saved, not shown — a source tree is not a document.
  */
-export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
+export function BuildFile({
+  node,
+  nodes,
+  tenantId,
+  attempt = null,
+  caveat = null,
+}: {
+  node: ArtifactNode;
+  nodes: readonly ArtifactNode[];
+  tenantId: string;
+  /** Which attempt the archive holds, when known (#791): the button says so. */
+  attempt?: number | null;
+  /** What the archive does not hold: a later attempt's work, say. */
+  caveat?: string | null;
+}) {
   const { busy, download } = useFileDownload(tenantId, node, node.title);
   // How it unpacks is read off its manifest (#727), never assumed: an
   // archive made before #699 has its files at the root.
@@ -446,7 +460,7 @@ export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes
     <div className="deck-file">
       <p className="inline-note">
         {node.title} · tar.gz archive{node.sizeBytes === undefined ? "" : ` · about ${formatSize(node.sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
-        without installed dependencies.{unpacks} Its bytes are what delivery review verifies once accepted.
+        without installed dependencies.{unpacks} Its bytes are what delivery review verifies once accepted.{caveat ? ` ${caveat}` : ""}
       </p>
       <div className="button-row">
         <Button
@@ -454,7 +468,7 @@ export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes
           loading={busy}
           onClick={() => void download()}
         >
-          Download the build (.tar.gz)
+          {attempt === null ? "Download the build (.tar.gz)" : `Download attempt ${String(attempt)}'s archive (.tar.gz)`}
         </Button>
       </div>
     </div>

@@ -47,19 +47,21 @@ export function buildEvidenceState(
   attempts: readonly Pick<BuildAttempt, "attempt" | "state">[],
   /** Whether `attempts` has been read from the host at all: before that, an empty list says nothing. */
   loaded = true,
-): { ready: boolean; reason: string | null } {
-  if (!loaded) return { ready: false, reason: "Reading the host's build attempts…" };
+): { ready: boolean; reason: string | null; waitingOn: string | null } {
+  // `waitingOn` is the reason in a few words, for a footer (#791).
+  if (!loaded) return { ready: false, reason: "Reading the host's build attempts…", waitingOn: "the host's attempts" };
   const archive = buildArchives(nodes)[0];
-  if (!archive) return { ready: false, reason: "No build archive has been recorded yet — package an ended attempt first." };
-  if (attempts.some((entry) => entry.state === "running" || entry.state === "detached")) {
-    return { ready: false, reason: "A build attempt is still running. Its work can be packaged once the worker has ended." };
+  if (!archive) return { ready: false, reason: "No build archive has been recorded yet — package an ended attempt first.", waitingOn: "build evidence" };
+  const running = attempts.find((entry) => entry.state === "running" || entry.state === "detached");
+  if (running) {
+    return { ready: false, reason: `Attempt ${String(running.attempt)} is still running. Its work can be recorded once the worker has ended, and the stage approved after that.`, waitingOn: `attempt ${String(running.attempt)}, still running` };
   }
   const recordedFor = attemptOfNode(archive);
   const newest = attempts.reduce((max, entry) => Math.max(max, entry.attempt), 0);
   if (recordedFor !== null && newest > recordedFor) {
-    return { ready: false, reason: `Attempt ${String(newest)} has not been packaged yet; the recorded archive is attempt ${String(recordedFor)}'s.` };
+    return { ready: false, reason: `Attempt ${String(newest)} has not been recorded yet; the recorded archive is attempt ${String(recordedFor)}'s.`, waitingOn: `attempt ${String(newest)} being recorded` };
   }
-  return { ready: true, reason: null };
+  return { ready: true, reason: null, waitingOn: null };
 }
 
 /** What the record step tells the supervisor, in the worker's own terms. */

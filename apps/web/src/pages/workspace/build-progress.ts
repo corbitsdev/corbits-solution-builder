@@ -31,6 +31,8 @@ export type BuildProgress = {
   readonly unnamed: number;
   /** The worker's commits, however many name a task. */
   readonly commits: number;
+  /** The commits made since the attempt started (#791): on a continuation, what this attempt did, as against what it inherited. */
+  readonly newCommits: number;
 };
 
 const TITLE_KEEP = 90;
@@ -98,8 +100,10 @@ export function taskNumbers(text: string): Set<number> {
  * STATUS.md heading names it, started when only the worker's turn lines do,
  * unnamed otherwise.
  */
-export function taskProgress(tasks: readonly PlanTask[], report: BuildWorkspaceReport | null, log: string): BuildProgress {
+export function taskProgress(tasks: readonly PlanTask[], report: BuildWorkspaceReport | null, log: string, since: string | null = null): BuildProgress {
   const commits = report?.commits ?? [];
+  const from = since ? Date.parse(since) : Number.NaN;
+  const newCommits = Number.isFinite(from) ? commits.filter((commit) => Date.parse(commit.at) >= from).length : commits.length;
   const byCommit = new Map<number, string>();
   for (const commit of commits) for (const n of taskNumbers(commit.subject)) if (!byCommit.has(n)) byCommit.set(n, commit.subject);
   const inStatus = new Set<number>();
@@ -118,6 +122,7 @@ export function taskProgress(tasks: readonly PlanTask[], report: BuildWorkspaceR
     started: placed.filter((task) => task.state === "started").length,
     unnamed: placed.filter((task) => task.state === "unnamed").length,
     commits: commits.length,
+    newCommits,
   };
 }
 
@@ -132,13 +137,22 @@ const SIGTERM_EXIT = 143;
  * worker ending on its own with an exit status of zero; whether what it
  * built is right is the supervisor's status and the person's review.
  */
-export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome" | "endedBy">, progress: BuildProgress): string {
+export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome" | "endedBy"> & Partial<Pick<BuildAttempt, "continuedFrom" | "note">>, progress: BuildProgress): string {
   const total = progress.tasks.length;
   const unnamed = progress.tasks.filter((task) => task.state === "unnamed").map((task) => task.number);
   const tally =
     total > 0
       ? `commits for ${String(progress.committed)} of ${String(total)} tasks${progress.started > 0 ? `, ${String(progress.started)} more named as under way` : ""}${unnamed.length > 0 && unnamed.length <= 8 ? `, and none yet for ${unnamed.length === 1 ? "task" : "tasks"} ${list(unnamed)}` : ""}`
       : `${String(progress.commits)} commit${progress.commits === 1 ? "" : "s"} (the plan has no numbered task list to count against)`;
+  // A continuation (#791) inherits the earlier attempt's commits, so the
+  // tally is mostly not this attempt's doing: say what was inherited,
+  // what this attempt has added, and that it is working on the note.
+  const continued = attempt.continuedFrom !== undefined && attempt.continuedFrom !== null;
+  const added = `${String(progress.newCommits)} commit${progress.newCommits === 1 ? "" : "s"} of its own`;
+  const asked = attempt.note ? ", working on what you asked for, below" : "";
+  if (attempt.state === "running" && continued) {
+    return `Not finished. Attempt continues from attempt ${String(attempt.continuedFrom)}, which left ${tally}; so far it has made ${added}${asked}.`;
+  }
   if (attempt.state === "running") return `Not finished. The worker is still working, with ${tally}.`;
   if (attempt.state === "detached") return `Not finished. The worker is still running from before the host restarted, with ${tally}.`;
   if (attempt.state === "lost") return `Not finished. The host was stopped and the worker is gone, leaving ${tally}. A new attempt can continue from its directory, below.`;
@@ -151,7 +165,8 @@ export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome"
   if (outcome.signal) return `Not finished. The attempt was ended by ${outcome.signal}, leaving ${tally}. A new attempt can continue from its directory, below.`;
   if (outcome.exitStatus === 0) {
     const all = total > 0 && progress.committed === total;
-    return `${all ? "Finished" : "The worker finished"}: it exited 0 after ${String(outcome.turns ?? "?")} turns, with ${tally}. Whether the work is right is for the supervisor's status and your review.`;
+    const own = continued ? ` and ${added} on top of attempt ${String(attempt.continuedFrom)}'s` : "";
+    return `${all ? "Finished" : "The worker finished"}: it exited 0 after ${String(outcome.turns ?? "?")} turns, with ${tally}${own}. Whether the work is right is for the supervisor's status and your review${attempt.note ? ", against what you asked for, below" : ""}.`;
   }
   // 143 is 128 + SIGTERM: the worker was told to stop and said so in its
   // exit, which a host that stopped before #781 recorded without the why.

@@ -39,7 +39,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 const THREAD_BACKSTOP_MS = 20_000;
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -377,7 +377,7 @@ export function BuildPanel({
     };
   }, [detail.nodes, freeze, tenantId]);
   const tasks = useMemo(() => planTasks(planText), [planText]);
-  const progress = useMemo(() => taskProgress(tasks, report, log), [tasks, report, log]);
+  const progress = useMemo(() => taskProgress(tasks, report, log, current?.startedAt ?? null), [tasks, report, log, current?.startedAt]);
 
   const logRef = useRef<HTMLPreElement | null>(null);
   useEffect(() => {
@@ -456,6 +456,7 @@ export function BuildPanel({
     });
 
   const archive = useMemo(() => buildArchives(detail.nodes)[0], [detail.nodes]) as ArtifactNode | undefined;
+  const archivedAttempt = archive ? attemptOfNode(archive) : null;
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
   const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
   const freshness = useMemo(() => (status ? statusFreshness(messages, status, current) : null), [messages, status, current]);
@@ -591,7 +592,14 @@ export function BuildPanel({
               >
                 {recordLabel}
               </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
+              <Button
+                variant="primary"
+                loading={approving}
+                // The workflow allows approval once an archive is recorded; the page also waits for a running attempt (#791).
+                disabled={!canApprove || !address || !evidence.ready}
+                {...(evidence.reason ? { title: evidence.reason } : {})}
+                onClick={onApprove}
+              >
                 Approve and continue
               </Button>
             </div>
@@ -638,7 +646,7 @@ export function BuildPanel({
                     <span key={entry.attempt} className={EV_TONE[mark.tone]} role="button" tabIndex={0} onClick={() => setSelected(entry.attempt)} onKeyDown={(event) => event.key === "Enter" && setSelected(entry.attempt)}>
                       {evMark(mark.tone)}
                       {entry.attempt === current?.attempt ? <b>attempt {String(entry.attempt)}</b> : `attempt ${String(entry.attempt)}`}
-                      {entry.continuedFrom !== null ? ` (continued from ${String(entry.continuedFrom)})` : ""}
+                      {entry.continuedFrom !== null ? ` (continued from ${String(entry.continuedFrom)}${entry.note ? ", with a note" : ""})` : ""}
                       {" — "}
                       {mark.label}
                       {entry.startedAt ? ` · ${new Date(entry.startedAt).toLocaleString()}` : ""}
@@ -654,6 +662,13 @@ export function BuildPanel({
                 <p className="inline-note build-directory">
                   Attempt {String(current.attempt)}'s directory on this computer: <code>{current.workspace}</code>
                 </p>
+                {current.note ? (
+                  // What this attempt was asked for (#791): the note sent with the continue, as the packet carries it.
+                  <details className="bubble-fold build-asked" open>
+                    <summary>What attempt {String(current.attempt)} was asked for, in its packet</summary>
+                    <Markdown source={current.note} />
+                  </details>
+                ) : null}
                 {progress.tasks.length > 0 ? (
                   <>
                     <div className="build-meter" role="img" aria-label={`${String(progress.committed)} of ${String(progress.tasks.length)} tasks committed, ${String(progress.started)} under way`}>
@@ -664,6 +679,7 @@ export function BuildPanel({
                     <details className="bubble-fold" open={current.state !== "running"}>
                       <summary>
                         The plan's {String(progress.tasks.length)} tasks: {String(progress.committed)} committed, {String(progress.started)} under way, {String(progress.unnamed)} not yet named
+                        {current.continuedFrom !== null && progress.newCommits === 0 ? ` — all by attempt ${String(current.continuedFrom)} or earlier; nothing committed by this attempt yet` : ""}
                       </summary>
                       <div className="ev build-tasks">
                         {progress.tasks.map((task) => (
@@ -734,7 +750,21 @@ export function BuildPanel({
             ) : (
               <p className="inline-note">No attempt has been started. The worker builds in its own directory on this computer, from the frozen plan, requirements, design and stack.</p>
             )}
-            {archive ? <BuildFile node={archive} nodes={detail.nodes} tenantId={tenantId} /> : null}
+            {archive ? (
+              <BuildFile
+                node={archive}
+                nodes={detail.nodes}
+                tenantId={tenantId}
+                attempt={archivedAttempt}
+                caveat={
+                  running
+                    ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until it is recorded.`
+                    : lastEnded && archivedAttempt !== null && lastEnded.attempt > archivedAttempt
+                      ? `Attempt ${String(lastEnded.attempt)} has ended but is not recorded; this archive is attempt ${String(archivedAttempt)}'s.`
+                      : null
+                }
+              />
+            ) : null}
             {status ? (
               <>
                 <h2>
@@ -744,7 +774,7 @@ export function BuildPanel({
                 <Markdown source={status.body} />
               </>
             ) : null}
-            {!canApprove && evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}
+            {evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}
           </div>
         </div>
       )}

@@ -197,6 +197,8 @@ export type AttemptRecord = {
   readonly endedBy: EndedBy | null;
   /** What the attempt has spent so far, in the worker's own counts (#785); null for a worker that keeps no usage log. */
   readonly usage: AttemptUsage | null;
+  /** What the person asked this attempt for, on a continuation (#789); null when nothing was asked. */
+  readonly note: string | null;
 };
 
 /** What is written as `<n>.json` when the worker ends. */
@@ -216,6 +218,8 @@ type StartedFile = {
   /** Which worker, so a host that adopts the attempt can record it; absent from a host before #783. */
   readonly worker?: string;
   readonly command?: string;
+  /** The person's note to the worker (#789), kept with the attempt so the page can show what it was asked for. */
+  readonly note?: string | null;
 };
 
 type InFlight = {
@@ -277,14 +281,16 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   if (live) {
     const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
     const usage = await attemptUsage(projectId, attempt, started?.worker ?? null, { from: live.startedAt, to: null });
-    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace, endedBy: null, usage };
+    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace, endedBy: null, usage, note: started?.note ?? null };
   }
   const ended = await readJson<OutcomeFile>(attemptFile(projectId, attempt, ".json"));
   if (ended) {
+    const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
     return {
       attempt,
       state: ended.outcome.available ? "ended" : "unavailable",
       endedBy: ended.endedBy ?? null,
+      note: started?.note ?? null,
       usage: ended.outcome.available ? await attemptUsage(projectId, attempt, ended.outcome.worker, { from: ended.outcome.startedAt, to: ended.outcome.endedAt }) : null,
       startedAt: ended.outcome.startedAt,
       endedAt: ended.outcome.endedAt,
@@ -301,7 +307,7 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   if (await adoptAttempt(projectId, attempt, started)) return attemptRecord(projectId, attempt);
   const alive = typeof started.pgid === "number" && groupAlive(started.pgid);
   const usage = await attemptUsage(projectId, attempt, started.worker ?? null, { from: started.startedAt, to: alive ? null : new Date().toISOString() });
-  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null, usage };
+  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null, usage, note: started.note ?? null };
 }
 
 /**
@@ -638,8 +644,9 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   const startedAt = new Date().toISOString();
   await writeFile(attemptFile(projectId, attempt, ".prompt.txt"), prompt);
   const startedFile = attemptFile(projectId, attempt, ".started.json");
+  const note = continueFrom !== null && args.prompt.continueNote?.trim() ? args.prompt.continueNote.trim() : null;
   const writeStarted = (process: { pid: number | null; pgid: number | null; worker?: string; command?: string }) =>
-    writeFile(startedFile, `${JSON.stringify({ startedAt, continuedFrom: continueFrom, ...process } satisfies StartedFile)}\n`);
+    writeFile(startedFile, `${JSON.stringify({ startedAt, continuedFrom: continueFrom, note, ...process } satisfies StartedFile)}\n`);
   await writeStarted({ pid: null, pgid: null });
   const logPath = attemptFile(projectId, attempt, ".log");
   await writeFile(logPath, "");
@@ -724,5 +731,5 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   })();
   live.done = done;
 
-  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace, endedBy: null, usage: null };
+  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace, endedBy: null, usage: null, note };
 }

@@ -118,6 +118,23 @@ describe("taskProgress and progressHeadline", () => {
     expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: null }, progress)).toMatch(/told to stop/);
   });
 
+  // #791: a continuation inherits the earlier attempt's commits.
+  test("a continuation says what it inherited, what it added, and that it is on the note", () => {
+    const inherited = taskProgress(tasks, report, log, "2026-10-06T12:00:00Z");
+    expect(inherited.newCommits).toBe(0);
+    expect(progressHeadline({ state: "running", outcome: null, continuedFrom: 2, note: "fix the 404" }, inherited)).toBe(
+      "Not finished. Attempt continues from attempt 2, which left commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5; so far it has made 0 commits of its own, working on what you asked for, below.",
+    );
+    const added = taskProgress(tasks, { ...report, commits: [...report.commits, { hash: "d", at: "2026-10-06T13:00:00Z", subject: "fix: build the web bundle in dev (Task 2)" }] }, log, "2026-10-06T12:00:00Z");
+    expect(added.newCommits).toBe(1);
+    expect(progressHeadline({ state: "running", outcome: null, continuedFrom: 2, note: null }, added)).toMatch(/so far it has made 1 commit of its own\.$/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({}), continuedFrom: 2, note: "fix the 404" }, added)).toBe(
+      "The worker finished: it exited 0 after 135 turns, with commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5 and 1 commit of its own on top of attempt 2's. Whether the work is right is for the supervisor's status and your review, against what you asked for, below.",
+    );
+    // Without a start to count from, every commit is this attempt's.
+    expect(taskProgress(tasks, report, log).newCommits).toBe(2);
+  });
+
   test("counts commits alone when the plan has no task list", () => {
     const progress = taskProgress([], report, "");
     expect(progressHeadline({ state: "running", outcome: null }, progress)).toBe("Not finished. The worker is still working, with 2 commits (the plan has no numbered task list to count against).");
