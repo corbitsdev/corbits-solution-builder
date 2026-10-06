@@ -12,7 +12,7 @@
  * is the only place quorum is enforced.
  */
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../client.js";
+import { api, ApiFailure, STAKEHOLDER_ROLES, type ArtifactNode, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -250,13 +250,9 @@ function Stakeholders({
 }) {
   const [rows, setRows] = useState(audiences);
   const [needed, setNeeded] = useState(quorum);
-  const [roles, setRoles] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void api.stakeholders(projectId).then((result) => setRoles(result.roles)).catch(() => setRoles([]));
-  }, [projectId]);
   useEffect(() => {
     if (!editing) {
       setRows(audiences);
@@ -313,7 +309,7 @@ function Stakeholders({
                 value={row.role}
                 onChange={(event) => setRows(rows.map((held, at) => (at === index ? { ...held, role: event.target.value } : held)))}
               >
-                {roles.map((role) => (
+                {STAKEHOLDER_ROLES.map((role) => (
                   <option key={role} value={role}>
                     {roleLabel(role)}
                   </option>
