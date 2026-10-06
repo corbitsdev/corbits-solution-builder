@@ -24,7 +24,16 @@ export type ComposedFold = {
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
+const BRIEF_SUBJECT = /^\[brief:\d+\]/;
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
+
+/**
+ * The subject a supervisor brief is sent under (CL-9940). A person's own
+ * message never carries it, so it, not the body, says the app wrote the mail.
+ */
+export function briefSubject(attempt: number): string {
+  return `[brief:${String(attempt)}] Build attempt ${String(attempt)}`;
+}
 
 /** The send-back cue's sentence, its marker gone. */
 export function withoutSendBackRef(body: string): string {
@@ -70,6 +79,16 @@ export function isComposedOpening(message: Pick<ChatMessage, "author" | "subject
   if (message.author !== "me" || !message.subject) return false;
   const opening = OPENING_SUBJECT.exec(message.subject);
   return opening !== null && opening[1] !== "1";
+}
+
+/**
+ * A brief the app sent the Build supervisor under its subject marker
+ * (CL-9940). The chat does not show it: the person never wrote it, and the
+ * Build evidence pane already shows the record it is made from. A brief
+ * sent before the marker existed is still folded (`composedMailFold`).
+ */
+export function isAppBrief(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && message.subject !== undefined && BRIEF_SUBJECT.test(message.subject);
 }
 
 /**

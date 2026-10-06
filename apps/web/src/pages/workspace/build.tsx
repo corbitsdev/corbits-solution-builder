@@ -40,6 +40,7 @@ const THREAD_BACKSTOP_MS = 20_000;
 import { BuildFile, downloadBuild } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
+import { briefSubject, isAppBrief } from "./composed-mail.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -345,7 +346,7 @@ export function BuildPanel({
     briefing.current = true;
     const body = composeProgressBrief({ attempt: running.attempt, startedAt: running.startedAt, now: new Date().toISOString(), log, worker: worker?.worker.label ?? null });
     api
-      .sendStageMail(tenantId, address, { body })
+      .sendStageMail(tenantId, address, { body, subject: briefSubject(running.attempt) })
       .then(() => load())
       .catch(() => {
         // The next poll tries again.
@@ -441,6 +442,7 @@ export function BuildPanel({
         manifest: packaged.manifest,
       });
       await api.sendStageMail(tenantId, address, {
+        subject: briefSubject(attempt.attempt),
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
@@ -460,6 +462,9 @@ export function BuildPanel({
   const evidence = useMemo(() => buildEvidenceState(detail.nodes, attempts), [detail.nodes, attempts]);
   const status = useMemo(() => [...messages].reverse().find((message) => message.author === "agent") ?? null, [messages]);
   const freshness = useMemo(() => (status ? statusFreshness(messages, status, current) : null), [messages, status, current]);
+  // The chat leaves out the briefs the app sends the supervisor (CL-9940);
+  // the timer and the status's freshness above still read every message.
+  const shownMessages = useMemo(() => messages.filter((message) => !isAppBrief(message)), [messages]);
   const state = running ? { label: "working", tone: "selected" as const } : current ? attemptLabel(current) : { label: "idle", tone: "info" as const };
   const ended = current !== null && current.state === "ended" && current.outcome !== null;
   const recorded = current !== null && attemptRecorded(detail.nodes, current.attempt);
@@ -500,7 +505,7 @@ export function BuildPanel({
           <StageConversation
             stage={8}
             rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
-            messages={messages}
+            messages={shownMessages}
             value={composer}
             onValueChange={setComposer}
             // Said where it is typed (#789): this reaches the supervisor, not the worker.
