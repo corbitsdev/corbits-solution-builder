@@ -40,10 +40,11 @@
  * worse than a missing one, because a human would act on it.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { inheritedEnvironment } from "@solutions-builder/specialist-runtime/host-environment";
 import { buildWorker, hostPlatform, installInstruction, type BuildWorker, type InstallInstruction } from "./build-worker.js";
+import { followFile } from "./file-follow.js";
 import { followTurnLog } from "./turn-reports.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
@@ -182,17 +183,29 @@ export const CONTINUE_EXCLUDES: ReadonlySet<string> = new Set([
   "coverage",
 ]);
 
-/**
- * Runs one build attempt in `workspace`. Resolves with the outcome whether
- * the attempt succeeded or failed — a failed build is evidence, not an
- * exception.
- */
-export async function runBuildAttempt(args: {
+/** What one attempt is run with. */
+export type RunBuildAttemptArgs = {
   workspace: string;
   prompt: string;
   /** Where the worker's turn reports go, beside the workspace, not in it. */
   turnLog: string;
   signal?: AbortSignal;
+  /**
+   * Where the worker's own output and exit status go, as files beside the
+   * workspace (#783). With these, nothing the worker writes goes through a
+   * pipe this host holds: a host that stops can leave the worker running
+   * (`release`), and a host that starts can follow it again from the
+   * files. Without them, or on Windows, the pipes are read here and the
+   * worker cannot outlive the host.
+   */
+  record?: { readonly stdout: string; readonly stderr: string; readonly exit: string };
+  /**
+   * Fires when the host is stopping and the worker is to run on without
+   * it: the bridge stops following and resolves null, with the worker
+   * still there. Honoured only with `record`; a piped worker ends with
+   * the host, so a release of one is ignored and its exit is awaited.
+   */
+  release?: AbortSignal;
   /**
    * An earlier attempt whose workspace is copied into this one before the
    * worker starts, so it continues from that work rather than from nothing.
@@ -211,8 +224,17 @@ export async function runBuildAttempt(args: {
    * has none), once it is up: what a host that restarts needs to know
    * whether the worker is still there, and what to signal if it is.
    */
-  onStarted?: (process: { pid: number; pgid: number | null }) => void;
-}): Promise<BridgeOutcome> {
+  onStarted?: (process: { pid: number; pgid: number | null; worker: string; command: string }) => void;
+};
+
+/**
+ * Runs one build attempt in `workspace`. Resolves with the outcome whether
+ * the attempt succeeded or failed — a failed build is evidence, not an
+ * exception — or with null when the worker was released to run on.
+ */
+export function runBuildAttempt(args: RunBuildAttemptArgs & { readonly release: AbortSignal }): Promise<BridgeOutcome | null>;
+export function runBuildAttempt(args: RunBuildAttemptArgs): Promise<BridgeOutcome>;
+export async function runBuildAttempt(args: RunBuildAttemptArgs): Promise<BridgeOutcome | null> {
   const startedAt = new Date().toISOString();
   const workspace = args.workspace;
   await mkdir(workspace, { recursive: true });
@@ -273,15 +295,27 @@ export async function runBuildAttempt(args: {
     // Ignored by git beside it, so a worker's `git add -A` never commits the packet.
     await writeFile(join(dirname(path), ".gitignore"), `${basename(path)}\n`);
   }
-  const child = spawn(worker.command, [...worker.prompt.args], {
-    cwd: workspace,
-    stdio: [worker.prompt.via === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
-    // The host's own environment carries the hub's secrets; the worker gets
-    // what it needs to run and sign in, and nothing else.
-    env: inheritedEnvironment(worker.environment),
-    detached: process.platform !== "win32",
-  });
-  if (child.pid !== undefined) args.onStarted?.({ pid: child.pid, pgid: process.platform === "win32" ? null : child.pid });
+  // The host's own environment carries the hub's secrets; the worker gets
+  // what it needs to run and sign in, and nothing else.
+  const environment = inheritedEnvironment(worker.environment);
+  const recorded = args.record && process.platform !== "win32" ? args.record : null;
+  if (recorded) await Promise.all([writeFile(recorded.stdout, ""), writeFile(recorded.stderr, ""), rm(recorded.exit, { force: true })]);
+  const child = recorded
+    ? spawn("/bin/sh", ["-c", RECORDING_SHELL, worker.command, ...worker.prompt.args], {
+        cwd: workspace,
+        stdio: [worker.prompt.via === "stdin" ? "pipe" : "ignore", "ignore", "ignore"],
+        env: { ...environment, [RECORD_STDOUT]: recorded.stdout, [RECORD_STDERR]: recorded.stderr, [RECORD_EXIT]: recorded.exit },
+        detached: true,
+      })
+    : spawn(worker.command, [...worker.prompt.args], {
+        cwd: workspace,
+        stdio: [worker.prompt.via === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
+        env: environment,
+        detached: process.platform !== "win32",
+      });
+  if (child.pid !== undefined) {
+    args.onStarted?.({ pid: child.pid, pgid: process.platform === "win32" ? null : child.pid, worker: worker.id, command: worker.command });
+  }
   if (worker.prompt.via === "stdin" && child.stdin) {
     // A worker that dies before reading gets EPIPE here; its exit is the record.
     child.stdin.on("error", () => undefined);
@@ -302,18 +336,37 @@ export async function runBuildAttempt(args: {
   if (args.signal?.aborted) killTree(child);
   args.signal?.addEventListener("abort", () => killTree(child), { once: true });
 
-  const draining = Promise.all([
-    drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")),
-    drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
-  ]);
+  // Recorded: the files are followed the way the turn log is. Piped: the
+  // pipes are drained here.
+  const followers = recorded
+    ? [followFile(recorded.stdout, (chunk) => args.onOutput?.(chunk, "stdout")), followFile(recorded.stderr, (chunk) => args.onOutput?.(chunk, "stderr"))]
+    : [];
+  const draining = recorded
+    ? null
+    : Promise.all([drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")), drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr"))]);
+
+  // A release while the worker runs: stop following, let go of the
+  // process, and say nothing of an outcome. The files go on filling.
+  const released = new Promise<"released">((resolve) => {
+    if (!recorded || !args.release) return;
+    if (args.release.aborted) resolve("released");
+    args.release.addEventListener("abort", () => resolve("released"), { once: true });
+  });
+  const result = await Promise.race([ended, released]);
+  if (result === "released") {
+    child.unref();
+    await Promise.all([...followers.map((follower) => follower.stop()), following?.stop()]);
+    return null;
+  }
+  const { exitStatus, signal } = result;
+
   // The attempt ends when the worker exits, and nothing that outlives the
   // worker belongs to the attempt: a dev server it backgrounded would keep
   // writing into the directory that is about to be packaged. The pipes get
   // a short grace to close (a child that inherited them holds them open),
   // then the group is ended whether or not anything held a pipe — a child
   // with its output redirected holds none and is just as much there.
-  const { exitStatus, signal } = await ended;
-  const drained = await Promise.race([draining.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), PIPE_GRACE_MS).unref())]);
+  const drained = draining ? await Promise.race([draining.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), PIPE_GRACE_MS).unref())]) : true;
   if (child.pid !== undefined && groupAlive(child.pid)) {
     args.onOutput?.(`${worker.label} exited but left processes running in its group; they were ended.\n`, "stderr");
   }
@@ -322,7 +375,8 @@ export async function runBuildAttempt(args: {
     child.stdout?.destroy();
     child.stderr?.destroy();
   }
-  const [stdout, stderr] = await draining;
+  const [stdout, stderr] = draining ? await draining : await recordedOutput(recorded!);
+  await Promise.all(followers.map((follower) => follower.stop()));
   const tally = following ? await following.stop() : null;
 
   return {
@@ -334,7 +388,7 @@ export async function runBuildAttempt(args: {
     signal,
     // Final text as the process emitted it. No parsing into synthetic events.
     finalText: stdout,
-    stderrTail: stderr.split("\n").slice(-40).join("\n"),
+    stderrTail: stderrTail(stderr),
     workspace,
     turnLog,
     turns: tally?.turns ?? null,
@@ -347,6 +401,58 @@ export async function runBuildAttempt(args: {
 
 /** How long the worker's tree gets to end on SIGTERM before SIGKILL. */
 export const CANCEL_GRACE_MS = 3_000;
+
+/** Enough of a long build's final text to read; the file beside the attempt has it all. */
+export const FINAL_TEXT_KEEP = 200_000;
+
+const RECORD_STDOUT = "SOLUTIONS_BUILDER_RECORD_STDOUT";
+const RECORD_STDERR = "SOLUTIONS_BUILDER_RECORD_STDERR";
+const RECORD_EXIT = "SOLUTIONS_BUILDER_RECORD_EXIT";
+
+/**
+ * The shell that stands between the host and a recorded worker (#783). It
+ * runs the worker with its output appended to the record files and the
+ * host's stdin passed through, waits for it, and writes its exit status
+ * to the exit file; so the status is on disk even when the host that
+ * started the worker is gone by the time it ends. A SIGTERM to the group
+ * reaches the worker directly; the trap passes it on as well and keeps
+ * the shell itself alive to record the exit. `$0` is the worker's
+ * command, `$@` its arguments.
+ */
+export const RECORDING_SHELL = [
+  `exec 3<&0`,
+  `"$0" "$@" <&3 >>"$${RECORD_STDOUT}" 2>>"$${RECORD_STDERR}" &`,
+  `child=$!`,
+  `exec 3<&-`,
+  `trap 'kill -TERM "$child" 2>/dev/null' TERM INT HUP`,
+  `wait "$child"`,
+  `status=$?`,
+  `while kill -0 "$child" 2>/dev/null; do wait "$child"; status=$?; done`,
+  `printf '%s\\n' "$status" >"$${RECORD_EXIT}"`,
+  `exit "$status"`,
+].join("\n");
+
+/** The last 40 lines, which is what the record keeps of stderr. */
+export function stderrTail(stderr: string): string {
+  return stderr.split("\n").slice(-40).join("\n");
+}
+
+/** What a recorded worker wrote: the tail of its stdout, and its stderr. */
+export async function recordedOutput(record: { readonly stdout: string; readonly stderr: string }): Promise<[string, string]> {
+  const read = (path: string) => readFile(path, "utf8").catch(() => "");
+  const [stdout, stderr] = await Promise.all([read(record.stdout), read(record.stderr)]);
+  return [stdout.slice(-FINAL_TEXT_KEEP), stderr];
+}
+
+/** The exit status a recorded worker left, or null when it left none (killed outright, or still running). */
+export async function recordedExit(path: string): Promise<number | null> {
+  try {
+    const status = Number((await readFile(path, "utf8")).trim());
+    return Number.isInteger(status) ? status : null;
+  } catch {
+    return null;
+  }
+}
 
 /** How long the pipes get to close after the worker itself has exited. */
 export const PIPE_GRACE_MS = 1_500;

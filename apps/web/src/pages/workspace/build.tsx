@@ -158,7 +158,7 @@ function evMark(tone: keyof typeof EV_TONE): string {
 
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
-  if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
+  if (attempt.state === "detached") return { label: "still running from before the host restarted; being taken up", tone: "warning" };
   if (attempt.state === "lost") return { label: "lost: the host was stopped without ending it, and the worker is gone", tone: "error" };
   if (attempt.state === "unavailable") return { label: "could not run", tone: "error" };
   const outcome = attempt.outcome;

@@ -16,9 +16,18 @@ import { dirname, join } from "node:path";
 import { serveHost } from "@corbits/embedded-host";
 import { initSolutionsBuilderHost } from "./identity.js";
 import { API_VERSION, createApi } from "./api.js";
-import { stopBuildAttempts } from "./build-attempts.js";
+import { adoptRunningAttempts, stopBuildAttempts } from "./build-attempts.js";
 
 initSolutionsBuilderHost();
+
+// A build worker an earlier run of this host left running is followed
+// again from its files (#783); one that ended while no host was there is
+// recorded from them.
+void adoptRunningAttempts()
+  .then((adopted) => {
+    if (adopted > 0) console.log(`Following ${String(adopted)} build attempt${adopted === 1 ? "" : "s"} again from before the host restarted.`);
+  })
+  .catch((cause: unknown) => console.error("Could not take up earlier build attempts:", cause));
 
 /**
  * Where `@corbits/embed-hub` mounts the run-scoped artifacts API. A deployed
@@ -35,7 +44,8 @@ await serveHost({
   api: createApi(),
   apiVersion: API_VERSION,
   selfAuthenticatingPaths: [WORKFLOW_ARTIFACTS_MOUNT_PATH],
-  // A build worker the host started ends with the host, recorded as cancelled.
+  // A build worker the host started runs on past the host's stop, followed
+  // again by the next host to start; on Windows it ends with the host.
   onStop: stopBuildAttempts,
   distDirs: [
     // What the desktop shell passes (Tauri bundles `dist/` as a resource),
