@@ -138,16 +138,6 @@ function toHeaderAddresses(raw: string): string[] {
 
 /** The stage agent address on a message, from whichever side (from/to)
  * carries one — matched case-insensitively against the given address set. */
-function participantAddress(
-  envelope: Pick<Envelope, "from" | "to">,
-  raw: string,
-  agentAddresses: ReadonlySet<string>,
-): string | undefined {
-  const to = envelope.to.length > 0 ? envelope.to : toHeaderAddresses(raw);
-  return [envelope.from, ...to]
-    .map(extractAddress)
-    .find((address) => agentAddresses.has(address.toLowerCase()));
-}
 
 /** The trigger Message-ID a Sent copy's flags record, if the hub set one. */
 function triggerIdOf(flags: readonly string[] | undefined): string | undefined {
@@ -155,44 +145,99 @@ function triggerIdOf(flags: readonly string[] | undefined): string | undefined {
   return flag === undefined ? undefined : flag.slice(TRIGGER_FLAG_PREFIX.length);
 }
 
+/** One message as the cache keeps it (#777): decoded once, filtered per read. */
+type CachedMessage = {
+  readonly uid: number;
+  readonly flags?: readonly string[];
+  readonly envelope: Envelope;
+  readonly body: string;
+  /** Every address on the message, lower case: the sender and the recipients. */
+  readonly participants: readonly string[];
+};
+
 /**
- * Every message of a folder, following `nextCursor` to the end. One page of
- * the newest 100 was the whole read once (#62): on a busy workspace one
- * folder's window then cut off before the other's, and a reply whose request
- * had fallen out of the Sent window paired with the next request instead.
+ * What each folder has yielded so far, per tenant (#777). Mail is
+ * immutable once filed and uids only grow, so a message once read is kept
+ * for the session, and a later read fetches only pages newer than what is
+ * held. The hub loads the whole folder to answer any page, so one page per
+ * poll instead of every page is most of the saving.
  */
+const folderCache = new Map<string, Map<number, CachedMessage>>();
+
+/** For tests: forget every folder. */
+export function resetStageMailCache(): void {
+  folderCache.clear();
+}
+
+function cacheFor(tenantId: string, folder: "INBOX" | "Sent"): Map<number, CachedMessage> {
+  const key = `${tenantId}|${folder}`;
+  let held = folderCache.get(key);
+  if (!held) {
+    held = new Map();
+    folderCache.set(key, held);
+  }
+  return held;
+}
+
+function toCached(message: InboxMessage): CachedMessage {
+  const to = message.envelope.to.length > 0 ? message.envelope.to : toHeaderAddresses(message.raw);
+  return {
+    uid: message.uid,
+    ...(message.flags ? { flags: message.flags } : {}),
+    envelope: message.envelope,
+    body: frameBody(message.raw),
+    participants: [message.envelope.from, ...to].map((address) => extractAddress(address).toLowerCase()),
+  };
+}
+
+/**
+ * Brings a folder's cache up to date: pages newest-first until a page holds
+ * a message already cached (or the folder ends), so a poll after the first
+ * costs one request. The first read of a session still walks the folder,
+ * as every read once did (#62): one page of the newest 100 cut a busy
+ * folder's window before the other's.
+ */
+async function refreshFolder(transport: Transport, tenantId: string, folder: "INBOX" | "Sent"): Promise<Map<number, CachedMessage>> {
+  const cache = cacheFor(tenantId, folder);
+  let cursor: string | undefined;
+  for (let pages = 0; pages < MAX_FOLDER_PAGES; pages += 1) {
+    const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+    const page = await transport.fetch<InboxPage>("GET", `${mailboxPath(tenantId)}?folder=${folder}&limit=100${query}`);
+    let seen = false;
+    for (const message of page.messages) {
+      if (cache.has(message.uid)) {
+        seen = true;
+        continue;
+      }
+      cache.set(message.uid, toCached(message));
+    }
+    if (seen || page.nextCursor === undefined || page.messages.length === 0) break;
+    cursor = page.nextCursor;
+  }
+  return cache;
+}
+
+/** The folder's messages that involve one of the stage agent's addresses. */
 async function readFolder(
   transport: Transport,
   tenantId: string,
   folder: "INBOX" | "Sent",
   agentAddresses: ReadonlySet<string>,
 ): Promise<ChatMessage[]> {
+  const cache = await refreshFolder(transport, tenantId, folder);
   const messages: ChatMessage[] = [];
-  let cursor: string | undefined;
-  for (let pages = 0; pages < MAX_FOLDER_PAGES; pages += 1) {
-    const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
-    const page = await transport.fetch<InboxPage>(
-      "GET",
-      `${mailboxPath(tenantId)}?folder=${folder}&limit=100${query}`,
-    );
-    for (const message of page.messages) {
-      const address = participantAddress(message.envelope, message.raw, agentAddresses);
-      if (address === undefined) continue;
-      const triggerMessageId = folder === "Sent" ? triggerIdOf(message.flags) : undefined;
-      messages.push({
-        id: `${folder}:${String(message.uid)}`,
-        author: folder === "Sent" ? ("me" as const) : ("agent" as const),
-        body: frameBody(message.raw),
-        at: message.envelope.date,
-        ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
-        ...(message.envelope.inReplyTo !== undefined
-          ? { inReplyTo: message.envelope.inReplyTo }
-          : {}),
-        ...(triggerMessageId !== undefined ? { triggerMessageId } : {}),
-      });
-    }
-    if (page.nextCursor === undefined || page.messages.length === 0) break;
-    cursor = page.nextCursor;
+  for (const message of cache.values()) {
+    if (!message.participants.some((address) => agentAddresses.has(address))) continue;
+    const triggerMessageId = folder === "Sent" ? triggerIdOf(message.flags) : undefined;
+    messages.push({
+      id: `${folder}:${String(message.uid)}`,
+      author: folder === "Sent" ? ("me" as const) : ("agent" as const),
+      body: message.body,
+      at: message.envelope.date,
+      ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
+      ...(message.envelope.inReplyTo !== undefined ? { inReplyTo: message.envelope.inReplyTo } : {}),
+      ...(triggerMessageId !== undefined ? { triggerMessageId } : {}),
+    });
   }
   return messages;
 }
@@ -202,8 +247,8 @@ async function readFolder(
 export async function readStageThread(
   tenantId: string,
   agentAddresses: readonly string[],
+  transport: Transport = createHubTransport(),
 ): Promise<ChatMessage[]> {
-  const transport = createHubTransport();
   const addresses = new Set(agentAddresses.map((address) => address.toLowerCase()));
   const [inbox, sent] = await Promise.all([
     readFolder(transport, tenantId, "INBOX", addresses),
