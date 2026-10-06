@@ -105,6 +105,19 @@ describe("taskProgress and progressHeadline", () => {
     expect(progressHeadline({ state: "lost", outcome: null }, progress)).toMatch(/^Not finished\. The host was stopped/);
   });
 
+  // #781: who stopped the worker, when the host knows, and what 143 means when it does not.
+  test("says the host's stop or a cancel ended the worker, and reads 143 as told to stop", () => {
+    const progress = taskProgress(tasks, report, log);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: "host_stop" }, progress)).toBe(
+      "Not finished. The host was stopped while the worker was running, which ended it, leaving commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5. Nothing went wrong with the work; a new attempt can continue from its directory, below.",
+    );
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: "cancel" }, progress)).toMatch(/^Not finished\. The attempt was cancelled, leaving commits for 3 of 5 tasks/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }) }, progress)).toMatch(
+      /^Not finished\. The worker was told to stop \(exit status 143, which is what a host stop or a cancel sends\), leaving commits for 3 of 5 tasks/,
+    );
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: null }, progress)).toMatch(/told to stop/);
+  });
+
   test("counts commits alone when the plan has no task list", () => {
     const progress = taskProgress([], report, "");
     expect(progressHeadline({ state: "running", outcome: null }, progress)).toBe("Not finished. The worker is still working, with 2 commits (the plan has no numbered task list to count against).");

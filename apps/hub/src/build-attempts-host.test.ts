@@ -66,6 +66,8 @@ describe("the host's build attempts", () => {
     // Ended by cancel, not by stopping the host: a stopped host starts nothing more.
     expect(await cancelBuildAttempt("proj_race", 1)).toBe(true);
     await until(async () => (await attemptRecord("proj_race", 1))?.state === "ended", CANCEL_GRACE_MS + 5_000);
+    // The record says a person cancelled it, not that the worker crashed.
+    expect((await attemptRecord("proj_race", 1))?.endedBy).toBe("cancel");
   }, CANCEL_GRACE_MS + 15_000);
 
   onlyOnPosix("an attempt an earlier host run started is detached while its group lives, lost once it is gone, and cancel reaches it", async () => {
@@ -107,6 +109,7 @@ describe("the host's build attempts", () => {
       const record = await attemptRecord(projectId, 1);
       expect(record?.state).toBe("ended");
       expect(record?.outcome?.signal).toBe("SIGTERM");
+      expect(record?.endedBy).toBe("host_stop");
       const { pid } = JSON.parse(await readFile(join(projectBuildsDirectory(projectId), "1.started.json"), "utf8")) as { pid: number | null };
       // And the worker is gone, not left to run on without a host.
       if (pid !== null) expect(() => process.kill(pid, 0)).toThrow();

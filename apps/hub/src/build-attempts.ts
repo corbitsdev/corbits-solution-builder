@@ -152,6 +152,13 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
  */
 export type AttemptState = "running" | "ended" | "unavailable" | "detached" | "lost";
 
+/**
+ * Who told the worker to stop, when this host did: a person's cancel, or
+ * the host's own stop. The worker's exit says only that it was signalled
+ * (143, or a signal); this says why, so the record is not read as a crash.
+ */
+export type EndedBy = "cancel" | "host_stop";
+
 export type AttemptRecord = {
   readonly attempt: number;
   readonly state: AttemptState;
@@ -161,10 +168,12 @@ export type AttemptRecord = {
   readonly continuedFrom: number | null;
   readonly outcome: BridgeOutcome | null;
   readonly workspace: string;
+  /** Null while running, and for a worker that ended on its own. */
+  readonly endedBy: EndedBy | null;
 };
 
 /** What is written as `<n>.json` when the worker ends. */
-type OutcomeFile = { readonly outcome: BridgeOutcome; readonly continuedFrom: number | null; readonly capabilities: typeof BRIDGE_CAPABILITIES };
+type OutcomeFile = { readonly outcome: BridgeOutcome; readonly continuedFrom: number | null; readonly capabilities: typeof BRIDGE_CAPABILITIES; readonly endedBy?: EndedBy | null };
 
 /**
  * What is written as `<n>.started.json` the moment an attempt starts, and
@@ -179,6 +188,8 @@ type InFlight = {
   readonly startedAt: string;
   readonly continuedFrom: number | null;
   transcript: string;
+  /** Set before the abort that ends the worker, so the record says who did. */
+  endedBy: EndedBy | null;
   /** Settles once the record is written and the entry removed. */
   done: Promise<unknown>;
 };
@@ -214,13 +225,14 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   const workspace = attemptWorkspace(projectId, attempt);
   const live = inFlight.get(key(projectId, attempt));
   if (live) {
-    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace };
+    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace, endedBy: null };
   }
   const ended = await readJson<OutcomeFile>(attemptFile(projectId, attempt, ".json"));
   if (ended) {
     return {
       attempt,
       state: ended.outcome.available ? "ended" : "unavailable",
+      endedBy: ended.endedBy ?? null,
       startedAt: ended.outcome.startedAt,
       endedAt: ended.outcome.endedAt,
       continuedFrom: ended.continuedFrom,
@@ -233,7 +245,7 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   // Started by some run of the host and never recorded as ended. The
   // process group says whether the worker is still there.
   const alive = typeof started.pgid === "number" && groupAlive(started.pgid);
-  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace };
+  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null };
 }
 
 export async function listAttempts(projectId: string): Promise<AttemptRecord[]> {
@@ -328,6 +340,7 @@ export async function attemptPrompt(projectId: string, attempt: number): Promise
 export async function cancelBuildAttempt(projectId: string, attempt: number): Promise<boolean> {
   const live = inFlight.get(key(projectId, attempt));
   if (live) {
+    live.endedBy = "cancel";
     live.controller.abort();
     return true;
   }
@@ -351,7 +364,10 @@ export async function stopBuildAttempts(): Promise<void> {
   // yet; it is waited for, so the worker it is about to spawn is ended too.
   await Promise.allSettled([...starting.values()]);
   const running = [...inFlight.values()];
-  for (const live of running) live.controller.abort();
+  for (const live of running) {
+    live.endedBy ??= "host_stop";
+    live.controller.abort();
+  }
   await Promise.all(running.map((live) => live.done));
 }
 
@@ -442,6 +458,7 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
     startedAt,
     continuedFrom: continueFrom,
     transcript: "",
+    endedBy: null,
     done: Promise.resolve(),
   };
   inFlight.set(key(projectId, attempt), live);
@@ -450,7 +467,7 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
     const record = async (outcome: BridgeOutcome) => {
       await writeFile(
         attemptFile(projectId, attempt, ".json"),
-        `${JSON.stringify({ outcome, continuedFrom: continueFrom, capabilities: BRIDGE_CAPABILITIES } satisfies OutcomeFile, null, 2)}\n`,
+        `${JSON.stringify({ outcome, continuedFrom: continueFrom, capabilities: BRIDGE_CAPABILITIES, endedBy: live.endedBy } satisfies OutcomeFile, null, 2)}\n`,
       );
     };
     try {
@@ -503,5 +520,5 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   })();
   live.done = done;
 
-  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace };
+  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace, endedBy: null };
 }
