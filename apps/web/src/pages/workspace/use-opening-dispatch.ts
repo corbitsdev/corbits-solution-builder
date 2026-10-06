@@ -297,17 +297,27 @@ export function useOpeningDispatch({
     // and the specialist answered from the cue alone (#105). The hand-off's
     // own reload of the thread re-runs this once it has landed.
     if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;
-    const cue = sendBackResumeCue({
+    const pending = sendBackResumeCue({
       stage,
       decisions: workflowView?.decisions ?? [],
       messages,
       requirements: workflowView?.requirements ?? [],
     });
-    if (!cue || cueInFlightRef.current === cue.marker) return;
-    cueInFlightRef.current = cue.marker;
-    void api
-      .sendStageMail(tenantId, agentAddress, { body: cue.body, subject: cue.subject })
-      .then(() => reloadThread())
+    if (!pending || cueInFlightRef.current === pending.marker) return;
+    cueInFlightRef.current = pending.marker;
+    // The record before this stage (#799): everything approved up to the
+    // stage before this one, which is the chain the stage after this one
+    // would be opened with; and the draft the send-back is about, the
+    // specialist's latest, whole.
+    const draft = [...messages].reverse().find((message) => message.author === "agent" && message.body.trim().length > 0)?.body ?? null;
+    void queryClient
+      .fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage: stage + 1 }))
+      .catch(() => "")
+      .then((record) => {
+        const cue = sendBackResumeCue({ stage, decisions: workflowView?.decisions ?? [], messages, requirements: workflowView?.requirements ?? [], record, draft });
+        if (!cue) return;
+        return api.sendStageMail(tenantId, agentAddress, { body: cue.body, subject: cue.subject }).then(() => reloadThread());
+      })
       .catch(() => {
         // Not marked as sent: the next thread or view change retries.
         cueInFlightRef.current = null;

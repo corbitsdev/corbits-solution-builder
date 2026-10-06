@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DecisionRecord, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
-import { sendBackCueIdOf, sendBackResumeCue } from "./send-back-cue.ts";
+import { SENT_BACK_DRAFT_LEAD, sendBackCueIdOf, sendBackResumeCue } from "./send-back-cue.ts";
 
 function sendBack(target: number, id = "dec_1", reason?: string): DecisionRecord {
   return {
@@ -63,6 +63,29 @@ describe("sendBackResumeCue", () => {
   test("a refused send-back is not a send-back", () => {
     const refused = { ...sendBack(6), accepted: false };
     expect(sendBackResumeCue({ stage: 6, decisions: [refused], messages: [{ body: "x" }], requirements: REQUIREMENTS })).toBeNull();
+  });
+
+  // #799: the cue carries the record and the sent-back draft, in that order, after the reason.
+  test("carries the approved record and the sent-back draft after the reason", () => {
+    const cue = sendBackResumeCue({
+      stage: 4,
+      decisions: [sendBack(4, "dec_9", "The colours should be more muted; keep every screen as it is otherwise.")],
+      messages: [],
+      requirements: [],
+      record: "What was approved before this stage, and what the person provided:\n\n## Problem brief\nAn iPhone app called workout log.\n\n--- END OF THE RECORD; THIS STAGE'S OPENING FOLLOWS ---",
+      draft: "<!doctype html><html><body>Mockup — workout log iPhone app</body></html>",
+    });
+    expect(cue?.body.startsWith("This stage was sent back: The colours should be more muted; keep every screen as it is otherwise. Address it and send the whole document again as a new draft.")).toBe(true);
+    const reason = cue!.body.indexOf("This stage was sent back");
+    const record = cue!.body.indexOf("What was approved before this stage");
+    const draft = cue!.body.indexOf(SENT_BACK_DRAFT_LEAD);
+    expect(reason).toBeLessThan(record);
+    expect(record).toBeLessThan(draft);
+    expect(cue!.body.endsWith("Mockup — workout log iPhone app</body></html>")).toBe(true);
+    // Without a record or a draft the body is the instruction alone, as before.
+    expect(sendBackResumeCue({ stage: 4, decisions: [sendBack(4, "dec_9", "Muted colours.")], messages: [], requirements: [], record: "", draft: null })!.body).toBe(
+      "This stage was sent back: Muted colours. Address it and send the whole document again as a new draft.",
+    );
   });
 
   test("stage 8 keeps its fresh-attempt instruction", () => {

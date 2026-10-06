@@ -199,7 +199,7 @@ export function SendBackPopover({
 /**
  * The reader's way to send the project back to the stage whose document is
  * open (#248): a card beside the button that names the one target the
- * button promised, takes an optional reason, and sends on confirm. Not the
+ * button promised, takes the reason, and sends on confirm. Not the
  * composer's picker, which is anchored to the composer and lists every
  * stage — from a past stage's document, that read as nothing happening.
  */
@@ -225,8 +225,8 @@ export function SendBackConfirm({
         className="sbconfirm-reason"
         value={reason}
         onChange={(event) => setReason(event.target.value)}
-        placeholder="What should change, optional"
-        aria-label="Why it is being sent back, optional"
+        placeholder="What should change: the specialist that gets it back works from this"
+        aria-label="Why it is being sent back"
         rows={3}
         autoFocus
       />
@@ -234,7 +234,7 @@ export function SendBackConfirm({
         <Button variant="ghost" disabled={busy} onClick={onCancel}>
           Cancel
         </Button>
-        <Button variant="primary" loading={busy} doing={`Sending back to ${stageName(target)}`} onClick={() => onConfirm(reason)}>
+        <Button variant="primary" loading={busy} disabled={reason.trim().length === 0} doing={`Sending back to ${stageName(target)}`} onClick={() => onConfirm(reason)}>
           Send back to {stageName(target)}
         </Button>
       </div>
