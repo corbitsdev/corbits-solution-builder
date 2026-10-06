@@ -104,6 +104,12 @@ export type BuildPromptInput = {
   /** A hash or version naming the approved plan, so the packet names what it was built from. */
   readonly planRef: string;
   readonly continuing: boolean;
+  /**
+   * What the person found in the earlier attempt and wants changed (#789),
+   * for a continuation: the one thing a person can say to the worker. The
+   * stage's chat goes to the supervisor, which the worker never reads.
+   */
+  readonly continueNote?: string;
   /** Files written into the workspace before the worker starts (#686): AGENTS.md, the documents, QUESTIONS.md. */
   readonly files?: readonly { readonly path: string; readonly content: string }[];
   /** The workspace's output language, for the documents the build ships (#733); American English when unset. */
@@ -134,6 +140,15 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
       ? [
           ``,
           `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over.`,
+        ]
+      : []),
+    ...(input.continuing && input.continueNote?.trim()
+      ? [
+          ``,
+          `--- WHAT THE PERSON FOUND IN THE EARLIER ATTEMPT ---`,
+          input.continueNote.trim(),
+          ``,
+          `Do what this asks before anything else, and say in your final message what you did about each point.`,
         ]
       : []),
     ``,

@@ -1482,6 +1482,22 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .build-probe .inline-note {
   flex-basis: 100%;
 }
+/* The note to the worker (#789): a label, a short textarea, and where it goes. */
+.build-note {
+  margin-left: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+}
+.build-note-label {
+  font-weight: 600;
+}
+.build-note textarea.field {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  font: inherit;
+}
 
 /* Every control in a document's header is one size: 32px tall, the same
    inset, the same 14px glyph before its label. Buttons, selects and the
