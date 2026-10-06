@@ -115,3 +115,20 @@ describe("taskProgress and progressHeadline", () => {
     expect(openQuestions(null)).toBe(0);
   });
 });
+
+// #777: a plan that lays its tasks out as a table, and the short T-number form.
+describe("task tables and T-numbers", () => {
+  test("reads `| T1 | … |` rows under 'Tasks in order'", () => {
+    const plan = ["## Tasks in order", "", "| # | Task | Done when |", "|---|---|---|", "| T1 | Scaffold bun workspace; lint | Applies |", "| T2 | `deploy/`: compose for dev | Boots |", "", "## Dependencies"].join("\n");
+    expect(planTasks(plan)).toEqual([
+      { number: 1, title: "Scaffold bun workspace; lint" },
+      { number: 2, title: "deploy/" },
+    ]);
+  });
+
+  test("T36, T36–T37 and T1-T28 name tasks", () => {
+    expect([...taskNumbers("Web T36 (finish): approvals screens")]).toEqual([36]);
+    expect([...taskNumbers("the T36–T37 successor")]).toEqual([36, 37]);
+    expect([...taskNumbers("Tasks T1-T3 committed")]).toEqual([1, 2, 3]);
+  });
+});

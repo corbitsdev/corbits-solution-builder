@@ -43,9 +43,14 @@ export function planTasks(planText: string): PlanTask[] {
   const tasks: PlanTask[] = [];
   for (const line of lines.slice(start + 1)) {
     if (/^##\s+/.test(line)) break;
-    const match = /^(\d+)\.\s+(.*)$/.exec(line.trim());
-    if (!match) continue;
-    tasks.push({ number: Number(match[1]), title: taskTitle(match[2] ?? "") });
+    const numbered = /^(\d+)\.\s+(.*)$/.exec(line.trim());
+    if (numbered) {
+      tasks.push({ number: Number(numbered[1]), title: taskTitle(numbered[2] ?? "") });
+      continue;
+    }
+    // A table row, `| T1 | Scaffold … | … |`, as some plans lay the list out (#777).
+    const row = /^\|\s*T?(\d+)\s*\|\s*([^|]+)\|/.exec(line.trim());
+    if (row) tasks.push({ number: Number(row[1]), title: taskTitle(row[2] ?? "") });
   }
   return tasks;
 }
@@ -65,6 +70,12 @@ function taskTitle(text: string): string {
  */
 export function taskNumbers(text: string): Set<number> {
   const numbers = new Set<number>();
+  // `T36`, `T36–T37`, `T1-T28` (#777): the short form a plan's table and a worker's commits use.
+  for (const match of text.matchAll(/\bT(\d+)(?:\s*[–-]\s*T?(\d+))?\b/g)) {
+    const from = Number(match[1]);
+    const to = match[2] !== undefined ? Number(match[2]) : from;
+    if (to >= from && to - from < 200) for (let n = from; n <= to; n += 1) numbers.add(n);
+  }
   for (const match of text.matchAll(/\bTasks?\s+(\d+(?:\s*(?:[–-]\s*\d+|,\s*\d+|(?:,\s*)?and\s+\d+|&\s*\d+))*)/gi)) {
     const list = match[1] ?? "";
     for (const part of list.split(/,|\band\b|&/)) {
