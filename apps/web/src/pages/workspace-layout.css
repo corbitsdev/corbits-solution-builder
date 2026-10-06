@@ -312,6 +312,14 @@
   color: var(--wb-foreground);
 }
 
+/* The rule separates a stage from the one before it; first in the
+   thread there is nothing above it to separate from. */
+.conv .conv-scroll > .conv-boundary:first-child {
+  border-top: 0;
+  padding-top: var(--space-1);
+  margin-top: 0;
+}
+
 .conv .msg {
   display: flex;
   flex-direction: column;
@@ -490,9 +498,24 @@
   pointer-events: none;
 }
 
+/* With the zen garden's strip at the foot of the window, the tip stays in
+   the opening wait, under what it says. */
+.conv .waiting-tips[data-inline] {
+  position: static;
+  min-height: 0;
+  margin-top: var(--space-12);
+  padding: 0;
+}
+
 .conv .waiting-tip {
   margin: 0;
-  color: var(--wb-foreground);
+  min-width: 24ch;
+  max-width: 46ch;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--wb-border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wb-muted-foreground);
   animation: waiting-tip-in 600ms ease-out both;
 }
 
@@ -502,6 +525,69 @@
 
 @media (prefers-reduced-motion: reduce) {
   .conv .waiting-tip {
+    animation: none;
+  }
+}
+
+/* Before the first reply the wait reads as a loading screen: one block
+   centred in what the column has left, not a thread yet to grow from the
+   top. With no composer yet the scroll is the last child, which
+   `.stage-conversation` would hold to its content. Auto margins, unlike
+   `justify-content: center`, never push a tall block out of reach. */
+.conv .conv-scroll:has(> .opening-wait) {
+  flex: 1;
+}
+
+.conv .opening-wait {
+  margin: auto 0;
+  padding: var(--space-6) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.conv .opening-wait-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.conv .opening-wait-title {
+  margin: 0;
+  font-family: var(--wb-font-ui);
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--wb-foreground);
+  text-wrap: balance;
+}
+
+.conv .opening-wait-doing {
+  color: var(--wb-muted-foreground);
+  animation: conv-shimmer 2.4s ease-in-out infinite;
+}
+
+.conv .opening-wait-clock {
+  margin: var(--space-2) 0 0;
+  font-family: var(--wb-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-muted-foreground);
+}
+
+.conv .opening-wait-lead {
+  margin: var(--space-3) 0 0;
+  max-width: 44ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wb-muted-foreground);
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv .opening-wait-doing {
     animation: none;
   }
 }

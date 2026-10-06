@@ -15,9 +15,8 @@ import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { sendBackCueIdOf } from "./send-back-cue.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
-import { WaitingTips } from "./waiting-tips.tsx";
+import { OpeningWait } from "./opening-wait.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
-import { useZenGarden } from "../../zen-garden-setting.ts";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
  *  as a system boundary line (`stage-events.ts`'s `switchEvents`) — dropped
@@ -207,11 +206,9 @@ export function StageConversation({
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
   const opening = pending && !messages.some((message) => message.author === "agent");
-  // Before the first reply the busy line alone says who is working and on
-  // what; the "Working on it…" row would repeat it. The row stands in only
-  // while the zen garden holds that line at the foot of the window instead.
-  const garden = useZenGarden();
-  const workingRow = pending && (!opening || garden === "on");
+  // Before the first reply the opening wait says who is working and on
+  // what; the "Working on it…" row would repeat it.
+  const workingRow = pending && !opening;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -258,6 +255,8 @@ export function StageConversation({
         >
           {uiMessages.map((message) => {
             const event = eventById.get(message.id);
+            // The header already names the stage the opening wait is for.
+            if (event && opening && event.tone === "boundary") return null;
             if (event) {
               return (
                 <div
@@ -314,8 +313,7 @@ export function StageConversation({
           {opening ? (
             <>
               {rows}
-              <BusyLine />
-              <WaitingTips />
+              <OpeningWait who={who} />
             </>
           ) : null}
         </div>

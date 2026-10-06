@@ -31,7 +31,7 @@ import { useZenGarden } from "./zen-garden-setting.ts";
 export const ZEN_GARDEN_VIDEO = "/zen-garden.mp4";
 export const ZEN_GARDEN_POSTER = "/zen-garden-poster.jpg";
 
-function useSecondsSince(since: number | null): number {
+export function useSecondsSince(since: number | null): number {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (since === null) {
