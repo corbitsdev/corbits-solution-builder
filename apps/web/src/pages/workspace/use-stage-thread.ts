@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
+import { queryClient } from "../../queries/client.ts";
+import { keys } from "../../queries/keys.ts";
 
 export type StageThreadState = {
   readonly messages: ChatMessage[];
@@ -26,6 +28,10 @@ export type StageThreadState = {
   readonly loadedFor: string | null;
   readonly reload: () => Promise<void>;
 };
+
+function threadAddresses(history: readonly string[], live: string): string[] {
+  return history.length > 0 ? [...history] : [live];
+}
 
 export function useStageThread(
   tenantId: string,
@@ -44,7 +50,7 @@ export function useStageThread(
   const reload = useCallback(async () => {
     if (!agentAddress) return;
     const loadedAddress = agentAddress;
-    const addresses = addressesRef.current.length > 0 ? [...addressesRef.current] : [agentAddress];
+    const addresses = threadAddresses(addressesRef.current, agentAddress);
     try {
       const result = await api.readStageThread(tenantId, addresses);
       setMessages(result);
@@ -82,12 +88,11 @@ export function useStageThread(
   useEffect(() => {
     if (!agentAddress) return;
     void reload();
-    // The workflow's own decisions (an approval landing, a send-back) land as
-    // run events on this same tenant mailbox stream — the nudge that already
-    // wakes the thread read is just as much a reason to re-read the workflow
-    // view, so both go on every nudge rather than leaving the view to the
-    // slower backstop poll alone.
+    // Decisions never land on this stream (a decision is a run signal, not
+    // mail); the view is re-read on a nudge only because a reply usually
+    // means the stage's record just changed.
     const subscription = subscribeMailbox(tenantId, () => {
+      void queryClient.invalidateQueries({ queryKey: keys.thread.of(tenantId, threadAddresses(addressesRef.current, agentAddress)) });
       void reload();
       onNudge();
     });
