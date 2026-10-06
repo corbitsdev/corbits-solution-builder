@@ -38,6 +38,20 @@ export const EXTERNAL = [
 
 export async function packSpecialist(dir: string): Promise<string> {
   const entry = join(ROOT_DIR, "packages", dir, "src", "workflow.ts");
+  // Bun.build writes each module's path, relative to the working directory, as
+  // a comment in the output, and a live specialist is redeployed whenever its
+  // packed bytes differ. Building from the repository root keeps the bytes the
+  // same wherever the pack is run from.
+  const previous = process.cwd();
+  process.chdir(ROOT_DIR);
+  try {
+    return await buildEntry(dir, entry);
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+async function buildEntry(dir: string, entry: string): Promise<string> {
   const result = await Bun.build({
     entrypoints: [entry],
     target: "browser",

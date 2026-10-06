@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_KIT, agentFor } from "@solutions-builder/app/kit";
 import { DELIVERY_STAGE, specialistTooling } from "@solutions-builder/app/specialist-source";
-import { buildSpecialistWorkflowFiles, EXTERNAL, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
+import { buildSpecialistWorkflowFiles, EXTERNAL, packSpecialist, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
 
 const files = await buildSpecialistWorkflowFiles();
 
@@ -67,6 +67,19 @@ describe("specialist pack", () => {
       expect({ id, pin: packed.includes('from "./inference-source.js"') }).toEqual({ id, pin: true });
       expect({ id, guidance: packed.includes('from "./workspace-guidance.js"') }).toEqual({ id, guidance: true });
     }
+  });
+
+  // A packed entry that changes with the working directory would redeploy every
+  // live specialist the first time a build ran from somewhere else.
+  test("the packed bytes do not depend on the working directory", async () => {
+    const previous = process.cwd();
+    process.chdir(join(ROOT_DIR, "apps", "web"));
+    try {
+      expect(await packSpecialist("specialist-namer")).toBe(files["namer"]!);
+    } finally {
+      process.chdir(previous);
+    }
+    expect(process.cwd()).toBe(previous);
   });
 
   test("only the delivery verifier carries a tool: deliver", () => {
