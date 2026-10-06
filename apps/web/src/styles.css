@@ -3607,20 +3607,22 @@ button[aria-disabled="true"] {
 }
 
 /* An enabled secondary button was the same flat muted fill as a disabled one
-   (#795): the Download button turned clickable and nothing changed. In the
-   build toolbar an enabled non-primary button has a border and the page's
-   own background, so it reads as a control; a disabled one stays flat,
-   dimmed, borderless, and still answers hover with its tooltip (the
-   library's pointer-events: none swallowed it). */
-.build-actions [data-slot="button"]:not(:disabled):not(.bg-primary):not(.bg-destructive) {
+   (#795, #797): the Download button turned clickable and nothing changed.
+   Everywhere in the app an enabled secondary button has a border and the
+   page's own background, so it reads as a control, and darkens on hover;
+   a disabled button of any variant stays flat, dimmed and borderless, and
+   still answers hover with its tooltip (the library's pointer-events: none
+   swallowed it). Ghost and link buttons are left as they are. */
+[data-slot="button"].bg-secondary:not(:disabled):not([aria-disabled="true"]) {
   background: var(--wb-background);
   color: var(--wb-foreground);
   border: 1px solid var(--wb-border);
 }
-.build-actions [data-slot="button"]:not(:disabled):not(.bg-primary):not(.bg-destructive):hover {
+[data-slot="button"].bg-secondary:not(:disabled):not([aria-disabled="true"]):hover {
   background: var(--wb-muted);
 }
-.build-actions [data-slot="button"]:disabled {
+[data-slot="button"]:disabled,
+[data-slot="button"][aria-disabled="true"] {
   border: 1px solid transparent;
   color: color-mix(in srgb, var(--wb-muted-foreground) 70%, transparent);
   pointer-events: auto;
