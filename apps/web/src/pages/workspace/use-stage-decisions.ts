@@ -499,11 +499,17 @@ export function useStageDecisions({
     onError(null);
     try {
       const said = (reason ?? sendReason).trim();
+      // The reason is what the specialist that gets the stage back works
+      // from (#799); "sent back from X to Y" told one nothing, and it guessed.
+      if (!said) {
+        onError(`Say why ${stageName(target)} is being sent back, so its specialist knows what to change. Type it in the message box, then send back again.`);
+        return;
+      }
       const result = await sendBackDecision(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         targetStage: target,
-        reason: said || `Sent back from ${stageName(stage)} to ${stageName(target)}.`,
+        reason: said,
       });
       if (!result.ok) {
         onError(`Send-back was refused: ${result.reason}`);
