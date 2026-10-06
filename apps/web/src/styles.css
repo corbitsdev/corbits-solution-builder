@@ -3606,6 +3606,26 @@ button[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
+/* An enabled secondary button was the same flat muted fill as a disabled one
+   (#795): the Download button turned clickable and nothing changed. In the
+   build toolbar an enabled non-primary button has a border and the page's
+   own background, so it reads as a control; a disabled one stays flat,
+   dimmed, borderless, and still answers hover with its tooltip (the
+   library's pointer-events: none swallowed it). */
+.build-actions [data-slot="button"]:not(:disabled):not(.bg-primary):not(.bg-destructive) {
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  border: 1px solid var(--wb-border);
+}
+.build-actions [data-slot="button"]:not(:disabled):not(.bg-primary):not(.bg-destructive):hover {
+  background: var(--wb-muted);
+}
+.build-actions [data-slot="button"]:disabled {
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--wb-muted-foreground) 70%, transparent);
+  pointer-events: auto;
+}
+
 /* An upstream bug, corrected locally: theme.css declares --input: #8a8080 in
    both schemes, so the composer's outline and the secondary button's stay mid
    grey while every other border darkens. Matching the rest of the frame is
