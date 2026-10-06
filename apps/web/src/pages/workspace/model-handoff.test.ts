@@ -14,6 +14,7 @@ import {
   handoffId,
   handoffLanded,
   handoffPending,
+  specialistBriefed,
   switchMarker,
 } from "./use-model-handoff.ts";
 import { withoutSwitchMarker } from "./thread.tsx";
@@ -22,6 +23,30 @@ const at = "2026-09-26T08:26:22.000Z";
 const head: ChatMessage = { id: "opening", author: "me", body: "## In short\n- The deliverable is an iPhone application called Workout Log.", at };
 const OLD = "run_b69ee3b5@solutions-builder.localhost";
 const NEW = "run_73558600@solutions-builder.localhost";
+
+// #801: what counts as the specialist having been briefed, read off its own thread.
+describe("specialistBriefed", () => {
+  const me = (body: string, subject?: string): ChatMessage => ({ id: body.slice(0, 8), author: "me", body, at, ...(subject ? { subject } : {}) });
+  const agent = (body: string): ChatMessage => ({ id: body.slice(0, 8), author: "agent", body, at });
+
+  test("an opening, a hand-off, a cue with the record or the draft, or a hand briefing is a briefing", () => {
+    expect(specialistBriefed([me("Here is the problem.", "[opening:tnt_1:1] Problem discovery")])).toBe(true);
+    expect(specialistBriefed([me("Record…", "[opening:tnt_1:4] GUI design")])).toBe(true);
+    expect(specialistBriefed([me(`${switchMarker("ab12")}\nThis stage continues on Anthropic.`)])).toBe(true);
+    expect(specialistBriefed([me("This stage was sent back: muted colours.\n\nWhat was approved before this stage, and what the person provided:\n\n…", "[sent-back:dec_1] GUI design")])).toBe(true);
+    expect(specialistBriefed([me("This stage was sent back: muted colours.\n\n--- THE DRAFT THAT WAS SENT BACK; THE REVISION STARTS FROM IT ---\n<html>…")])).toBe(true);
+    expect(specialistBriefed([me("You were started without the record; here it is.", "[briefing:tnt_1:4] GUI design")])).toBe(true);
+  });
+
+  test("a decision notice, a bare cue, a person's reply, or anything a specialist wrote is not", () => {
+    expect(specialistBriefed([])).toBe(false);
+    expect(specialistBriefed([me("Stage 4 is waiting on a decision", "[decision:tnt_1:4:stage-approval] Stage 4 is waiting on a decision")])).toBe(false);
+    expect(specialistBriefed([me("This stage was sent back: Sent back from stage 5 to stage 4. Address it and send the whole document again as a new draft.")])).toBe(false);
+    expect(specialistBriefed([me("phone-plus-existing. Please look at version 7 for the previous mockup")])).toBe(false);
+    expect(specialistBriefed([agent("What was approved before this stage, and what the person provided: nothing, as far as I can see.")])).toBe(false);
+    expect(specialistBriefed([agent(`${switchMarker("ab12")}\nI am briefed.`)])).toBe(false);
+  });
+});
 
 describe("handoffDue", () => {
   test("a redeployed stage with prior mail and a loaded thread is due", () => {

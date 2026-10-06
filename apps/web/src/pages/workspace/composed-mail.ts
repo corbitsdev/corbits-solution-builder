@@ -61,6 +61,11 @@ export function materialMailFold(body: string): ComposedFold | null {
  * show it; the person never typed it and the reply is the turn that counts.
  * Stage 1's opening is the person's own problem statement and is shown.
  */
+/** Whether a person's mail is a stage opening of any stage, stage 1's included, by its subject marker. */
+export function isOpeningMail(message: Pick<ChatMessage, "author" | "subject">): boolean {
+  return message.author === "me" && !!message.subject && OPENING_SUBJECT.test(message.subject);
+}
+
 export function isComposedOpening(message: Pick<ChatMessage, "author" | "subject">): boolean {
   if (message.author !== "me" || !message.subject) return false;
   const opening = OPENING_SUBJECT.exec(message.subject);

@@ -48,6 +48,9 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { isHtmlDocument } from "./guidance.ts";
+import { isOpeningMail } from "./composed-mail.ts";
+import { CHAIN_LEAD } from "./approved-chain.ts";
+import { SENT_BACK_DRAFT_LEAD } from "./send-back-cue.ts";
 
 /** The exact marker line's shape: `[[sb-switch:<hex id>]]`. Deliberately not
  *  the bare word "switch" or anything a specialist's own prose could
@@ -135,6 +138,27 @@ function transcriptTurn(message: ChatMessage, opening = false): string {
 /** Whether a person's message is a hand-off mail: the marker line first. */
 export function isHandoffMessage(message: Pick<ChatMessage, "author" | "body">): boolean {
   return message.author === "me" && isHandoffBody(message.body);
+}
+
+/** The subject marker of a briefing sent by hand (#803), to a specialist found without the record. */
+const BRIEFING_SUBJECT = /^\[briefing:[^\]]+:\d+\]/;
+
+/**
+ * Whether a specialist's own thread holds what it works from (#801): a
+ * stage opening, a hand-off, a send-back cue that carries the record or
+ * the sent-back draft, or a briefing sent by hand. Anything else that can
+ * reach a fresh address first, a decision notice, a bare cue from before
+ * #799, a person's reply, is mail, not a briefing. Only a person's own
+ * mail counts: nothing a specialist writes can brief itself.
+ */
+export function specialistBriefed(ownThread: readonly Pick<ChatMessage, "author" | "body" | "subject">[]): boolean {
+  return ownThread.some((message) => {
+    if (message.author !== "me") return false;
+    if (isOpeningMail(message)) return true;
+    if (isHandoffBody(message.body)) return true;
+    if (message.subject && BRIEFING_SUBJECT.test(message.subject)) return true;
+    return message.body.includes(CHAIN_LEAD) || message.body.includes(SENT_BACK_DRAFT_LEAD);
+  });
 }
 
 /**
@@ -232,10 +256,10 @@ export function handoffLanded(address: string, messages: readonly ChatMessage[])
 
 /**
  * Whether anything else must wait before mailing `address`: a hand-off is
- * due for it and has not landed. The hand-off skips itself when the new
- * address already holds any mail, so a send-back cue that reached the
- * address first left the specialist with the cue and nothing of the
- * conversation or the draft it was meant to revise (#105).
+ * due for it and has not landed. Senders that honour this (the send-back
+ * cue, attached material) go after it; and since #801 a sender that does
+ * not, a decision notice say, no longer makes the hand-off stand down: it
+ * stands down only once the address holds a briefing.
  */
 export function handoffPending(args: {
   readonly address: string | null;
@@ -321,12 +345,15 @@ export function useModelHandoff(args: {
         // The new deployment's OWN thread, not the merged one -- an empty
         // merged thread is impossible here (priorAddresses is non-empty),
         // so idempotency has to ask the one address that would actually be
-        // empty on a fresh deployment. See the module doc: this read-then-
-        // send has a TOCTOU window this hook accepts rather than pretends
-        // to close, since no atomic claim exists to close it with.
+        // empty on a fresh deployment. It stands down only when that thread
+        // already holds a briefing (#801): any mail at all used to do, and a
+        // decision notice or a bare cue that got there first left the
+        // specialist with that and nothing of the conversation or the draft.
+        // See the module doc: this read-then-send has a TOCTOU window this
+        // hook accepts rather than pretends to close.
         const own = await api.readStageThread(args.tenantId, [args.address!]);
         if (cancelled) return;
-        if (own.length > 0) {
+        if (specialistBriefed(own)) {
           resolvedRef.current = args.address;
           return;
         }
