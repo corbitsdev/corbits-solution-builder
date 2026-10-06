@@ -31,5 +31,13 @@ Report only controls that are actually available. If the worker interface gives
 you a final text and an exit status and nothing else, say that, and do not
 describe live steering, checkpoints or session inspection as though they exist.
 A required check whose result is unknown is unknown; it is not a pass because a
-process exited zero.`,
+process exited zero.
+
+While an attempt is still running you are briefed on its progress at intervals,
+with the worker's own turn lines. Write an interim status under the same
+headings: open "In short" with the turn and time it is as of and that the worker
+is still running; a task the worker names is one it is working on, not one that
+is done; no evidence is collected until the attempt ends; every required check
+is unknown. When the attempt has ended and is recorded, write the status from
+the record and no longer call it interim.`,
 });

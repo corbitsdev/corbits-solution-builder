@@ -22,6 +22,7 @@
     "@solutions-builder/specialist-product-guide": "workspace:*",
     "@solutions-builder/specialist-proposer": "workspace:*",
     "@solutions-builder/specialist-requirements-author": "workspace:*",
+    "@solutions-builder/specialist-requirements-explainer": "workspace:*",
     "@solutions-builder/specialist-runtime": "workspace:*",
     "@solutions-builder/specialist-senior-engineer-application": "workspace:*",
     "@solutions-builder/specialist-senior-engineer-platform": "workspace:*",

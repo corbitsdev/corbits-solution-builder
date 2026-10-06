@@ -54,6 +54,10 @@ name the primitives it uses rather than inventing ones the platform already
 provides, and plan the actual product — its screens, routes, schema, auth,
 seed data and tests — not a stand-in workflow. The seed script that loads
 real data is a task of its own, and the build is verified after it runs.
+Every build ships README.md, for the person who installs and runs it, and
+docs/USER-MANUAL.md, for the people who use it, with pictures of the screens
+and the relevant areas highlighted; writing those two documents is a task of
+its own under "Tasks in order", placed after the screens they describe exist.
 
 ${STACK_RUBRIC}
 

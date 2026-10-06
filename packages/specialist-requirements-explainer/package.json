@@ -1,16 +1,15 @@
 {
-  "name": "@solutions-builder/specialist-estimator",
+  "name": "@solutions-builder/specialist-requirements-explainer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Cost approval estimator: its role and prompt.",
+  "description": "The Requirements explainer: tells the requirements for a person to read, with the design's screens beside what they show.",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
     "@intx/agent": "0.4.0",
     "@intx/workflow": "workspace:*",
-    "@solutions-builder/specialist-runtime": "workspace:*",
     "@solutions-builder/specialist-shared": "workspace:*"
   },
   "interchange": {

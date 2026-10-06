@@ -2,7 +2,7 @@ import { AGENT_ECONOMICS, INTERVIEW, SHARED_RULES, role } from "@solutions-build
 
 export const proposer = role({
   id: "proposer",
-  title: "Brainstormer (proposals)",
+  title: "Proposer",
   mission: "Offer at most two candidate approaches against the accepted brief.",
   stages: [3],
   produces: "chosen_approach",

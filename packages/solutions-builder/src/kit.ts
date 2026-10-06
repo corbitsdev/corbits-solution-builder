@@ -26,6 +26,7 @@ import { presentationCreator } from "@solutions-builder/specialist-presentation-
 import { productGuide } from "@solutions-builder/specialist-product-guide";
 import { proposer } from "@solutions-builder/specialist-proposer";
 import { requirementsAuthor } from "@solutions-builder/specialist-requirements-author";
+import { requirementsExplainer } from "@solutions-builder/specialist-requirements-explainer";
 import { seniorEngineerApplication } from "@solutions-builder/specialist-senior-engineer-application";
 import { seniorEngineerPlatform } from "@solutions-builder/specialist-senior-engineer-platform";
 import { seniorEngineerQuality } from "@solutions-builder/specialist-senior-engineer-quality";
@@ -66,6 +67,7 @@ export const AGENT_KIT: readonly AgentRole[] = [
   experienceDesigner,
   presentationCreator,
   requirementsAuthor,
+  requirementsExplainer,
   architect,
   ...PANEL_ROLES,
   estimator,

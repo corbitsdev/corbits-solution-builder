@@ -175,6 +175,7 @@
         "@solutions-builder/specialist-product-guide": "workspace:*",
         "@solutions-builder/specialist-proposer": "workspace:*",
         "@solutions-builder/specialist-requirements-author": "workspace:*",
+        "@solutions-builder/specialist-requirements-explainer": "workspace:*",
         "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/specialist-senior-engineer-application": "workspace:*",
         "@solutions-builder/specialist-senior-engineer-platform": "workspace:*",
@@ -188,6 +189,8 @@
       "name": "@solutions-builder/specialist-architect",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -195,6 +198,8 @@
       "name": "@solutions-builder/specialist-brainstormer",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -202,6 +207,8 @@
       "name": "@solutions-builder/specialist-brief-evaluator",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -209,6 +216,8 @@
       "name": "@solutions-builder/specialist-build-supervisor",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -216,6 +225,8 @@
       "name": "@solutions-builder/specialist-constraints-mapper",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -223,13 +234,19 @@
       "name": "@solutions-builder/specialist-delivery-verifier",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
+        "@solutions-builder/tools-delivery": "workspace:*",
       },
     },
     "packages/specialist-estimator": {
       "name": "@solutions-builder/specialist-estimator",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
+        "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -237,6 +254,8 @@
       "name": "@solutions-builder/specialist-experience-designer",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -244,6 +263,8 @@
       "name": "@solutions-builder/specialist-namer",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -251,6 +272,8 @@
       "name": "@solutions-builder/specialist-presentation-creator",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -258,6 +281,8 @@
       "name": "@solutions-builder/specialist-product-guide",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -265,6 +290,8 @@
       "name": "@solutions-builder/specialist-proposer",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -272,6 +299,17 @@
       "name": "@solutions-builder/specialist-requirements-author",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-requirements-explainer": {
+      "name": "@solutions-builder/specialist-requirements-explainer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -287,6 +325,8 @@
       "name": "@solutions-builder/specialist-senior-engineer-application",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -294,6 +334,8 @@
       "name": "@solutions-builder/specialist-senior-engineer-platform",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -301,6 +343,8 @@
       "name": "@solutions-builder/specialist-senior-engineer-quality",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -308,6 +352,8 @@
       "name": "@solutions-builder/specialist-senior-engineer-security",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/agent": "0.4.0",
+        "@intx/workflow": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
       },
     },
@@ -923,6 +969,8 @@
     "@solutions-builder/specialist-proposer": ["@solutions-builder/specialist-proposer@workspace:packages/specialist-proposer"],
 
     "@solutions-builder/specialist-requirements-author": ["@solutions-builder/specialist-requirements-author@workspace:packages/specialist-requirements-author"],
+
+    "@solutions-builder/specialist-requirements-explainer": ["@solutions-builder/specialist-requirements-explainer@workspace:packages/specialist-requirements-explainer"],
 
     "@solutions-builder/specialist-runtime": ["@solutions-builder/specialist-runtime@workspace:packages/specialist-runtime"],
 
