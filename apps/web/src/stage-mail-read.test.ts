@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readStageThread, TRIGGER_FLAG_PREFIX } from "./stage-mail.ts";
+import { readStageThread, TRIGGER_FLAG_PREFIX, resetStageMailCache } from "./stage-mail.ts";
 
 const AGENT = "run_a1b2c3d4e5f60718293a4b5c6d7e8f90@sb-project.localhost";
 const ME = "owner@ws.localhost";
@@ -58,6 +58,8 @@ describe("readStageThread", () => {
   const original = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = original;
+    // The folder cache (#777) outlives a read; each test starts without one.
+    resetStageMailCache();
   });
 
   // #62: one page of 100 was the whole read once, so a long thread lost its

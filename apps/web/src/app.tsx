@@ -6,6 +6,7 @@
  * rather than an optimistic guess.
  */
 import { keys } from "./queries/keys.ts";
+import { hostLatency } from "./hub.ts";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
 import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from "react";
@@ -25,6 +26,24 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Banner, Button, Mark, notify, stageName, type NoticeAction } from "./components.jsx";
+
+/** Above this average, the window says the host is slow (#777). */
+const SLOW_HOST_MS = 1_500;
+
+/** The host's recent average request time when it is slow, else null; re-read every few seconds. */
+function useSlowHost(): number | null {
+  const [slow, setSlow] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => {
+      const latency = hostLatency();
+      setSlow(latency.samples >= 3 && latency.averageMs >= SLOW_HOST_MS ? Math.round(latency.averageMs) : null);
+    };
+    tick();
+    const timer = setInterval(tick, 5_000);
+    return () => clearInterval(timer);
+  }, []);
+  return slow;
+}
 
 /** How often the decision queue is re-read when nothing nudges it (#764). */
 const DECISIONS_POLL_MS = 30_000;
@@ -500,6 +519,7 @@ export function App() {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [exportDoing, setExportDoing] = useState<string | null>(null);
+  const slowHost = useSlowHost();
   const exporting = exportDoing !== null;
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
@@ -938,6 +958,13 @@ export function App() {
 
         {offline ? (
           <Banner tone="error" title="The host is not answering" />
+        ) : slowHost ? (
+          // Said rather than left to be wondered about (#777): every
+          // request on this page waits on the host, and the host's own log
+          // names which requests are slow.
+          <Banner tone="warning" title={`The host is answering slowly: about ${(slowHost / 1000).toFixed(1)} s per request`}>
+            Everything on this page waits on it. Its log says which requests are slow and whether its event loop is stalling.
+          </Banner>
         ) : null}
 
         {error ? (

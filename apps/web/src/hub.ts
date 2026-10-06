@@ -24,6 +24,26 @@ export { ApiError };
 /** Longer than any healthy call, including a build's packaging and a workflow's deploy-and-wait (#746). */
 export const HUB_REQUEST_CEILING_MS = 5 * 60_000;
 
+/** The last few request durations (#777): what the window reads to say the host is slow. */
+const LATENCY_SAMPLES = 8;
+const latencies: number[] = [];
+
+function recordLatency(ms: number): void {
+  latencies.push(ms);
+  if (latencies.length > LATENCY_SAMPLES) latencies.shift();
+}
+
+/** The average duration of the host's recent requests, and how many were measured. */
+export function hostLatency(): { averageMs: number; samples: number } {
+  if (latencies.length === 0) return { averageMs: 0, samples: 0 };
+  return { averageMs: latencies.reduce((sum, value) => sum + value, 0) / latencies.length, samples: latencies.length };
+}
+
+/** For tests: forget every measurement. */
+export function resetHostLatency(): void {
+  latencies.length = 0;
+}
+
 export function createHubTransport(): Transport {
   return {
     async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -37,7 +57,9 @@ export function createHubTransport(): Transport {
           init.headers = { "content-type": "application/json" };
           init.body = JSON.stringify(body);
         }
+        const startedAt = Date.now();
         response = await fetch(`${hubOrigin()}${path}`, init);
+        recordLatency(Date.now() - startedAt);
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === "TimeoutError") {
           throw new ApiError(0, "host_timeout", "The host did not answer in time. Try again; if it keeps happening, restart the host.");
