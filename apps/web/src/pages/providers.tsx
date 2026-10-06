@@ -94,7 +94,7 @@ export function ProviderList({
   const [secret, setSecret] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ row: string; message: string } | null>(null);
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const cancelledRef = useRef<Set<string>>(new Set());
 
@@ -147,7 +147,7 @@ export function ProviderList({
   const listRows = [...connectedRows, ...otherRows];
   const dividerBefore = manage && connectedRows.length > 0 && otherRows.length > 0 ? otherRows[0]!.id : null;
 
-  const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
+  const act = async (id: string, work: () => Promise<unknown>, done?: string, errorRow = id) => {
     setBusy(id);
     setError(null);
     cancelledRef.current.delete(id);
@@ -158,20 +158,25 @@ export function ProviderList({
       await onChanged();
     } catch (cause) {
       if (cancelledRef.current.has(id)) return;
-      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+      const message = cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause);
+      setError({ row: errorRow, message });
     } finally {
       if (!cancelledRef.current.has(id)) setBusy(null);
     }
   };
 
-  const persistOrder = (next: string[]) => {
+  // `moved` is the connected provider the person moved; a failed save shows
+  // on its row. Busy stays "order" so no row's own control reads as working.
+  const persistOrder = (next: string[], moved: string) => {
     if (sameOrder(next, order)) return;
     setOrder(next);
     const head = rows.find((row) => connectedFor(row)?.id === next[0]);
+    const movedRow = rows.find((row) => connectedFor(row)?.id === moved);
     void act(
       "order",
       () => api.reorderProviders(next),
       head ? `${head.name} is tried first now. Applies to stages that start from now on.` : "Order saved.",
+      movedRow?.id ?? "order",
     );
   };
 
@@ -273,7 +278,7 @@ export function ProviderList({
             onDrop={(event) => {
               if (!sortable || dragging === null) return;
               event.preventDefault();
-              persistOrder(dropOn(order, dragging, connected.id));
+              persistOrder(dropOn(order, dragging, connected.id), dragging);
               setDragging(null);
               setOver(null);
             }}
@@ -298,13 +303,13 @@ export function ProviderList({
                 onKeyDown={(event) => {
                   if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    persistOrder(moveBy(order, connected.id, -1));
+                    persistOrder(moveBy(order, connected.id, -1), connected.id);
                   } else if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    persistOrder(moveBy(order, connected.id, 1));
+                    persistOrder(moveBy(order, connected.id, 1), connected.id);
                   } else if (event.key === "Home") {
                     event.preventDefault();
-                    persistOrder(moveTo(order, connected.id, 0));
+                    persistOrder(moveTo(order, connected.id, 0), connected.id);
                   }
                 }}
               >
@@ -449,13 +454,17 @@ export function ProviderList({
               </span>
             )}
           </div>
+            {error?.row === row.id ? (
+              <div className="row row-error" role="alert">
+                {error.message}
+              </div>
+            ) : null}
           </div>
         );
       })}
 
-      {/* Below the list, always. An error above it would move the thing the
-          person was about to click. */}
-      {error ? <Banner tone="error" title={error} /> : null}
+      {/* Only a reorder whose moved provider is no longer listed lands here. */}
+      {error?.row === "order" ? <Banner tone="error" title={error.message} /> : null}
 
       {rows.find((row) => row.id === chosen)?.kind === "local_endpoint" ? (
         <p className="inline-note">

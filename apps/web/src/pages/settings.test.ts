@@ -187,9 +187,9 @@ describe("provider and catalog row language", () => {
     expect(source).not.toContain("Use as default");
     expect(source).not.toContain("Any (fail over)");
     // Every way of ordering reduces to the same persisted order: drag and keys.
-    expect(source).toContain("persistOrder(dropOn(order, dragging, connected.id))");
-    expect(source).toContain("persistOrder(moveBy(order, connected.id, -1))");
-    expect(source).toContain("persistOrder(moveTo(order, connected.id, 0))");
+    expect(source).toContain("persistOrder(dropOn(order, dragging, connected.id), dragging)");
+    expect(source).toContain("persistOrder(moveBy(order, connected.id, -1), connected.id)");
+    expect(source).toContain("persistOrder(moveTo(order, connected.id, 0), connected.id)");
     expect(source).toContain("api.reorderProviders(next)");
     // Viewing the page writes nothing: legacy repairs run once at app start (`settleProviderCatalog`).
     expect(source).not.toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
