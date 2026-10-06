@@ -34,7 +34,7 @@ import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudienceGate, AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, CopyButton, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
+import { Banner, Button, CopyButton, GuideDock, Screen, documentName, stageName } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { specialistActivity } from "./specialist-activity.ts";
@@ -179,8 +179,7 @@ export function StageWorkspace({
     };
   }, [detail.project.id]);
 
-  // The opening screen's own current-stage draft content — read the same
-  // way `ProductRequirements` reads a single node's content below, off the
+  // The opening screen's own current-stage draft content — read off the
   // artifact fold already on `detail.nodes` rather than the mail thread, so
   // it renders before the stage specialist (and its mailbox) exist at all.
   const [openingDraftNodeId, setOpeningDraftNodeId] = useState<string | null>(null);
@@ -1520,68 +1519,6 @@ function DesignPanel({
  * undoes that at the last step — the reader has to be able to see that
  * security and platform reached their verdicts separately.
  */
-/**
- * Stage 6's requirements, beside the plan: what stages 1 to 4 agreed,
- * gathered into the document the plan is written against. Folded to one line
- * by default, since the plan is what the person is here to read.
- */
-export function ProductRequirements({
-  node,
-  tenantId,
-  canRewrite,
-  busy,
-  onRewrite,
-}: {
-  node: ArtifactNode;
-  /** The workspace tenant artifacts are recorded under. */
-  tenantId: string;
-  canRewrite: boolean;
-  busy: boolean;
-  onRewrite: () => void;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    setContent(null);
-    void api
-      .artifactContent(tenantId, node.id)
-      .then((result) => {
-        if (!cancelled) setContent(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setContent(UNREADABLE);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [node.id, tenantId]);
-  return (
-    <Screen
-      title="Product requirements"
-      description="What the stages through GUI design agreed, gathered into the one document the plan is written against. The plan cites its ids."
-      status={<StateLabel tone="info">Version {node.position}</StateLabel>}
-      tight
-    >
-      <details className="document-fold">
-        <summary className="document-fold-summary">
-          <span className="document-fold-title">Requirements</span>
-          <span className="document-fold-digest">{versionDigest(node)}</span>
-        </summary>
-        <div className="document-body document-fold-body">
-          {content === null ? <p className="inline-note">Loading…</p> : <Markdown source={content} />}
-        </div>
-      </details>
-      {canRewrite ? (
-        <div className="button-row">
-          <Button loading={busy} onClick={onRewrite}>
-            Write the requirements again
-          </Button>
-        </div>
-      ) : null}
-    </Screen>
-  );
-}
-
 export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId: string }) {
   const live = reviews.filter((node) => node.supersededByNodeId === null);
   const [openId, setOpenId] = useState<string | null>(live[0]?.id ?? null);
