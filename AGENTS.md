@@ -85,8 +85,11 @@ following still costs someone an evening when forgotten:
 
 - Never `git stash`. Worktrees share one stash stack, so a stash in one
   worktree can swallow another's uncommitted work. Commit a WIP instead.
-- Never run `bun run check` at the same time as another agent's. They race on
-  `vendor:build` and produce failures that are not real.
+- Two `bun run check` runs at once can fail each other. `oauth-mount.test.ts`
+  starts a real Codex login, which holds the fixed callback port 1455 until
+  its test process exits. A 502 from that test while another gate, a dev
+  host's Codex sign-in or the Codex CLI is running is that collision, not a
+  defect; rerun once the other finishes.
 - After resolving a merge or rebase, check `git status` before committing and
   run the gate on the committed tree. A gate run against the working tree
   proves nothing about what was pushed.
