@@ -4,7 +4,7 @@ import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, st
 import { visibleCatalog } from "./visible-catalog.js";
 import { sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
-import { SPECIALIST_ENTRY_PATH, SPECIALIST_GUIDANCE_PATH, guidanceModule } from "@solutions-builder/app/specialist-source";
+import { SPECIALIST_ENTRY_PATH, SPECIALIST_GUIDANCE_PATH, defaultExportModule } from "@solutions-builder/app/specialist-source";
 
 const TENANT = {
   id: "tnt_ws",
@@ -205,10 +205,8 @@ describe("leadingOffering", () => {
   });
 });
 
-// #103: the packed entry a live specialist runs, and the workspace guidance
-// beside it, are compared against what this role packs and reads today.
 describe("specialistEntryIsCurrent", () => {
-  const packed = "export default defineWorkflow({ id: \"sb-stage-4\" });\n";
+  const packed = { roleId: "experience-designer", workflow: "export default defineWorkflow({ id: \"sb-stage-4\" });\n", dependencies: [] };
   const guidance = "Write in American English.";
 
   function transportWithTree(entry: string | null, deployedGuidance: string | null): Transport {
@@ -229,23 +227,23 @@ describe("specialistEntryIsCurrent", () => {
     } as Transport;
   }
 
-  const check = (entry: string | null, deployedGuidance: string | null = guidanceModule(guidance)) =>
+  const check = (entry: string | null, deployedGuidance: string | null = defaultExportModule(guidance)) =>
     specialistEntryIsCurrent(transportWithTree(entry, deployedGuidance), TENANT.id, "ast_1", packed, guidance);
 
   test("current when the deployed entry is the packed file and the guidance is today's", async () => {
-    expect(await check(packed)).toBe(true);
+    expect(await check(packed.workflow)).toBe(true);
   });
 
   test("stale when the packed entry has moved on since the deploy", async () => {
-    expect(await check(packed.replace("sb-stage-4", "sb-stage-4-old"))).toBe(false);
+    expect(await check(packed.workflow.replace("sb-stage-4", "sb-stage-4-old"))).toBe(false);
   });
 
   test("stale when the workspace guidance has changed since the deploy", async () => {
-    expect(await check(packed, guidanceModule("Write in British English."))).toBe(false);
+    expect(await check(packed.workflow, defaultExportModule("Write in British English."))).toBe(false);
   });
 
   test("stale when the entry was deployed without guidance", async () => {
-    expect(await check(packed, null)).toBe(false);
+    expect(await check(packed.workflow, null)).toBe(false);
   });
 
   test("an entry that cannot be read back is not a reason to redeploy", async () => {

@@ -6,37 +6,38 @@ import {
   DELIVERY_TOOL_DEPENDENCIES,
   POSIX_TOOL_DEPENDENCIES,
   SPECIALIST_BASE_DEPENDENCIES,
-  inferenceSourceModule,
+  defaultExportModule,
   specialistDependencies,
   specialistTooling,
   WORKFLOW_PACKAGE_DEPENDENCIES,
 } from "./specialist-source.js";
+import { composeSpecialistPrompt } from "@solutions-builder/specialist-shared/deploy-overlays";
+import { skillTextFor } from "@solutions-builder/specialist-shared/skill-text";
 
 const NONE = { deck: false, posix: false, delivery: false, artifacts: false };
 
-const BARE = 'import { defineWorkflow } from "@intx/workflow";\nimport SOURCE from "./inference-source.js";\n';
-const DELIVERY = `${BARE}import { deliver } from "@solutions-builder/tools-delivery/sidecar-bundle";\n`;
-const ARTIFACTS = `${BARE}import { artifacts } from '@corbits/artifacts/sidecar-bundle';\n`;
+const BARE = ["@intx/agent", "@intx/workflow", "@solutions-builder/specialist-shared"];
+const DELIVERY = [...BARE, "@solutions-builder/tools-delivery"];
+const ARTIFACTS = [...BARE, "@corbits/artifacts"];
 
-// #42: a specialist ships only what its entry imports, and the entry is the
-// package's own `workflow.ts`, so the tooling is read off the packed bytes
+// #42: a specialist ships only what its role package declares, as any
+// Interchange package does, so the tooling is read off those declarations
 // rather than decided a second time here.
 describe("specialistTooling", () => {
-  test("an entry importing no tool package carries nothing", () => {
+  test("a role declaring no tool package carries nothing", () => {
     expect(specialistTooling(BARE)).toEqual(NONE);
   });
 
-  test("each external tool import is detected by its package, subpath or not", () => {
+  test("each declared tool package is its tool", () => {
     expect(specialistTooling(DELIVERY)).toEqual({ ...NONE, delivery: true });
     expect(specialistTooling(ARTIFACTS)).toEqual({ ...NONE, artifacts: true });
-    expect(specialistTooling(`${BARE}import { deck } from "@solutions-builder/tools-deck";\n`)).toEqual({ ...NONE, deck: true });
-    expect(specialistTooling(`${BARE}import { shell } from "@intx/tools-posix";\n`)).toEqual({ ...NONE, posix: true });
-    expect(specialistTooling(`${DELIVERY}import { artifacts } from "@corbits/artifacts/sidecar-bundle";\n`)).toEqual({ ...NONE, delivery: true, artifacts: true });
+    expect(specialistTooling([...BARE, "@solutions-builder/tools-deck"])).toEqual({ ...NONE, deck: true });
+    expect(specialistTooling([...BARE, "@intx/tools-posix"])).toEqual({ ...NONE, posix: true });
+    expect(specialistTooling([...DELIVERY, "@corbits/artifacts"])).toEqual({ ...NONE, delivery: true, artifacts: true });
   });
 
-  test("a package name inside a string is not an import", () => {
-    expect(specialistTooling(`${BARE}const note = "see @solutions-builder/tools-delivery";\n`)).toEqual(NONE);
-    expect(specialistTooling(`${BARE}import { x } from "@solutions-builder/tools-delivery-extras";\n`)).toEqual(NONE);
+  test("a similarly named package is not the tool", () => {
+    expect(specialistTooling([...BARE, "@solutions-builder/tools-delivery-extras"])).toEqual(NONE);
   });
 });
 
@@ -64,11 +65,24 @@ describe("specialistDependencies", () => {
   });
 });
 
-describe("inferenceSourceModule", () => {
-  test("exports the pin as the default, nothing else", () => {
-    expect(inferenceSourceModule({ provider: "openai", model: "gpt-5.5" })).toBe(
-      `export default {"provider":"openai","model":"gpt-5.5"};\n`,
-    );
+describe("defaultExportModule", () => {
+  test("exports the value as the default, nothing else", () => {
+    expect(defaultExportModule({ provider: "openai", model: "gpt-5.5" })).toBe(`export default {"provider":"openai","model":"gpt-5.5"};\n`);
+    expect(defaultExportModule("Write in British English.")).toBe(`export default "Write in British English.";\n`);
+  });
+});
+
+// The order main rendered: a specialist moved to a packed entry is told
+// exactly what it was told before.
+describe("composeSpecialistPrompt", () => {
+  const role = { id: "probe", system: "Role text." };
+
+  test("puts the guidance after the role's text and before its skills", () => {
+    expect(composeSpecialistPrompt(role, "Guidance line.")).toBe(`Role text.\n\nGuidance line.\n\n${skillTextFor(role)}`);
+  });
+
+  test("leaves no guidance section when there is none", () => {
+    expect(composeSpecialistPrompt(role, "")).toBe(`Role text.\n\n${skillTextFor(role)}`);
   });
 });
 

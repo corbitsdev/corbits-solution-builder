@@ -4,8 +4,8 @@
  * Each `packages/specialist-*` role package authors a real `src/workflow.ts`
  * (`defineAgent` + `defineWorkflow` + mail trigger). `scripts/specialist-pack.ts`
  * compiles that to `workflow.js`; the installer copies those bytes and writes
- * `inference-source.js` beside them (the model pin, same idea as
- * `namer-source.js`). There is no string-built entry.
+ * `inference-source.js` (the model pin, same idea as `namer-source.js`) and
+ * `workspace-guidance.js` beside them. There is no string-built entry.
  *
  * There is no chat section, no router, no approve chain: a specialist only
  * ever answers the mail addressed to its own run, and a stage's approval is
@@ -113,10 +113,10 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The tools a specialist's packed entry imports: what the pushed tree must
- * ship as members and the package must depend on (#42). The package's own
- * `workflow.ts` decides by what it imports; this only reads that decision
- * off the packed bytes, so an entry never imports a tool its closure lacks.
+ * The tools a specialist ships: what the pushed tree must carry as members and
+ * the package must depend on (#42). The role package's own `package.json`
+ * decides by what it declares, as any Interchange package does; the pack
+ * carries those declarations beside `workflow.js` (`PackedSpecialist`).
  */
 export type SpecialistTooling = {
   /** `@solutions-builder/tools-deck`'s `render_deck`. No stage carries it (#435). */
@@ -129,28 +129,39 @@ export type SpecialistTooling = {
   readonly artifacts: boolean;
 };
 
-/** The tool packages `scripts/specialist-pack.ts` leaves external, so their
- *  import specifiers survive into the packed entry verbatim. */
-const TOOL_PACKAGES: Readonly<Record<keyof SpecialistTooling, string>> = {
+/** The tool packages a role package can declare. */
+export const TOOL_PACKAGES: Readonly<Record<keyof SpecialistTooling, string>> = {
   deck: "@solutions-builder/tools-deck",
   posix: "@intx/tools-posix",
   delivery: "@solutions-builder/tools-delivery",
   artifacts: "@corbits/artifacts",
 };
 
-function importsPackage(packedWorkflow: string, pkg: string): boolean {
-  const escaped = pkg.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  return new RegExp(`from\\s*["']${escaped}(?:/[^"']*)?["']`).test(packedWorkflow);
-}
-
-export function specialistTooling(packedWorkflow: string): SpecialistTooling {
+/** The tooling a role's declared dependencies name. */
+export function specialistTooling(dependencies: readonly string[]): SpecialistTooling {
   return {
-    deck: importsPackage(packedWorkflow, TOOL_PACKAGES.deck),
-    posix: importsPackage(packedWorkflow, TOOL_PACKAGES.posix),
-    delivery: importsPackage(packedWorkflow, TOOL_PACKAGES.delivery),
-    artifacts: importsPackage(packedWorkflow, TOOL_PACKAGES.artifacts),
+    deck: dependencies.includes(TOOL_PACKAGES.deck),
+    posix: dependencies.includes(TOOL_PACKAGES.posix),
+    delivery: dependencies.includes(TOOL_PACKAGES.delivery),
+    artifacts: dependencies.includes(TOOL_PACKAGES.artifacts),
   };
 }
+
+/**
+ * A role's specialist as the interface ships it: `scripts/specialist-pack.ts`
+ * writes the compiled entry and the role package's declared dependencies under
+ * `specialists/<roleId>/`, and the client fetches both to deploy it.
+ */
+export type PackedSpecialist = {
+  readonly roleId: string;
+  /** The compiled `workflow.js`. */
+  readonly workflow: string;
+  /** The role package's own `dependencies`, by name. */
+  readonly dependencies: readonly string[];
+};
+
+/** Where the pack writes a role's declared dependencies, beside `workflow.js`. */
+export const SPECIALIST_DEPENDENCIES_PATH = "dependencies.json";
 
 /** The `dependencies` a specialist's own package declares: the base set plus
  *  each tool set its entry imports, nothing it does not ship. */
@@ -178,15 +189,9 @@ export const SPECIALIST_ENTRY_PATH = "workflow.js";
 export const SPECIALIST_INFERENCE_SOURCE_PATH = "inference-source.js";
 
 /** The overlay the packed entry imports for the workspace's language and
- *  design guidance, appended to its prompt. Written at deploy, like the pin. */
+ *  design guidance, set between its role text and its skills. Written at
+ *  deploy, like the pin. */
 export const SPECIALIST_GUIDANCE_PATH = "workspace-guidance.js";
-
-/** `sb-stage-<N>`: this specialist's workflow id, and the stem of the mail
- *  label its trigger declares (grant configuration only — the hub mints the
- *  real run address at deploy time). */
-export function specialistWorkflowId(stage: Stage): string {
-  return `sb-stage-${stage}`;
-}
 
 /**
  * What a credential-bound deployment declares: the `hub` binding, and the
@@ -207,12 +212,9 @@ export function credentialAccess(pkg: string, credentialName: string, credential
   };
 }
 
-/** The module `workflow.js` imports its inference pin from. */
-export function inferenceSourceModule(pin: InferenceSourcePin): string {
-  return `export default ${JSON.stringify(pin)};\n`;
-}
-
-/** The module `workflow.js` imports its workspace guidance from. */
-export function guidanceModule(guidance: string): string {
-  return `export default ${JSON.stringify(guidance)};\n`;
+/** A deploy-time module `workflow.js` imports a value from: the inference pin
+ *  (`SPECIALIST_INFERENCE_SOURCE_PATH`) or the workspace guidance
+ *  (`SPECIALIST_GUIDANCE_PATH`). */
+export function defaultExportModule(value: InferenceSourcePin | string): string {
+  return `export default ${JSON.stringify(value)};\n`;
 }

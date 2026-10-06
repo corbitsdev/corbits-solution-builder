@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_KIT, agentFor } from "@solutions-builder/app/kit";
 import { DELIVERY_STAGE, specialistTooling } from "@solutions-builder/app/specialist-source";
-import { buildSpecialistWorkflowFiles, EXTERNAL, packSpecialist, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
+import { buildSpecialistWorkflowFiles, declaredDependencies, EXTERNAL, packSpecialist, ROOT_DIR, SPECIALIST_PACK_ROLES } from "./specialist-pack.ts";
 
 const files = await buildSpecialistWorkflowFiles();
 
@@ -39,15 +39,19 @@ describe("specialist pack", () => {
     expect(packed).not.toContain("gpt-5.5");
   });
 
-  // #42: the package's `workflow.ts` is the one place that decides a
-  // specialist's tools; the installer ships what the packed entry imports
-  // (`specialistTooling`). So every import left in a packed entry must be
-  // one the installer knows how to ship, and the detector must see it.
-  test("every packed entry imports only the externals the installer ships, and the detector agrees", () => {
-    for (const [id, packed] of Object.entries(files)) {
-      const imports = externalImportsOf(packed);
-      for (const name of imports) expect({ id, name, known: EXTERNAL.includes(name) }).toEqual({ id, name, known: true });
-      const tooling = specialistTooling(packed);
+  // #42: a role's package.json declares its tools, and the installer ships
+  // what it declares (`specialistTooling`). So every import left in a packed
+  // entry must be one the installer knows how to ship and the role declares.
+  test("every packed entry imports only declared externals the installer ships, and the tooling agrees", () => {
+    for (const role of SPECIALIST_PACK_ROLES) {
+      const id = role.id;
+      const imports = externalImportsOf(files[id]!);
+      const declared = declaredDependencies(role.dir);
+      for (const name of imports) {
+        expect({ id, name, known: EXTERNAL.includes(name) }).toEqual({ id, name, known: true });
+        expect({ id, name, declared: declared.includes(name) }).toEqual({ id, name, declared: true });
+      }
+      const tooling = specialistTooling(declared);
       expect({ id, tooling }).toEqual({
         id,
         tooling: {
@@ -83,9 +87,9 @@ describe("specialist pack", () => {
   });
 
   test("only the delivery verifier carries a tool: deliver", () => {
-    for (const role of AGENT_KIT) {
+    for (const role of SPECIALIST_PACK_ROLES) {
       const expected = role.id === agentFor(DELIVERY_STAGE).id ? { deck: false, posix: false, delivery: true, artifacts: false } : { deck: false, posix: false, delivery: false, artifacts: false };
-      expect({ id: role.id, tooling: specialistTooling(files[role.id]!) }).toEqual({ id: role.id, tooling: expected });
+      expect({ id: role.id, tooling: specialistTooling(declaredDependencies(role.dir)) }).toEqual({ id: role.id, tooling: expected });
     }
   });
 

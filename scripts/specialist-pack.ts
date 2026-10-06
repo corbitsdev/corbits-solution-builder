@@ -9,11 +9,13 @@
  *
  * The browser-driven installer cannot run `Bun.build`, so `main()` writes the
  * compiled JS under `apps/web/public/specialists/<id>/workflow.js`, fetched
- * at deploy time the same way `apps/web/public/project-workflow/` is.
+ * at deploy time the same way `apps/web/public/project-workflow/` is, with
+ * the role package's declared dependencies beside it in `dependencies.json`.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
+import { SPECIALIST_DEPENDENCIES_PATH, SPECIALIST_ENTRY_PATH } from "@solutions-builder/app/specialist-source";
 
 export const ROOT_DIR = join(import.meta.dir, "..");
 export const SPECIALIST_PACK_OUT_DIR = join(ROOT_DIR, "apps", "web", "public", "specialists");
@@ -26,7 +28,7 @@ export const SPECIALIST_PACK_ROLES: readonly { readonly id: string; readonly dir
 }));
 
 /** Left out of the bundle, so the packed entry imports them by name and the
- *  installer ships the matching members (`specialistTooling`). */
+ *  installer ships the members its role package declares (`specialistTooling`). */
 export const EXTERNAL = [
   "@intx/workflow",
   "@intx/agent",
@@ -78,6 +80,15 @@ async function buildEntry(dir: string, entry: string): Promise<string> {
   return await output.text();
 }
 
+/** The dependencies a role package declares in its own `package.json`, by
+ *  name: what the installer ships beside its entry (`specialistTooling`). */
+export function declaredDependencies(dir: string): string[] {
+  const manifest = JSON.parse(readFileSync(join(ROOT_DIR, "packages", dir, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  return Object.keys(manifest.dependencies ?? {}).sort();
+}
+
 /** Compiles every specialist workflow to plain ESM JS, keyed by role id. */
 export async function buildSpecialistWorkflowFiles(): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
@@ -92,11 +103,13 @@ async function main(): Promise<void> {
   const files = await buildSpecialistWorkflowFiles();
 
   if (!existsSync(SPECIALIST_PACK_OUT_DIR)) mkdirSync(SPECIALIST_PACK_OUT_DIR, { recursive: true });
-  for (const [id, content] of Object.entries(files)) {
-    const dir = join(SPECIALIST_PACK_OUT_DIR, id);
+  for (const role of SPECIALIST_PACK_ROLES) {
+    const content = files[role.id]!;
+    const dir = join(SPECIALIST_PACK_OUT_DIR, role.id);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "workflow.js"), content);
-    console.log(`  wrote specialists/${id}/workflow.js (${String(content.length)} bytes)`);
+    writeFileSync(join(dir, SPECIALIST_ENTRY_PATH), content);
+    writeFileSync(join(dir, SPECIALIST_DEPENDENCIES_PATH), `${JSON.stringify(declaredDependencies(role.dir))}\n`);
+    console.log(`  wrote specialists/${role.id}/ (${String(content.length)} bytes)`);
   }
   console.log(`\nWrote ${String(Object.keys(files).length)} specialist(s) to ${SPECIALIST_PACK_OUT_DIR}.`);
 }

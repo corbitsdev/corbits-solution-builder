@@ -12,6 +12,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import { designerGuidance } from "@solutions-builder/app/designer-settings";
+import { SPECIALIST_DEPENDENCIES_PATH, SPECIALIST_ENTRY_PATH, type PackedSpecialist } from "@solutions-builder/app/specialist-source";
 import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE } from "./prd-for-people.ts";
 import { singleFlight } from "./single-flight.ts";
 import { DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
@@ -723,14 +724,19 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
   return { files };
 }
 
-/** Compiled specialist `workflow.js` `scripts/specialist-pack.ts` writes to
- *  `apps/web/public/specialists/<id>/` (wired into `bun run ui:build`):
- *  the browser cannot run `Bun.build` itself, so it fetches these
+/** A role's packed specialist -- the compiled `workflow.js` and its role
+ *  package's declared dependencies -- as `scripts/specialist-pack.ts` writes
+ *  them to `apps/web/public/specialists/<id>/` (wired into `bun run
+ *  ui:build`): the browser cannot run `Bun.build` itself, so it fetches these
  *  same-origin static files rather than compiling them client-side. */
-async function specialistPackedWorkflow(roleId: string): Promise<string> {
-  const response = await fetch(`/specialists/${roleId}/workflow.js`, { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`specialist entry ${roleId} unavailable (HTTP ${String(response.status)})`);
-  return response.text();
+async function packedSpecialist(roleId: string): Promise<PackedSpecialist> {
+  const read = async (path: string) => {
+    const response = await fetch(`/specialists/${roleId}/${path}`, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`specialist ${roleId} ${path} unavailable (HTTP ${String(response.status)})`);
+    return response.text();
+  };
+  const [workflow, dependencies] = await Promise.all([read(SPECIALIST_ENTRY_PATH), read(SPECIALIST_DEPENDENCIES_PATH)]);
+  return { roleId, workflow, dependencies: JSON.parse(dependencies) as string[] };
 }
 
 /**
@@ -1220,9 +1226,12 @@ async function localizedGuidance(transport: ReturnType<typeof createHubTransport
  * redeploys it.
  */
 async function stageGuidance(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, stage: Stage): Promise<string> {
-  const localized = await localizedGuidance(transport, workspaceTenantId);
-  if (stage !== 4) return localized;
-  const designer = designerGuidance(await readDesignerSettings(transport, workspaceTenantId));
+  if (stage !== 4) return localizedGuidance(transport, workspaceTenantId);
+  const [localized, settings] = await Promise.all([
+    localizedGuidance(transport, workspaceTenantId),
+    readDesignerSettings(transport, workspaceTenantId),
+  ]);
+  const designer = designerGuidance(settings);
   return localized ? `${localized}\n\n${designer}` : designer;
 }
 
@@ -2374,7 +2383,7 @@ export const api = {
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
-        specialistPackedWorkflow(agentFor(stage as Stage).id),
+        packedSpecialist(agentFor(stage as Stage).id),
         stageGuidance(transport, workspaceTenantId, stage as Stage),
       ]);
       // Mailing a deployment whose sidecar is not placed yet loses the
@@ -2414,7 +2423,7 @@ export const api = {
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
-        specialistPackedWorkflow(agentFor(stage as Stage).id),
+        packedSpecialist(agentFor(stage as Stage).id),
         stageGuidance(transport, workspaceTenantId, stage as Stage),
       ]);
       const deployment = await switchSpecialistDeployment(
@@ -2458,7 +2467,7 @@ export const api = {
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
-        specialistPackedWorkflow(BRIEF_EVALUATOR_ROLE.id),
+        packedSpecialist(BRIEF_EVALUATOR_ROLE.id),
         localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(
@@ -2501,7 +2510,7 @@ export const api = {
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
-        specialistPackedWorkflow(PRODUCT_GUIDE_ROLE.id),
+        packedSpecialist(PRODUCT_GUIDE_ROLE.id),
         localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(
@@ -2548,7 +2557,7 @@ export const api = {
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const [status, packed, guidance] = await Promise.all([
         readyToDeploy(transport, workspaceTenantId, projectId),
-        specialistPackedWorkflow(stage6RoleFor(roleKey).id),
+        packedSpecialist(stage6RoleFor(roleKey).id),
         localizedGuidance(transport, workspaceTenantId),
       ]);
       const deployment = await ensureSpecialistDeployment(

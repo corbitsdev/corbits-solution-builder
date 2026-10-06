@@ -16,11 +16,11 @@ import {
   SPECIALIST_ENTRY_PATH,
   SPECIALIST_GUIDANCE_PATH,
   SPECIALIST_INFERENCE_SOURCE_PATH,
-  guidanceModule,
-  inferenceSourceModule,
+  defaultExportModule,
   specialistDependencies,
   specialistTooling,
   type InferenceSourcePin,
+  type PackedSpecialist,
 } from "@solutions-builder/app/specialist-source";
 import { assetsFor, readWorkflowSourceBlob, workflowsFor, type HubAsset, type HubDeployment } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
@@ -378,7 +378,7 @@ export async function renderSpecialistSource(
   stage: Stage,
   source: InferenceSourcePin,
   roleKey: string,
-  packedWorkflow: string,
+  packed: PackedSpecialist,
   guidance: string,
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage, roleKey);
@@ -390,12 +390,12 @@ export async function renderSpecialistSource(
     workspaces: ["packages/*"],
     catalog: closure.manifest.catalog,
   };
-  // The package depends on exactly the members and npm packages its entry
-  // imports (#42), read off the packed entry itself: `@corbits/artifacts`
-  // and its `@standard-schema/spec` peer only when the entry imports the
-  // generic tool bundle, the deck or delivery tools and the runtime package
-  // they author with only when the entry imports them.
-  const tooling = specialistTooling(packedWorkflow);
+  // The package depends on exactly the members and npm packages its role
+  // package declares (#42): `@corbits/artifacts` and its
+  // `@standard-schema/spec` peer only when it declares the generic tool
+  // bundle, the deck or delivery tools and the runtime package they author
+  // with only when it declares them.
+  const tooling = specialistTooling(packed.dependencies);
   const dependencies = specialistDependencies(tooling);
   const member = {
     name,
@@ -408,9 +408,9 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: packedWorkflow,
-    [`${SPECIALIST_DIR}/${SPECIALIST_INFERENCE_SOURCE_PATH}`]: inferenceSourceModule(source),
-    [`${SPECIALIST_DIR}/${SPECIALIST_GUIDANCE_PATH}`]: guidanceModule(guidance),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: packed.workflow,
+    [`${SPECIALIST_DIR}/${SPECIALIST_INFERENCE_SOURCE_PATH}`]: defaultExportModule(source),
+    [`${SPECIALIST_DIR}/${SPECIALIST_GUIDANCE_PATH}`]: defaultExportModule(guidance),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -419,9 +419,9 @@ export async function renderSpecialistSource(
     [SOURCE_PIN_PATH]: `${JSON.stringify(source, null, 2)}\n`,
     // The members this entry's imports resolve against, and no others (#42):
     // the vendored workflow always; the runtime package with the deck or
-    // delivery tool when the entry imports one; the generic artifact bundle
-    // only when the entry imports it. An entry that imports no tool ships
-    // the workflow alone, so its sidecar materialises a fraction of the closure.
+    // delivery tool when the role declares one; the generic artifact bundle
+    // only when it declares that. A role that declares no tool ships the
+    // workflow alone, so its sidecar materialises a fraction of the closure.
     ...(await vendoredMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(tooling.deck || tooling.delivery ? await runtimeMemberFiles(closure.manifest, closure.fetchTarball) : {}),
     ...(tooling.deck ? await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball) : {}),
@@ -460,7 +460,7 @@ export async function specialistEntryIsCurrent(
   transport: Transport,
   tenantId: string,
   assetId: string,
-  packedWorkflow: string,
+  packed: PackedSpecialist,
   guidance: string,
 ): Promise<boolean> {
   const [deployed, deployedGuidance] = await Promise.all([
@@ -468,7 +468,7 @@ export async function specialistEntryIsCurrent(
     readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_GUIDANCE_PATH}`),
   ]);
   if (deployed === null) return true;
-  return packedWorkflow === deployed && deployedGuidance === guidanceModule(guidance);
+  return packed.workflow === deployed && deployedGuidance === defaultExportModule(guidance);
 }
 
 /**
@@ -496,7 +496,7 @@ async function ensureSpecialistDeploymentOnce(
   projectId: string,
   stage: Stage,
   roleKey: string,
-  packedWorkflow: string,
+  packed: PackedSpecialist,
   guidance: string,
   /** CL-8899 "Switch model": when set, names the offering the new deployment
    *  must lead with, and forces a fresh deploy even though a live deployment
@@ -513,11 +513,11 @@ async function ensureSpecialistDeploymentOnce(
   // CL-8719 / #288 / #388: a credential-bound entry has to declare its `hub`
   // binding and use-grant itself (`credentialAccess`), and the installer then
   // mints the credential row and scopes its bearer to the winning run
-  // (`artifacts-credential.ts`). No packed entry declares either yet, so an
-  // entry importing the bundle would run with a tool it cannot authenticate.
+  // (`artifacts-credential.ts`). No packed entry declares either yet, so a
+  // role depending on the bundle would run with a tool it cannot authenticate.
   // Refused here rather than deployed as if bound.
-  if (specialistTooling(packedWorkflow).artifacts) {
-    throw new Error(`the ${roleKey} specialist's entry imports @corbits/artifacts but declares no credential binding; it cannot be deployed yet`);
+  if (specialistTooling(packed.dependencies).artifacts) {
+    throw new Error(`the ${roleKey} specialist depends on @corbits/artifacts but declares no credential binding; it cannot be deployed yet`);
   }
 
   // The project's own tenant is where this deploys (#29): the hub then
@@ -582,15 +582,15 @@ async function ensureSpecialistDeploymentOnce(
   }
 
   if (existing) {
-    // A live specialist runs the packed entry it was deployed with. The
-    // packed `workflow.js` is compared against what this role packs today,
-    // and when the two differ it is redeployed onto the model it already
-    // leads with -- the switch it was chosen by, else the catalog's first --
-    // recorded as a switch so mail follows the new deployment rather than
+    // A live specialist runs the entry it was deployed with. That entry is
+    // compared against what this role would be given today, and when the two
+    // differ it is redeployed onto the model it already leads with -- the
+    // switch it was chosen by, else the catalog's first -- recorded as a
+    // switch so mail follows the new deployment rather than
     // `pickDeployment`'s oldest.
     const recorded = await readStageSwitch(transport, projectId, stage);
     const leading = leadingOffering(recorded, existing.deployment.id, catalogOfferings);
-    const current = await specialistEntryIsCurrent(transport, existing.tenantId, existing.assetId, packedWorkflow, guidance);
+    const current = await specialistEntryIsCurrent(transport, existing.tenantId, existing.assetId, packed, guidance);
     if (current) {
       return {
         deploymentId: existing.deployment.id,
@@ -606,7 +606,7 @@ async function ensureSpecialistDeploymentOnce(
       projectId,
       stage,
       roleKey,
-      packedWorkflow,
+      packed,
       guidance,
       leading.id,
       wait,
@@ -636,7 +636,7 @@ async function ensureSpecialistDeploymentOnce(
   // No project read here: a specialist's entry is the same for every
   // project its role serves, and what is the project's (who a stage 5
   // package is for) arrives with the request (#41 step 3).
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, roleKey, packedWorkflow, guidance);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, roleKey, packed, guidance);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     tenantId,
@@ -709,10 +709,10 @@ export async function ensureSpecialistDeployment(
   gitPush: WorkflowGitPush,
   projectId: string,
   stage: Stage,
-  /** Compiled `workflow.js` for the role this deployment runs
-   *  (`scripts/specialist-pack.ts`): the prompt and tools are the package's own. */
-  packedWorkflow: string,
-  /** The workspace's language and design guidance, appended to the package's
+  /** The role this deployment runs, as `scripts/specialist-pack.ts` packed
+   *  it: the prompt and tools are the package's own. */
+  packed: PackedSpecialist,
+  /** The workspace's language and design guidance, added to the package's
    *  prompt; a change to it redeploys a live specialist, as a new entry does. */
   guidance: string,
   /** Which of the stage's roles to deploy -- default is the primary
@@ -725,7 +725,7 @@ export async function ensureSpecialistDeployment(
   wait: PlacementWait = RECOVERY_WAIT,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
-    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packedWorkflow, guidance, undefined, wait);
+    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packed, guidance, undefined, wait);
   try {
     return await attempt();
   } catch (cause) {
@@ -793,7 +793,7 @@ export async function switchSpecialistDeployment(
   projectId: string,
   stage: Stage,
   offeringId: string,
-  packedWorkflow: string,
+  packed: PackedSpecialist,
   guidance: string,
   roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeployment> {
@@ -810,7 +810,7 @@ export async function switchSpecialistDeployment(
     }
 
     const attempt = () =>
-      ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packedWorkflow, guidance, offeringId);
+      ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, roleKey, packed, guidance, offeringId);
     let result: SpecialistDeployment;
     try {
       result = await attempt();
