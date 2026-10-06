@@ -75,6 +75,23 @@
   font-family: var(--font-mono);
 }
 
+/* A provider's failure is a row of its own, directly under the row that
+   failed, so it reads as part of that provider rather than squeezed beside
+   its controls. */
+.settings-page .row:has(+ .row-error) {
+  border-bottom: 0;
+}
+
+.settings-page .row.row-error {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--wb-destructive) 80%, var(--wb-foreground));
+  background: color-mix(in srgb, var(--wb-destructive) 8%, transparent);
+  border-left: 2px solid var(--wb-destructive);
+  overflow-wrap: anywhere;
+}
+
 /* Connected providers are ordered by hand: a grip at the row's start to
    drag (or arrow through), the head marked as where the default model
    comes from, and the unconnected rows set off beneath a quiet divider. */
