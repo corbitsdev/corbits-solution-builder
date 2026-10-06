@@ -58,6 +58,7 @@ describe("assembleBuildPrompt", () => {
     const prompt = assembleBuildPrompt(input);
     expect(prompt).toContain("A package, service or key you cannot reach is a blocker");
     expect(prompt).toContain("never tell one to fall back");
+    expect(prompt).toContain("The application you ship has no fallback either");
   });
 
   test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {

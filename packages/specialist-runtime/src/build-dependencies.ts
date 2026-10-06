@@ -9,5 +9,7 @@ export const BUILD_DEPENDENCIES_RULE = [
   ``,
   `A package, service or key you cannot reach is a blocker, not a reason to substitute a heuristic, a stub, a local file or mock data. Record it in QUESTIONS.md, mark every task that depends on it not done in STATUS.md, and say so in your final message.`,
   ``,
+  `The application you ship has no fallback either: run without a key or service it needs, it fails with a clear error that names what is missing, and never serves a substitute in its place, documented or not.`,
+  ``,
   `This binds every brief you write for an agent you start: never tell one to fall back, and never tell a reviewer to overlook a substitute.`,
 ].join("\n");
