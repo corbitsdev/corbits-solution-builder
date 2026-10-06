@@ -24,11 +24,15 @@ export function routedLine(): string {
   return "Sent to the requirements author, whose document this is; its reply appears under Product requirements above.";
 }
 
-export type AskKind = "question" | "redraft" | "draft";
+/** `status`: a brief the app sent the Build supervisor (#768), answered with a build status, not a draft of anything. */
+export type AskKind = "question" | "redraft" | "draft" | "status";
+
+const SUPERVISOR_BRIEF = /^Build attempt \d+ (?:is still running|has ended)\b/;
 
 /** What the person asked for, from their words and whether a draft exists yet. */
 export function askKind(body: string | null, hasDraft: boolean): AskKind {
   if (!body) return hasDraft ? "redraft" : "draft";
+  if (SUPERVISOR_BRIEF.test(body)) return "status";
   if (QUESTION.test(body.trim())) return "question";
   if (hasDraft && REDRAFT.test(body)) return "redraft";
   return hasDraft ? "redraft" : "draft";

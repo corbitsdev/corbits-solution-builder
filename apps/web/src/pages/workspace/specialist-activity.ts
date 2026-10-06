@@ -29,7 +29,7 @@ const STAGE_DOCUMENT: Record<number, string> = {
   5: "the stakeholder packages",
   6: "the build plan",
   7: "the estimate",
-  8: "the build",
+  8: "the build status",
   9: "the delivery",
 };
 
@@ -41,6 +41,7 @@ export function specialistActivity(stage: number, ask: AskKind = "draft"): strin
   // question is answered, an existing draft is redrafted, a first draft is
   // the stage's own task.
   if (ask === "question") return `${who} is answering`;
+  if (ask === "status") return `${who} is writing the build status`;
   if (ask === "redraft") return `${who} is redrafting ${STAGE_DOCUMENT[stage] ?? "the draft"}`;
   const doing = STAGE_ACTIVITY[stage] ?? "working on this stage";
   return `${who} is ${doing}`;
