@@ -332,7 +332,8 @@ export function Stage6Panel({
     };
     checkAll();
     const subscription = subscribeMailbox(tenantId, checkAll);
-    const timer = setInterval(checkAll, 8_000);
+    // The nudge is the signal; the timer only backstops a missed one (#777).
+    const timer = setInterval(checkAll, 20_000);
     return () => {
       clearInterval(timer);
       subscription.unsubscribe();

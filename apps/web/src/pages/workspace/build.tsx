@@ -33,6 +33,10 @@ import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
+import { subscribeMailbox } from "../../mailbox-events.ts";
+
+/** How long a thread waits for a missed nudge before re-reading on its own (#777). */
+const THREAD_BACKSTOP_MS = 20_000;
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
@@ -265,12 +269,19 @@ export function BuildPanel({
     }
   }, [address, tenantId]);
 
+  // Re-read on the mailbox nudge, with a backstop every twenty seconds
+  // (#777): a poll every three seconds had the hub load the whole
+  // mailbox each time, and every other request waited behind it.
   useEffect(() => {
     if (!address) return;
     void load();
-    const timer = setInterval(() => void load(), 3_000);
-    return () => clearInterval(timer);
-  }, [address, load]);
+    const subscription = subscribeMailbox(tenantId, () => void load());
+    const timer = setInterval(() => void load(), THREAD_BACKSTOP_MS);
+    return () => {
+      clearInterval(timer);
+      subscription.unsubscribe();
+    };
+  }, [address, load, tenantId]);
 
   // The project detail (and so `detail.nodes`) follows this stage's thread:
   // a supervisor reply is the only cue that the status document changed.

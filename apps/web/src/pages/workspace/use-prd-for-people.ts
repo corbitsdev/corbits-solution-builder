@@ -202,7 +202,7 @@ export function usePrdForPeople({
     };
     void check();
     const subscription = subscribeMailbox(tenantId, () => void check());
-    const timer = setInterval(() => void check(), 8_000);
+    const timer = setInterval(() => void check(), 20_000);
     return () => {
       clearInterval(timer);
       subscription.unsubscribe();
