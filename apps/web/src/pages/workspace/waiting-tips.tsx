@@ -24,7 +24,6 @@ export function WaitingTips() {
   const index = still ? 0 : Math.floor(elapsed / TIP_MS) % WAITING_TIPS.length;
   return (
     <aside className="waiting-tips" aria-label="Tips">
-      <p className="waiting-tips-head">While you wait</p>
       <p key={index} className="waiting-tip">
         {WAITING_TIPS[index]}
       </p>
