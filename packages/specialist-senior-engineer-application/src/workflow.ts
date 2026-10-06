@@ -14,8 +14,8 @@ const AGENT = defineAgent({
 });
 
 export default defineWorkflow({
-  id: "sb-stage-6",
-  triggers: [{ type: "mail", to: "sb-stage-6@solutions-builder.local" }],
+  id: "sb-senior-engineer-application",
+  triggers: [{ type: "mail", to: "sb-senior-engineer-application@solutions-builder.local" }],
   steps: {
     run: step({
       agent: AGENT,
