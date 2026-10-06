@@ -70,6 +70,22 @@ Principal comes ONLY from the hub-stamped top-level `principalId` on the
 signal's output; a nested `principalId` on the decision payload is never read.
 The reducer is deterministic: no clock, no randomness.
 
+## What the reducer does not decide
+
+The client alone gates two transitions: stage 8's review opens only once a
+build archive is published, and stage 9's final approval is sent only after
+the delivery tool call is approved. The client also checks stage 6's Stack
+section before the plan is approved, but `stageRules` refuses the same plan,
+so that check only explains the refusal.
+
+The project record (title, stakeholder policy, archive and delete marks) is
+not `ProjectState` and is written through the installer
+(`packages/installer/src/project-tenant.ts`); a stage 5 review captures the
+stakeholder policy into `ProjectState` when it opens.
+`packages/solutions-builder/src/ledger.ts` names the stages, authorities and
+transition rows that the installer's roles and authority grants and the
+client's stakeholder roles read; it enforces nothing.
+
 ## Deployment
 
 `packages/installer/src/project-workflow-deploy.ts`'s `ensureProjectWorkflow`
