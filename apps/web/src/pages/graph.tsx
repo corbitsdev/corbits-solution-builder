@@ -442,6 +442,7 @@ export function BuildFile({
   tenantId,
   attempt = null,
   caveat = null,
+  withButton = true,
 }: {
   node: ArtifactNode;
   nodes: readonly ArtifactNode[];
@@ -450,6 +451,8 @@ export function BuildFile({
   attempt?: number | null;
   /** What the archive does not hold: a later attempt's work, say. */
   caveat?: string | null;
+  /** False where the page offers the download among its own actions (#793): the description alone. */
+  withButton?: boolean;
 }) {
   const { busy, download } = useFileDownload(tenantId, node, node.title);
   // How it unpacks is read off its manifest (#727), never assumed: an
@@ -462,15 +465,13 @@ export function BuildFile({
         {node.title} · tar.gz archive{node.sizeBytes === undefined ? "" : ` · about ${formatSize(node.sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
         without installed dependencies.{unpacks} Its bytes are what delivery review verifies once accepted.{caveat ? ` ${caveat}` : ""}
       </p>
-      <div className="button-row">
-        <Button
-          variant="primary"
-          loading={busy}
-          onClick={() => void download()}
-        >
-          {attempt === null ? "Download the build (.tar.gz)" : `Download attempt ${String(attempt)}'s archive (.tar.gz)`}
-        </Button>
-      </div>
+      {withButton ? (
+        <div className="button-row">
+          <Button variant="primary" loading={busy} onClick={() => void download()}>
+            {attempt === null ? "Download the build (.tar.gz)" : `Download attempt ${String(attempt)}'s archive (.tar.gz)`}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
