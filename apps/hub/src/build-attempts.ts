@@ -42,6 +42,8 @@ import { dataDirectory, HostError } from "@corbits/embedded-host";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, CANCEL_GRACE_MS, groupAlive, killGroup, recordedExit, recordedOutput, runBuildAttempt, stderrTail, type BridgeOutcome } from "./corbits-exec.js";
 import { followFile } from "./file-follow.js";
 import { followTurnLog } from "./turn-reports.js";
+import { BUILD_WORKERS, buildWorker } from "./build-worker.js";
+import { sumUsage, turnLogModels, usageCalls, type AttemptUsage } from "./build-usage.js";
 import { buildDocumentsRule, MANUAL_IMAGES_DIR, README_PATH, USER_MANUAL_PATH } from "@solutions-builder/specialist-runtime/build-documents";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
@@ -178,6 +180,8 @@ export type AttemptRecord = {
   readonly workspace: string;
   /** Null while running, and for a worker that ended on its own. */
   readonly endedBy: EndedBy | null;
+  /** What the attempt has spent so far, in the worker's own counts (#785); null for a worker that keeps no usage log. */
+  readonly usage: AttemptUsage | null;
 };
 
 /** What is written as `<n>.json` when the worker ends. */
@@ -256,7 +260,9 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   const workspace = attemptWorkspace(projectId, attempt);
   const live = inFlight.get(key(projectId, attempt));
   if (live) {
-    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace, endedBy: null };
+    const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
+    const usage = await attemptUsage(projectId, attempt, started?.worker ?? null, { from: live.startedAt, to: null });
+    return { attempt, state: "running", startedAt: live.startedAt, endedAt: null, continuedFrom: live.continuedFrom, outcome: null, workspace, endedBy: null, usage };
   }
   const ended = await readJson<OutcomeFile>(attemptFile(projectId, attempt, ".json"));
   if (ended) {
@@ -264,6 +270,7 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
       attempt,
       state: ended.outcome.available ? "ended" : "unavailable",
       endedBy: ended.endedBy ?? null,
+      usage: ended.outcome.available ? await attemptUsage(projectId, attempt, ended.outcome.worker, { from: ended.outcome.startedAt, to: ended.outcome.endedAt }) : null,
       startedAt: ended.outcome.startedAt,
       endedAt: ended.outcome.endedAt,
       continuedFrom: ended.continuedFrom,
@@ -278,7 +285,26 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   // case; detached for the moment it cannot be; lost when it is gone.
   if (await adoptAttempt(projectId, attempt, started)) return attemptRecord(projectId, attempt);
   const alive = typeof started.pgid === "number" && groupAlive(started.pgid);
-  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null };
+  const usage = await attemptUsage(projectId, attempt, started.worker ?? null, { from: started.startedAt, to: alive ? null : new Date().toISOString() });
+  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null, usage };
+}
+
+/**
+ * What an attempt has spent (#785): the worker's usage log summed over the
+ * attempt's window, with the models its own turns name. The worker is the
+ * one recorded for the attempt, or the one chosen now for an attempt from
+ * before the worker was recorded; a worker without a usage log is null.
+ */
+async function attemptUsage(projectId: string, attempt: number, workerId: string | null, window: { from: string; to: string | null }): Promise<AttemptUsage | null> {
+  const kind = workerId ? BUILD_WORKERS.find((entry) => entry.id === workerId) : await buildWorker().catch(() => null);
+  const log = kind?.usageLog;
+  if (!log) return null;
+  try {
+    const [calls, models] = await Promise.all([usageCalls(log.path(), log.parse), turnLogModels(attemptFile(projectId, attempt, ".turns.jsonl"))]);
+    return sumUsage(calls, window, log.source, models);
+  } catch {
+    return null;
+  }
 }
 
 export async function listAttempts(projectId: string): Promise<AttemptRecord[]> {
@@ -683,5 +709,5 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   })();
   live.done = done;
 
-  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace, endedBy: null };
+  return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace, endedBy: null, usage: null };
 }

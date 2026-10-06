@@ -18,9 +18,11 @@
  * answered for, or a release and a Homebrew tap that were read.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type } from "arktype";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
+import { parseCorbitsUsageLine, type UsageLineParser } from "./build-usage.js";
 
 export type BuildWorkerId = "corbits-code" | "claude-code" | "codex";
 
@@ -55,6 +57,12 @@ export type BuildWorkerKind = {
    * live output is its stdout alone.
    */
   readonly turnReports: null | { install: (log: string) => readonly { path: string; content: string }[] };
+  /**
+   * Where the worker logs every inference call it and the agents it spawns
+   * make, with a timestamp and token counts (#785); null for a worker that
+   * keeps no such log. `source` says, for the page, what the counts cover.
+   */
+  readonly usageLog: null | { readonly path: () => string; readonly parse: UsageLineParser; readonly source: string };
   /** Where the tool comes from, for the instruction shown when it is absent. */
   readonly install: WorkerInstall;
 };
@@ -118,6 +126,11 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     },
     environment: ["CORBITS_*"],
     turnReports: { install: corbitsTurnHook },
+    usageLog: {
+      path: () => join(homedir(), ".corbits", "logs", "corbits.log"),
+      parse: parseCorbitsUsageLine,
+      source: "every Corbits Code inference call on this computer while the attempt ran, the agents the worker spawned included",
+    },
     // Not on npm, and not meant to be: a binary from GitHub releases
     // (macOS and Linux tarballs, Debian packages; no Windows build) and the
     // `corbits-code` formula in the corbitsdev/homebrew-tap tap.
@@ -133,6 +146,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     prompt: { via: "stdin", args: ["-p"] },
     environment: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"],
     turnReports: null,
+    usageLog: null,
     install: { kind: "npm", package: "@anthropic-ai/claude-code" },
   },
   {
@@ -145,6 +159,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     prompt: { via: "stdin", args: ["exec", "-"] },
     environment: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME"],
     turnReports: null,
+    usageLog: null,
     install: { kind: "npm", package: "@openai/codex" },
   },
 ];

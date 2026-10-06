@@ -32,7 +32,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
-import { clock } from "./elapsed.jsx";
+import { elapsedLabel, spendLine } from "./build-spend.ts";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 
 /** How long a thread waits for a missed nudge before re-reading on its own (#777). */
@@ -135,7 +135,7 @@ function BuildClock({ since, until }: { since: string | null; until: string | nu
   if (!since) return null;
   return (
     <span className="elapsed-clock" role="timer" aria-live="off">
-      {clock(seconds)}
+      {elapsedLabel(seconds)}
     </span>
   );
 }
@@ -517,6 +517,11 @@ export function BuildPanel({
                     {" · "}
                     <BuildClock since={current.startedAt} until={current.endedAt} />
                   </>
+                ) : null}
+                {current && progress.tasks.length > 0 ? ` · ${String(progress.committed)} of ${String(progress.tasks.length)} tasks` : null}
+                {current?.usage ? (
+                  // The attempt's spend so far (#785): what the worker's log counted, and an estimate at a list price.
+                  <span title={spendLine(current.usage).title}>{` · ${spendLine(current.usage).text}`}</span>
                 ) : null}
               </span>
             </div>
