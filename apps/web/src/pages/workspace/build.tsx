@@ -37,7 +37,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 
 /** How long a thread waits for a missed nudge before re-reading on its own (#777). */
 const THREAD_BACKSTOP_MS = 20_000;
-import { BuildFile } from "../graph.jsx";
+import { BuildFile, downloadBuild } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
 
@@ -474,6 +474,12 @@ export function BuildPanel({
       ? `Re-archive attempt ${String(recordable.attempt)}'s files`
       : `Record attempt ${String(recordable.attempt)} and brief the supervisor`
     : "Record the attempt and brief the supervisor";
+  // What the archive does not hold (#791), said beside it and on its button.
+  const archiveCaveat = running
+    ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until it is recorded.`
+    : lastEnded && archivedAttempt !== null && lastEnded.attempt > archivedAttempt
+      ? `Attempt ${String(lastEnded.attempt)} has ended but is not recorded; this archive is attempt ${String(archivedAttempt)}'s.`
+      : null;
 
   return (
     <StagePanes
@@ -591,6 +597,15 @@ export function BuildPanel({
                 onClick={() => recordable && void record(recordable)}
               >
                 {recordLabel}
+              </Button>
+              <Button
+                variant="secondary"
+                loading={busy === "download"}
+                disabled={!archive || busy !== null}
+                title={archive ? `The recorded archive of attempt ${archivedAttempt === null ? "?" : String(archivedAttempt)}'s directory, as a tar.gz.${archiveCaveat ? ` ${archiveCaveat}` : ""}` : "Enabled once an attempt is recorded."}
+                onClick={() => archive && void run("download", () => downloadBuild(tenantId, archive))}
+              >
+                {archive ? `Download attempt ${archivedAttempt === null ? "the" : String(archivedAttempt)}'s archive (.tar.gz)` : "Download the archive (.tar.gz)"}
               </Button>
               <Button
                 variant="primary"
@@ -756,13 +771,8 @@ export function BuildPanel({
                 nodes={detail.nodes}
                 tenantId={tenantId}
                 attempt={archivedAttempt}
-                caveat={
-                  running
-                    ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until it is recorded.`
-                    : lastEnded && archivedAttempt !== null && lastEnded.attempt > archivedAttempt
-                      ? `Attempt ${String(lastEnded.attempt)} has ended but is not recorded; this archive is attempt ${String(archivedAttempt)}'s.`
-                      : null
-                }
+                caveat={archiveCaveat}
+                withButton={false}
               />
             ) : null}
             {status ? (
