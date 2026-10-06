@@ -13,7 +13,8 @@
  * progress, stage or success from it — the report is the worker's, the
  * verdict on the build is still a person's.
  */
-import { open, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { followFile } from "./file-follow.js";
 
 /** The shape a turn report is read as; anything else is shown as unreadable. */
 type TurnReport = {
@@ -63,68 +64,64 @@ function firstLine(content: unknown): string {
 
 export type TurnTally = { turns: number; toolCalls: number };
 
+/** Counts one record into the tally, and says it. */
+function takeRecord(line: string, tally: TurnTally, onTurn: (text: string) => void): void {
+  let record: unknown;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    onTurn("── a turn report the bridge could not read\n");
+    return;
+  }
+  tally.turns += 1;
+  const calls = (record as TurnReport).toolCalls;
+  tally.toolCalls += Array.isArray(calls) ? calls.length : 0;
+  onTurn(describeTurn(record));
+}
+
 /**
  * Follows a JSON-lines log as it grows, saying each complete record as it
- * lands. Polled rather than watched: a file that is appended to by a hook
- * process is exactly what file watching gets wrong on macOS. `stop` reads
- * whatever landed last and resolves with how much was reported.
+ * lands. `stop` reads whatever landed last and resolves with how much was
+ * reported. From the end, records already there are counted but not said
+ * again: a host that starts and finds the worker still running.
  */
 export function followTurnLog(
   path: string,
   onTurn: (text: string) => void,
   intervalMs = 500,
+  from: "start" | "end" = "start",
 ): { stop: () => Promise<TurnTally> } {
-  let offset = 0;
   let partial = "";
   const tally: TurnTally = { turns: 0, toolCalls: 0 };
-  let reading: Promise<void> = Promise.resolve();
-
-  const readNew = async () => {
-    let size: number;
-    try {
-      size = (await stat(path)).size;
-    } catch {
-      return;
-    }
-    if (size <= offset) return;
-    const handle = await open(path, "r");
-    try {
-      const buffer = Buffer.alloc(size - offset);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
-      offset += bytesRead;
-      partial += buffer.subarray(0, bytesRead).toString("utf8");
-    } finally {
-      await handle.close();
-    }
-    const lines = partial.split("\n");
-    partial = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.trim().length === 0) continue;
-      let record: unknown;
-      try {
-        record = JSON.parse(line);
-      } catch {
-        onTurn("── a turn report the bridge could not read\n");
-        continue;
-      }
-      tally.turns += 1;
-      const calls = (record as TurnReport).toolCalls;
-      tally.toolCalls += Array.isArray(calls) ? calls.length : 0;
-      onTurn(describeTurn(record));
-    }
-  };
-
-  const tick = () => {
-    reading = reading.then(readNew).catch(() => undefined);
-  };
-  const timer = setInterval(tick, intervalMs);
-
+  const counted = from === "end" ? tallyTurnLog(path) : Promise.resolve({ turns: 0, toolCalls: 0 });
+  const follower = followFile(
+    path,
+    (text) => {
+      partial += text;
+      const lines = partial.split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) if (line.trim().length > 0) takeRecord(line, tally, onTurn);
+    },
+    { intervalMs, from },
+  );
   return {
     stop: async () => {
-      clearInterval(timer);
-      tick();
-      await reading;
-      return tally;
+      await follower.stop();
+      const before = await counted;
+      return { turns: before.turns + tally.turns, toolCalls: before.toolCalls + tally.toolCalls };
     },
   };
+}
+
+/** How many turns and tool calls a whole log reports; zero for a log that is not there. */
+export async function tallyTurnLog(path: string): Promise<TurnTally> {
+  const tally: TurnTally = { turns: 0, toolCalls: 0 };
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return tally;
+  }
+  for (const line of text.split("\n")) if (line.trim().length > 0) takeRecord(line, tally, () => undefined);
+  return tally;
 }

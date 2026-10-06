@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bridgeAvailable, CANCEL_GRACE_MS, PIPE_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
+import { bridgeAvailable, CANCEL_GRACE_MS, FINAL_TEXT_KEEP, PIPE_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
 
 // A stand-in for the worker: answers the probe with the verb the bridge
 // looks for, echoes its prompt as final text, and exits the way the test
@@ -88,6 +88,77 @@ describe("runBuildAttempt", () => {
     // The hook for the worker's turn reports is placed in the workspace and ignored by git there.
     expect(await readFile(join(workspace, ".corbits/hooks/.gitignore"), "utf8")).toContain("solution-builder-turns.sh");
   });
+
+  // #783: the worker's output and exit as files beside the attempt, so a
+  // host can let go of the worker and another can follow it.
+  onlyOnPosix("with record files, the worker's output and exit land beside the attempt and are followed", async () => {
+    const workspace = join(root, "recorded");
+    const record = { stdout: join(root, "recorded.stdout"), stderr: join(root, "recorded.stderr"), exit: join(root, "recorded.exit") };
+    const seen: string[] = [];
+    let started: { pid: number; worker: string } | null = null;
+    const outcome = await runBuildAttempt({
+      workspace,
+      prompt: "build it",
+      turnLog: join(root, "recorded.turns.jsonl"),
+      record,
+      onOutput: (chunk, channel) => seen.push(`${channel}:${chunk.trim()}`),
+      onStarted: (process) => {
+        started = { pid: process.pid, worker: process.worker };
+      },
+    });
+    expect(outcome.exitStatus).toBe(0);
+    expect(outcome.signal).toBeNull();
+    expect(outcome.finalText).toBe("final text for: build it\n");
+    expect(outcome.stderrTail).toContain("to stderr");
+    expect(seen).toContain("stdout:final text for: build it");
+    expect(seen).toContain("stderr:to stderr");
+    expect(await readFile(record.stdout, "utf8")).toBe("final text for: build it\n");
+    expect(await readFile(record.stderr, "utf8")).toBe("to stderr\n");
+    expect(await readFile(record.exit, "utf8")).toBe("0\n");
+    expect(started!.worker).toBe("corbits-code");
+    // A non-zero exit lands in the file the same way.
+    await writeFile(join(workspace, "FAIL"), "");
+    expect((await runBuildAttempt({ workspace, prompt: "again", turnLog: join(root, "recorded.turns.jsonl"), record })).exitStatus).toBe(3);
+    expect(await readFile(record.exit, "utf8")).toBe("3\n");
+  });
+
+  onlyOnPosix("a recorded worker that takes the packet on stdin gets it whole", async () => {
+    process.env.SOLUTIONS_BUILDER_WORKER = "claude-code";
+    try {
+      const workspace = join(root, "recorded-stdin");
+      const prompt = `start ${"z".repeat(200_000)} end`;
+      const record = { stdout: join(root, "rs.stdout"), stderr: join(root, "rs.stderr"), exit: join(root, "rs.exit") };
+      const outcome = await runBuildAttempt({ workspace, prompt, turnLog: join(root, "rs.turns.jsonl"), record });
+      expect(outcome.exitStatus).toBe(0);
+      // The record keeps the tail of a long final text; the file has it all.
+      expect(outcome.finalText.endsWith("zzz end\n")).toBe(true);
+      expect(outcome.finalText).toHaveLength(FINAL_TEXT_KEEP);
+      expect(await readFile(record.stdout, "utf8")).toBe(`final text for: ${prompt}\n`);
+    } finally {
+      delete process.env.SOLUTIONS_BUILDER_WORKER;
+    }
+  });
+
+  onlyOnPosix("a released worker runs on without the bridge, and its exit still lands in its file", async () => {
+    const workspace = join(root, "released");
+    await runBuildAttempt({ workspace, prompt: "x", turnLog: join(root, "r.turns.jsonl") });
+    await writeFile(join(workspace, "SLEEP"), "");
+    const record = { stdout: join(root, "released.stdout"), stderr: join(root, "released.stderr"), exit: join(root, "released.exit") };
+    const release = new AbortController();
+    let pid = 0;
+    const running = runBuildAttempt({ workspace, prompt: "x", turnLog: join(root, "r.turns.jsonl"), record, release: release.signal, onStarted: (process) => void (pid = process.pid) });
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    release.abort();
+    expect(await running).toBeNull();
+    // Still there, in its own group, with nothing of the bridge's to hold it.
+    expect(() => process.kill(-pid, 0)).not.toThrow();
+    expect(await Bun.file(record.exit).exists()).toBe(false);
+    // Ended from outside, the shell between still records how it ended.
+    process.kill(-pid, "SIGTERM");
+    const deadline = Date.now() + 5_000;
+    while (!(await Bun.file(record.exit).exists()) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await readFile(record.exit, "utf8")).trim()).toBe("143");
+  }, 15_000);
 
   onlyOnPosix("a packet far past one argument's limit reaches the worker whole", async () => {
     const workspace = join(root, "large");

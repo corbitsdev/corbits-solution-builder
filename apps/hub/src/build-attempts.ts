@@ -16,24 +16,32 @@
  *   <data>/builds/<projectId>/attempts/<n>.log        stdout, stderr and
  *                                                     turn reports, in order
  *   <data>/builds/<projectId>/attempts/<n>.turns.jsonl the worker's own hook log
+ *   <data>/builds/<projectId>/attempts/<n>.stdout     what the worker wrote, as files
+ *   <data>/builds/<projectId>/attempts/<n>.stderr       (#783), so no pipe ties
+ *   <data>/builds/<projectId>/attempts/<n>.exit         it to this host
  *   <data>/builds/<projectId>/attempts/<n>.json       the outcome, once ended
  *
  * The files are the record; they are what a host that restarts reads. The
- * process itself is memory, so a host that stops cancels every attempt it
- * is running (`stopBuildAttempts`, from the host's own stop) and records
- * each as ended by the signal. An attempt that was started and never
- * recorded as ended — the host was killed outright — is read back from
- * `<n>.started.json`: when the process group it names is still alive the
- * attempt is `detached` (running, but not followed by this host; cancel
- * still reaches it by group), and when it is gone the attempt is `lost`.
+ * worker writes to files, not to the host, so the host's own stop leaves
+ * it running (`stopBuildAttempts` releases each attempt) and the next host
+ * to start follows it again (`adoptRunningAttempts`): an eight-hour build
+ * is not lost to a restart. An attempt that was started and never
+ * recorded as ended is read back from `<n>.started.json`: when the
+ * process group it names is still alive the attempt is adopted and is
+ * `running` again, or `detached` until it is; when the group is gone and
+ * the worker left an exit status the attempt is recorded from its files,
+ * and when it left none it is `lost`. On Windows there are no process
+ * groups and no files: the worker is piped, and ends with the host.
  * `attempts/<n>/` is the convention `publish_workspace` reads
  * (`packages/tools-delivery`), kept so the archive and manifest it writes
  * name the attempt the same way.
  */
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
-import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
+import { BRIDGE_CAPABILITIES, BRIDGE_ID, CANCEL_GRACE_MS, groupAlive, killGroup, recordedExit, recordedOutput, runBuildAttempt, stderrTail, type BridgeOutcome } from "./corbits-exec.js";
+import { followFile } from "./file-follow.js";
+import { followTurnLog } from "./turn-reports.js";
 import { buildDocumentsRule, MANUAL_IMAGES_DIR, README_PATH, USER_MANUAL_PATH } from "@solutions-builder/specialist-runtime/build-documents";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
@@ -181,10 +189,21 @@ type OutcomeFile = { readonly outcome: BridgeOutcome; readonly continuedFrom: nu
  * restarts reads it to tell a worker that is still there from one that is
  * gone, and to reach the former.
  */
-type StartedFile = { readonly startedAt: string; readonly continuedFrom: number | null; readonly pid: number | null; readonly pgid: number | null };
+type StartedFile = {
+  readonly startedAt: string;
+  readonly continuedFrom: number | null;
+  readonly pid: number | null;
+  readonly pgid: number | null;
+  /** Which worker, so a host that adopts the attempt can record it; absent from a host before #783. */
+  readonly worker?: string;
+  readonly command?: string;
+};
 
 type InFlight = {
+  /** Aborted to end the worker: a cancel, or a host stop where the worker cannot run on. */
   readonly controller: AbortController;
+  /** Aborted to stop following and leave the worker running: the host's own stop. */
+  readonly release: AbortController;
   readonly startedAt: string;
   readonly continuedFrom: number | null;
   transcript: string;
@@ -205,6 +224,18 @@ const inFlight = new Map<string, InFlight>();
 const starting = new Map<string, Promise<unknown>>();
 
 const RUNNING_CONFLICT = "A build attempt is already running for this project. Cancel it, or wait for it to end.";
+
+/** Whether a worker here writes to files and can outlive the host. */
+const WORKERS_OUTLIVE_HOST = process.platform !== "win32";
+
+/** How often an adopted worker is looked for. */
+const ADOPTED_POLL_MS = 1_000;
+
+const recordFiles = (projectId: string, attempt: number) => ({
+  stdout: attemptFile(projectId, attempt, ".stdout"),
+  stderr: attemptFile(projectId, attempt, ".stderr"),
+  exit: attemptFile(projectId, attempt, ".exit"),
+});
 
 /** Set by `stopBuildAttempts`: from then on no attempt starts on this host. */
 let stopping = false;
@@ -242,8 +273,10 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   }
   const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
   if (!started) return null;
-  // Started by some run of the host and never recorded as ended. The
-  // process group says whether the worker is still there.
+  // Started by an earlier run of the host and never recorded as ended:
+  // followed again from here when it can be (#783), which is the common
+  // case; detached for the moment it cannot be; lost when it is gone.
+  if (await adoptAttempt(projectId, attempt, started)) return attemptRecord(projectId, attempt);
   const alive = typeof started.pgid === "number" && groupAlive(started.pgid);
   return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace, endedBy: null };
 }
@@ -338,13 +371,14 @@ export async function attemptPrompt(projectId: string, attempt: number): Promise
  * group a detached one still runs in. True when there was one to stop.
  */
 export async function cancelBuildAttempt(projectId: string, attempt: number): Promise<boolean> {
+  // The record first: reading it adopts a worker an earlier host left running.
+  const record = await attemptRecord(projectId, attempt);
   const live = inFlight.get(key(projectId, attempt));
   if (live) {
     live.endedBy = "cancel";
     live.controller.abort();
     return true;
   }
-  const record = await attemptRecord(projectId, attempt);
   if (record?.state !== "detached") return false;
   const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
   if (typeof started?.pgid !== "number") return false;
@@ -353,22 +387,142 @@ export async function cancelBuildAttempt(projectId: string, attempt: number): Pr
 }
 
 /**
- * Cancels every attempt this host is running and waits for each record to
- * be written: the host's own stop calls this, so a worker never outlives
- * the host that started it and the attempt is recorded as ended by the
- * signal rather than found lost on the next start.
+ * The host's own stop. Every attempt it is following is released to run
+ * on (#783): the worker writes to files, not to this process, and the
+ * next host to start follows it again. Where a worker cannot outlive the
+ * host (Windows: piped, no process group) it is cancelled and recorded as
+ * ended by the host's stop. Either way nothing starts after.
  */
 export async function stopBuildAttempts(): Promise<void> {
   stopping = true;
   // A start between its reservation and its registration is not in flight
-  // yet; it is waited for, so the worker it is about to spawn is ended too.
+  // yet; it is waited for, so the worker it is about to spawn is handled too.
   await Promise.allSettled([...starting.values()]);
-  const running = [...inFlight.values()];
-  for (const live of running) {
-    live.endedBy ??= "host_stop";
-    live.controller.abort();
+  const running = [...inFlight.entries()];
+  for (const [entry, live] of running) {
+    if (WORKERS_OUTLIVE_HOST) {
+      console.log(`[build] leaving attempt ${entry} running; the next host to start will follow it`);
+      live.release.abort();
+    } else {
+      live.endedBy ??= "host_stop";
+      live.controller.abort();
+    }
   }
-  await Promise.all(running.map((live) => live.done));
+  await Promise.all(running.map(([, live]) => live.done));
+}
+
+/**
+ * Follows again every attempt an earlier run of the host left running,
+ * and records every one that ended while no host was there. Called once
+ * when the host starts; `attemptRecord` does the same for one attempt on
+ * demand. Returns how many are being followed again.
+ */
+export async function adoptRunningAttempts(): Promise<number> {
+  let adopted = 0;
+  let projects: string[];
+  try {
+    projects = (await readdir(buildsRoot(), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return 0;
+  }
+  for (const projectId of projects) {
+    if (!/^[A-Za-z0-9_-]+$/.test(projectId)) continue;
+    for (const attempt of await attemptNumbers(projectId)) {
+      if (inFlight.has(key(projectId, attempt))) continue;
+      if (await readJson<OutcomeFile>(attemptFile(projectId, attempt, ".json"))) continue;
+      const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
+      if (started && (await adoptAttempt(projectId, attempt, started))) adopted += 1;
+    }
+  }
+  return adopted;
+}
+
+/**
+ * Takes up an attempt started by an earlier run of the host: its worker
+ * still running, or ended with its exit on disk. Idempotent: an attempt
+ * already in flight is left as it is. False when there is nothing to take
+ * up — no process group recorded, or the worker gone without an exit,
+ * which is `lost`.
+ */
+async function adoptAttempt(projectId: string, attempt: number, started: StartedFile): Promise<boolean> {
+  const entry = key(projectId, attempt);
+  if (inFlight.has(entry)) return true;
+  // A stopping host has just released what it followed; it takes nothing up.
+  if (stopping || !WORKERS_OUTLIVE_HOST || typeof started.pgid !== "number") return false;
+  const pgid = started.pgid;
+  const files = recordFiles(projectId, attempt);
+  const exitKnown = (await recordedExit(files.exit)) !== null;
+  if (!exitKnown && !groupAlive(pgid)) return false;
+
+  const workspace = attemptWorkspace(projectId, attempt);
+  const logPath = attemptFile(projectId, attempt, ".log");
+  const turnLog = attemptFile(projectId, attempt, ".turns.jsonl");
+  const controller = new AbortController();
+  const release = new AbortController();
+  const live: InFlight = {
+    controller,
+    release,
+    startedAt: started.startedAt,
+    continuedFrom: started.continuedFrom,
+    transcript: (await readFile(logPath, "utf8").catch(() => "")).slice(-TRANSCRIPT_KEEP),
+    endedBy: null,
+    done: Promise.resolve(),
+  };
+  inFlight.set(entry, live);
+  const say = (chunk: string) => {
+    live.transcript = (live.transcript + chunk).slice(-TRANSCRIPT_KEEP);
+    void appendFile(logPath, chunk).catch(() => undefined);
+  };
+  // From here on: what the worker wrote while no host was there is in its
+  // files, not repeated into the log.
+  const followers = [followFile(files.stdout, say, { from: "end" }), followFile(files.stderr, say, { from: "end" })];
+  const turns = followTurnLog(turnLog, say, 500, "end");
+  say(`── the host started again and is following the worker from here\n`);
+  controller.signal.addEventListener("abort", () => killGroup(pgid), { once: true });
+
+  live.done = (async () => {
+    try {
+      // Until the worker leaves its exit, or is gone, or this host stops too.
+      while (!release.signal.aborted && (await recordedExit(files.exit)) === null && groupAlive(pgid)) {
+        await new Promise((resolve) => setTimeout(resolve, ADOPTED_POLL_MS));
+      }
+      if (release.signal.aborted) return;
+      // What the worker left running in its group ends with it, as when
+      // this host drove it; the exit file says the worker itself is done.
+      if (groupAlive(pgid)) {
+        killGroup(pgid);
+        const deadline = Date.now() + CANCEL_GRACE_MS + 1_000;
+        while (groupAlive(pgid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      const [stdout, stderr] = await recordedOutput(files);
+      const tally = await turns.stop();
+      const outcome: BridgeOutcome = {
+        bridgeId: BRIDGE_ID,
+        worker: started.worker ?? "",
+        command: started.command ?? "",
+        available: true,
+        exitStatus: await recordedExit(files.exit),
+        signal: null,
+        finalText: stdout,
+        stderrTail: stderrTail(stderr),
+        workspace,
+        turnLog,
+        turns: tally.turns,
+        toolCalls: tally.toolCalls,
+        startedAt: started.startedAt,
+        endedAt: new Date().toISOString(),
+        checkpointRef: null,
+      };
+      await writeFile(
+        attemptFile(projectId, attempt, ".json"),
+        `${JSON.stringify({ outcome, continuedFrom: started.continuedFrom, capabilities: BRIDGE_CAPABILITIES, endedBy: live.endedBy } satisfies OutcomeFile, null, 2)}\n`,
+      );
+    } finally {
+      await Promise.all(followers.map((follower) => follower.stop()));
+      inFlight.delete(entry);
+    }
+  })();
+  return true;
 }
 
 /**
@@ -443,18 +597,20 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
   const startedAt = new Date().toISOString();
   await writeFile(attemptFile(projectId, attempt, ".prompt.txt"), prompt);
   const startedFile = attemptFile(projectId, attempt, ".started.json");
-  const writeStarted = (process: { pid: number | null; pgid: number | null }) =>
+  const writeStarted = (process: { pid: number | null; pgid: number | null; worker?: string; command?: string }) =>
     writeFile(startedFile, `${JSON.stringify({ startedAt, continuedFrom: continueFrom, ...process } satisfies StartedFile)}\n`);
   await writeStarted({ pid: null, pgid: null });
   const logPath = attemptFile(projectId, attempt, ".log");
   await writeFile(logPath, "");
 
   const controller = new AbortController();
+  const release = new AbortController();
   // Registered before the first await of the run: the attempt is "running"
   // from the moment the caller has its number, so a cancel can arrive
   // before the process is up and must still reach the worker.
   const live: InFlight = {
     controller,
+    release,
     startedAt,
     continuedFrom: continueFrom,
     transcript: "",
@@ -476,6 +632,8 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
         prompt,
         turnLog: attemptFile(projectId, attempt, ".turns.jsonl"),
         signal: controller.signal,
+        record: recordFiles(projectId, attempt),
+        release: release.signal,
         ...(continueFrom !== null ? { continueFrom: attemptWorkspace(projectId, continueFrom) } : {}),
         onOutput: (chunk) => {
           live.transcript = (live.transcript + chunk).slice(-TRANSCRIPT_KEEP);
@@ -484,6 +642,11 @@ async function startReserved(args: { projectId: string; prompt: BuildPromptInput
         },
         onStarted: (process) => void writeStarted(process).catch(() => undefined),
       });
+      if (outcome === null) {
+        // Released: the worker runs on, and the next host to start follows it.
+        log.write(`── the host is stopping; the worker runs on, and will be followed again when the host starts\n`);
+        return null;
+      }
       await record(outcome);
       return outcome;
     } catch (cause) {
