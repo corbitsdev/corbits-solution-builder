@@ -63,6 +63,15 @@ describe("assembleBuildPrompt", () => {
   test("a continued attempt is told the earlier work is in the directory", () => {
     const prompt = assembleBuildPrompt({ ...input, continuing: true });
     expect(prompt).toContain("An earlier attempt's work is already in the current directory");
+    expect(prompt).not.toContain("WHAT THE PERSON FOUND");
+    // #789: the person's note to the worker rides in the continuation packet, ahead of the plan.
+    const noted = assembleBuildPrompt({ ...input, continuing: true, continueNote: "  The dev instructions never build the web bundle, so / is a 404.\n" });
+    const section = noted.indexOf("--- WHAT THE PERSON FOUND IN THE EARLIER ATTEMPT ---\nThe dev instructions never build the web bundle, so / is a 404.\n\nDo what this asks before anything else");
+    expect(section).toBeGreaterThan(noted.indexOf("Continue from it"));
+    expect(section).toBeLessThan(noted.indexOf("--- PLAN ---"));
+    // A note on a fresh start is not a continuation and is not sent; a blank one is nothing.
+    expect(assembleBuildPrompt({ ...input, continuing: false, continueNote: "fix it" })).not.toContain("WHAT THE PERSON FOUND");
+    expect(assembleBuildPrompt({ ...input, continuing: true, continueNote: "   " })).not.toContain("WHAT THE PERSON FOUND");
     expect(prompt).toContain("do not start over");
   });
 

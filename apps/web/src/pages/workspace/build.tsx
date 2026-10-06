@@ -228,6 +228,10 @@ export function BuildPanel({
   const [planText, setPlanText] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
+  // The one thing a person can say to the worker (#789): what they found
+  // in the last attempt, sent in the next attempt's packet. The chat on
+  // the left goes to the supervisor, which the worker never reads.
+  const [continueNote, setContinueNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -396,7 +400,9 @@ export function BuildPanel({
   const start = (continueFrom?: number) =>
     run(continueFrom === undefined ? "start" : "continue", async () => {
       const material = await buildPromptMaterial(tenantId, detail.nodes, freeze);
-      const started = await api.startBuildAttempt(detail.project.id, material, continueFrom);
+      const note = continueFrom === undefined ? "" : continueNote.trim();
+      const started = await api.startBuildAttempt(detail.project.id, note ? { ...material, continueNote: note } : material, continueFrom);
+      if (note) setContinueNote("");
       setSelected(started.attempt.attempt);
       await refreshAttempts();
     });
@@ -490,6 +496,8 @@ export function BuildPanel({
             messages={messages}
             value={composer}
             onValueChange={setComposer}
+            // Said where it is typed (#789): this reaches the supervisor, not the worker.
+            placeholder={`To ${agentFor(8).title.toLowerCase()}, who writes the build status. The worker reads the note under the toolbar, not this…`}
             onSend={() => {
               const body = composer;
               setComposer("");
@@ -556,7 +564,11 @@ export function BuildPanel({
                 variant="primary"
                 loading={busy === "continue"}
                 disabled={!!running || busy !== null || lastEnded === null}
-                title={lastEnded ? `A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included.` : "Nothing has ended yet to continue from."}
+                title={
+                  lastEnded
+                    ? `A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below in its packet.`
+                    : "Nothing has ended yet to continue from."
+                }
                 onClick={() => lastEnded && void start(lastEnded.attempt)}
               >
                 {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
@@ -583,6 +595,26 @@ export function BuildPanel({
                 Approve and continue
               </Button>
             </div>
+            {attempts.length > 0 ? (
+              // The note to the worker (#789), beside the button that sends it.
+              <div className="document-tools build-note">
+                <label className="build-note-label" htmlFor="build-continue-note">
+                  For the worker, on the next attempt
+                </label>
+                <textarea
+                  id="build-continue-note"
+                  className="field"
+                  rows={3}
+                  placeholder={lastEnded ? `What you found in attempt ${String(lastEnded.attempt)} and want changed, e.g. "bun run dev serves a 404 at /: the development instructions never build the web bundle."` : "Enabled once an attempt has ended."}
+                  value={continueNote}
+                  disabled={lastEnded === null || !!running}
+                  onChange={(event) => setContinueNote(event.target.value)}
+                />
+                <p className="inline-note">
+                  Goes to the worker in the packet of the attempt "Continue from attempt {lastEnded ? String(lastEnded.attempt) : "N"}" starts, ahead of the plan. The chat on the left goes to {agentFor(8).title.toLowerCase()}, who writes the build status; the worker never reads it.
+                </p>
+              </div>
+            ) : null}
             {attempts.length > 0 ? (
               // What the record step probes, beside the button that uses it.
               <div className="document-tools build-probe">

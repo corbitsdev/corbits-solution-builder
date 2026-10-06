@@ -57,6 +57,8 @@ const StartBody = type({
     planRef: "string",
     "files?": [{ path: "string", content: "string" }, "[]"],
     "language?": "string",
+    /** The person's note to the worker on a continuation (#789). */
+    "continueNote?": "string<=20000",
   },
   "continueFrom?": "number",
 });

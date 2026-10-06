@@ -299,6 +299,8 @@ export type BuildPromptMaterial = {
   files?: { path: string; content: string }[];
   /** The workspace's output language, for the documents the build ships (#733). */
   language?: string;
+  /** What the person found in the earlier attempt and wants changed (#789); sent only with a continuation. */
+  continueNote?: string;
 };
 
 export class ApiFailure extends Error {
