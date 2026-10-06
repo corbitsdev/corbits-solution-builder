@@ -464,16 +464,11 @@ export function BuildPanel({
   const ended = current !== null && current.state === "ended" && current.outcome !== null;
   const recorded = current !== null && attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
-  // The one toolbar every action lives in (#787): each button keeps its
-  // place and is disabled, never hidden, when it does not apply. Record
-  // acts on the attempt in view once it has ended; once recorded, the
-  // same button archives it again.
+  // The one toolbar every action lives in (#787), in a fixed order; a
+  // button shows only while it can act, so the row never offers a choice
+  // that is not there. Record acts on the attempt in view once it has
+  // ended; once recorded, the same button archives it again.
   const recordable = ended ? current : null;
-  const recordLabel = recordable
-    ? recorded
-      ? `Re-archive attempt ${String(recordable.attempt)}'s files`
-      : `Record attempt ${String(recordable.attempt)} and brief the supervisor`
-    : "Record the attempt and brief the supervisor";
   // What the archive does not hold (#791), said beside it and on its button.
   const archiveCaveat = running
     ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until it is recorded.`
@@ -558,65 +553,65 @@ export function BuildPanel({
               </Banner>
             ) : null}
             <div className="document-tools build-actions">
-              <Button
-                variant={attempts.length === 0 ? "primary" : "secondary"}
-                loading={busy === "start"}
-                disabled={!!running || busy !== null}
-                {...(attempts.length === 0 ? {} : { title: "A new attempt in a fresh directory, from the frozen plan alone; earlier attempts' directories are kept." })}
-                onClick={() => void start()}
-              >
-                {attempts.length === 0 ? "Start the build attempt" : "Restart the build from the beginning"}
-              </Button>
-              <Button
-                variant="primary"
-                loading={busy === "continue"}
-                disabled={!!running || busy !== null || lastEnded === null}
-                title={
-                  lastEnded
-                    ? `A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below in its packet.`
-                    : "Nothing has ended yet to continue from."
-                }
-                onClick={() => lastEnded && void start(lastEnded.attempt)}
-              >
-                {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
-              </Button>
-              <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
-                Cancel the build attempt
-              </Button>
-              <Button
-                variant={recordable && !recorded ? "primary" : "secondary"}
-                loading={busy === "record"}
-                disabled={!recordable || busy !== null || !address || !!running}
-                title={
-                  recordable
-                    ? recorded
+              {running ? null : (
+                <Button
+                  variant={attempts.length === 0 ? "primary" : "secondary"}
+                  loading={busy === "start"}
+                  disabled={busy !== null}
+                  {...(attempts.length === 0 ? {} : { title: "A new attempt in a fresh directory, from the frozen plan alone; earlier attempts' directories are kept." })}
+                  onClick={() => void start()}
+                >
+                  {attempts.length === 0 ? "Start the build attempt" : "Restart the build from the beginning"}
+                </Button>
+              )}
+              {!running && lastEnded ? (
+                <Button
+                  variant="primary"
+                  loading={busy === "continue"}
+                  disabled={busy !== null}
+                  title={`A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below in its packet.`}
+                  onClick={() => void start(lastEnded.attempt)}
+                >
+                  Continue from attempt {String(lastEnded.attempt)}
+                </Button>
+              ) : null}
+              {cancellable ? (
+                <Button variant="destructive" loading={busy === "cancel"} disabled={busy !== null} onClick={() => void cancel(cancellable.attempt)}>
+                  Cancel the build attempt
+                </Button>
+              ) : null}
+              {recordable && !running ? (
+                <Button
+                  variant={recorded ? "secondary" : "primary"}
+                  loading={busy === "record"}
+                  disabled={busy !== null || !address}
+                  title={
+                    recorded
                       ? "No build runs. The directory the worker left is packaged again as it is, a new archive and manifest are written beside the earlier ones, and the supervisor is briefed on the new record."
                       : "Packages the directory the worker left into an archive, records it as the build evidence, and briefs the supervisor, who writes the build status."
-                    : "Enabled once the attempt in view has ended."
-                }
-                onClick={() => recordable && void record(recordable)}
-              >
-                {recordLabel}
-              </Button>
-              <Button
-                variant="secondary"
-                loading={busy === "download"}
-                disabled={!archive || busy !== null}
-                title={archive ? `The recorded archive of attempt ${archivedAttempt === null ? "?" : String(archivedAttempt)}'s directory, as a tar.gz.${archiveCaveat ? ` ${archiveCaveat}` : ""}` : "Enabled once an attempt is recorded."}
-                onClick={() => archive && void run("download", () => downloadBuild(tenantId, archive))}
-              >
-                {archive ? `Download attempt ${archivedAttempt === null ? "the" : String(archivedAttempt)}'s archive (.tar.gz)` : "Download the archive (.tar.gz)"}
-              </Button>
-              <Button
-                variant="primary"
-                loading={approving}
-                // The workflow allows approval once an archive is recorded; the page also waits for a running attempt (#791).
-                disabled={!canApprove || !address || !evidence.ready}
-                {...(evidence.reason ? { title: evidence.reason } : {})}
-                onClick={onApprove}
-              >
-                Approve and continue
-              </Button>
+                  }
+                  onClick={() => void record(recordable)}
+                >
+                  {recorded ? `Re-archive attempt ${String(recordable.attempt)}'s files` : `Record attempt ${String(recordable.attempt)} and brief the supervisor`}
+                </Button>
+              ) : null}
+              {archive ? (
+                <Button
+                  variant="secondary"
+                  loading={busy === "download"}
+                  disabled={busy !== null}
+                  title={`The recorded archive of attempt ${archivedAttempt === null ? "?" : String(archivedAttempt)}'s directory, as a tar.gz.${archiveCaveat ? ` ${archiveCaveat}` : ""}`}
+                  onClick={() => void run("download", () => downloadBuild(tenantId, archive))}
+                >
+                  Download attempt {archivedAttempt === null ? "the" : String(archivedAttempt)}'s archive (.tar.gz)
+                </Button>
+              ) : null}
+              {/* The workflow allows approval once an archive is recorded; the page also waits for a running attempt (#791). */}
+              {canApprove && evidence.ready ? (
+                <Button variant="primary" loading={approving} disabled={!address} onClick={onApprove}>
+                  Approve and continue
+                </Button>
+              ) : null}
             </div>
             {attempts.length > 0 ? (
               // The note to the worker (#789), beside the button that sends it.
