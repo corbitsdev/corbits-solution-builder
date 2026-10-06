@@ -21,9 +21,20 @@ export type ComposedFold = {
   readonly body: string;
   /** A line shown outside the fold: the cue's or the ask's own sentence. */
   readonly lead: string | null;
+  /** The app wrote it, not the person: the chat must not label it as theirs. */
+  readonly byApp?: true;
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
+const BRIEF_SUBJECT = /^\[brief:\d+\]/;
+
+/**
+ * The subject a supervisor brief is sent under (CL-9940). A person's own
+ * message never carries it, so it, not the body, says the app wrote the mail.
+ */
+export function briefSubject(attempt: number): string {
+  return `[brief:${String(attempt)}] Build attempt ${String(attempt)}`;
+}
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /** The send-back cue's sentence, its marker gone. */
@@ -81,10 +92,13 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   if (material) return material;
   // The supervisor's briefs (#695): the record of an ended attempt, and the
   // progress of a running one. The chat shows the line that says which; the
-  // worker's turn lines and the record stay behind the fold.
+  // worker's turn lines and the record stay behind the fold. A brief sent
+  // before CL-9940 has no subject marker: it still folds, but stays labelled
+  // as the person's, since its body alone cannot prove the app wrote it.
   const brief = /^(Build attempt \d+ (?:is still running|has ended)[^\n]*)\n/.exec(message.body);
   if (brief) {
-    return { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
+    const fold = { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
+    return message.subject && BRIEF_SUBJECT.test(message.subject) ? { ...fold, byApp: true } : fold;
   }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);

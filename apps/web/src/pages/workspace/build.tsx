@@ -40,6 +40,7 @@ const THREAD_BACKSTOP_MS = 20_000;
 import { BuildFile, downloadBuild } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
+import { briefSubject } from "./composed-mail.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -345,7 +346,7 @@ export function BuildPanel({
     briefing.current = true;
     const body = composeProgressBrief({ attempt: running.attempt, startedAt: running.startedAt, now: new Date().toISOString(), log, worker: worker?.worker.label ?? null });
     api
-      .sendStageMail(tenantId, address, { body })
+      .sendStageMail(tenantId, address, { body, subject: briefSubject(running.attempt) })
       .then(() => load())
       .catch(() => {
         // The next poll tries again.
@@ -441,6 +442,7 @@ export function BuildPanel({
         manifest: packaged.manifest,
       });
       await api.sendStageMail(tenantId, address, {
+        subject: briefSubject(attempt.attempt),
         body: composeSupervisorBrief({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
