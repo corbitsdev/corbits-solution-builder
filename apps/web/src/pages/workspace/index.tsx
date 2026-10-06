@@ -33,8 +33,7 @@ import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudienceGate, AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, CopyButton, GuideDock, Screen, documentName, stageName } from "../../components.jsx";
+import { Banner, Button, CopyButton, GuideDock, documentName, stageName } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { specialistActivity } from "./specialist-activity.ts";
@@ -1508,85 +1507,5 @@ function DesignPanel({
         }}
       />
     </div>
-  );
-}
-
-/**
- * The senior engineer panel's four independent reviews.
- *
- * Shown side by side and never merged. Section 8 makes the four principals
- * independent, and a UI that concatenates them into one scrolling document
- * undoes that at the last step — the reader has to be able to see that
- * security and platform reached their verdicts separately.
- */
-export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId: string }) {
-  const live = reviews.filter((node) => node.supersededByNodeId === null);
-  const [openId, setOpenId] = useState<string | null>(live[0]?.id ?? null);
-  const [contents, setContents] = useState(new Map<string, string>());
-
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      live.map(async (node) => {
-        const result = await api.artifactContent(tenantId, node.id).catch(() => null);
-        return [node.id, result?.content ?? UNREADABLE] as const;
-      }),
-    ).then((entries) => {
-      if (!cancelled) setContents(new Map(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [live.map((node) => node.id).join(","), tenantId]);
-
-  const open = live.find((node) => node.id === openId) ?? live[0] ?? null;
-  const body = open ? (contents.get(open.id) ?? "") : "";
-  const verdictOf = (text: string) => {
-    const match = /##\s*Verdict\s*\n+([^\n#]+)/i.exec(text);
-    return match?.[1]?.trim() ?? null;
-  };
-  // Folded, the line carries every principal's verdict, so the four can be
-  // compared without opening any of them.
-  const verdicts = live
-    .map((node) => `${node.variant ?? node.title}: ${verdictOf(contents.get(node.id) ?? "") ?? "…"}`)
-    .join(" · ");
-
-  return (
-    <Screen
-      title="Independent engineering review"
-      description="Four principals reviewed this plan separately. Their findings are not merged."
-      tight
-    >
-      <details className="document-fold">
-        <summary className="document-fold-summary">
-          <span className="document-fold-title">Reviews</span>
-          <span className="document-fold-digest">{verdicts}</span>
-        </summary>
-        <div className="document-fold-body">
-          <Tabs
-            label="Panel principals"
-            active={open?.id ?? ""}
-            onChange={setOpenId}
-            tabs={live.map((node) => ({
-              id: node.id,
-              label: node.variant ?? node.title,
-            }))}
-          >
-            {/* The review reads inside the panel the tab controls, so switching
-                principals announces the finding rather than an empty region. */}
-            {() => (
-              <>
-                <p className="inline-note">
-                  {open ? (verdictOf(contents.get(open.id) ?? "") ?? "No verdict stated.") : null}
-                </p>
-                <div className="document-body">
-                  {body ? <Markdown source={body} /> : <p className="inline-note">Loading…</p>}
-                </div>
-              </>
-            )}
-          </Tabs>
-        </div>
-      </details>
-    </Screen>
   );
 }
