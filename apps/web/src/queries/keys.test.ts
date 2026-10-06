@@ -37,6 +37,13 @@ describe("keys", () => {
     expect(keys.thread.of("t", ["b@x", "a@x"])).toEqual(keys.thread.of("t", ["a@x", "b@x"]));
   });
 
+  test("every key's prefix is its own name, so no two resources share one", () => {
+    for (const [name, entry] of Object.entries(keys)) {
+      const prefix: string = "all" in entry ? entry.all[0] : "of" in entry ? entry.of("")[0] : entry[0];
+      expect(prefix).toBe(name);
+    }
+  });
+
   test("the active model key tells the workspace default from a project's stage", () => {
     expect(keys.activeModel.of()).toEqual(["activeModel", null, null]);
     expect(keys.activeModel.of("p", 2)).not.toEqual(keys.activeModel.of());
