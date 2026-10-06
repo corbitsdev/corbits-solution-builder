@@ -463,11 +463,12 @@ export async function specialistEntryIsCurrent(
   packedWorkflow: string,
   guidance: string,
 ): Promise<boolean> {
-  const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
+  const [deployed, deployedGuidance] = await Promise.all([
+    readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`),
+    readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_GUIDANCE_PATH}`),
+  ]);
   if (deployed === null) return true;
-  if (packedWorkflow !== deployed) return false;
-  const deployedGuidance = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_GUIDANCE_PATH}`);
-  return deployedGuidance === guidanceModule(guidance);
+  return packedWorkflow === deployed && deployedGuidance === guidanceModule(guidance);
 }
 
 /**
