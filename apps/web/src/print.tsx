@@ -18,7 +18,8 @@
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { Printer } from "lucide-react";
-import { api, type ArtifactNode } from "./client.js";
+import { toast } from "sonner";
+import { api, ApiFailure, type ArtifactNode } from "./client.js";
 import { Button, documentName, stageName } from "./components.jsx";
 import { Markdown } from "./markdown.jsx";
 
@@ -113,7 +114,10 @@ export function printHtmlDocument(html: string): void {
 /** Opens the document for printing. `content` may be null; it is fetched then. */
 export function printArtifact(node: ArtifactNode, tenantId: string, content: string | null = null): void {
   if (isPage(node)) {
-    void printPage(node, tenantId, content);
+    printPage(node, tenantId, content).catch((cause: unknown) => {
+      const reason = cause instanceof ApiFailure ? cause.detail.message : String(cause);
+      toast.error(`${documentLabel(node)} could not be printed: ${reason}`);
+    });
     return;
   }
   set({ node, content, tenantId });
