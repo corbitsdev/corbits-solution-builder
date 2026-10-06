@@ -285,6 +285,8 @@ export type BuildAttempt = {
    * before it was counted.
    */
   usage?: { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; source: string; models: string[] } | null;
+  /** What the person asked this attempt for, on a continuation (#789); null when nothing was asked, absent from a host before it was kept. */
+  note?: string | null;
 };
 
 /** The frozen material the host assembles the worker's prompt from. */

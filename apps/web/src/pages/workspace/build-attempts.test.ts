@@ -43,7 +43,10 @@ describe("buildEvidenceState", () => {
   });
 
   test("ready once the ended attempt's archive is recorded", () => {
-    expect(buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }])).toEqual({ ready: true, reason: null });
+    expect(buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }])).toEqual({ ready: true, reason: null, waitingOn: null });
+    // #791: a running attempt is named, in a sentence and in a few words.
+    const running = buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }, { attempt: 3, state: "running" }]);
+    expect(running).toEqual({ ready: false, reason: "Attempt 3 is still running. Its work can be recorded once the worker has ended, and the stage approved after that.", waitingOn: "attempt 3, still running" });
   });
 
   test("a text/markdown node is chat prose, not the archive", () => {
@@ -59,7 +62,8 @@ describe("buildEvidenceState", () => {
   test("not ready when a later attempt ended and was not packaged", () => {
     const state = buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }, { attempt: 3, state: "ended" }]);
     expect(state.ready).toBe(false);
-    expect(state.reason).toContain("Attempt 3 has not been packaged");
+    expect(state.reason).toContain("Attempt 3 has not been recorded yet");
+    expect(state.waitingOn).toBe("attempt 3 being recorded");
   });
 
   test("an archive that names no attempt is taken as the current one", () => {

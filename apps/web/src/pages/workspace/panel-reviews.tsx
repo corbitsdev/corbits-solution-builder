@@ -161,11 +161,11 @@ export function usePanelReviews({
 }
 
 /** What the companion says of the chosen review. */
-export function panelReviewMeta(state: Pick<PanelReviewState, "status">, hasInput: boolean): string {
+export function panelReviewMeta(state: Pick<PanelReviewState, "status">, hasInput: boolean, waitingOn: string | null = null): string {
   if (state.status === "starting" || state.status === "waiting") return "drafting";
   if (state.status === "done") return "draft";
   if (state.status === "error") return "failed";
-  return hasInput ? "not yet requested" : "waiting on build evidence";
+  return hasInput ? "not yet requested" : `waiting on ${waitingOn ?? "build evidence"}`;
 }
 
 /**
@@ -178,6 +178,7 @@ export function PanelReviewsCompanion({
   tenantId,
   stage,
   reviewInput,
+  waitingOn = null,
   reviewNodes,
   onDocumentsChanged,
   onDocuments,
@@ -186,6 +187,8 @@ export function PanelReviewsCompanion({
   tenantId: string;
   stage: 6 | 8;
   reviewInput: string | null;
+  /** What the input waits on, in a few words, when there is none yet (#791). */
+  waitingOn?: string | null;
   reviewNodes: ReadonlyMap<string, ArtifactNode>;
   onDocumentsChanged?: () => void;
   /** The reviews as they stand, as documents a message to the stage's specialist may attach. */
@@ -216,7 +219,7 @@ export function PanelReviewsCompanion({
             </option>
           ))}
         </select>
-        <span className="inline-note">{panelReviewMeta(current, reviewInput !== null)}</span>
+        <span className="inline-note">{panelReviewMeta(current, reviewInput !== null, waitingOn)}</span>
         <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => panel.requestReview(role.key)}>
           {current.status === "done" ? "Request again" : "Request review"}
         </Button>

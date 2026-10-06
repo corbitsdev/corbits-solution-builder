@@ -1310,6 +1310,7 @@ export function StageWorkspace({
                   .join("\n\n")
               : null
           }
+          waitingOn={decisions.stage8Evidence?.waitingOn ?? null}
           reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
