@@ -22,6 +22,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { watch } from "node:fs";
 import { Hono } from "hono";
 import { openDatabase } from "./db.js";
+import { startCompaction } from "./vacuum.js";
 import { hostIdentity } from "./identity.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
@@ -146,6 +147,13 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       console.log(`Applied Interchange migrations: ${migrated.applied.join(", ")}`);
     }
   }
+
+  // Before anything is served: pglite has no autovacuum, and a table a
+  // reconciler rewrites all day grows until every query over it stalls
+  // the host. The first pass runs now, with nothing waiting on it, and
+  // one runs every few minutes after that.
+  const compaction = startCompaction(host.raw, (line) => console.log(line));
+  await compaction.first;
 
   const hubEndpoint = await ensureHub();
   console.log(`Interchange hub: ${hubEndpoint.detail}`);
@@ -458,6 +466,7 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       if (hubIsMounted()) hub().stopReconcile();
       await options.onStop?.().catch((cause: unknown) => console.error("Stopping the product's own work failed:", cause));
       await server.stop(true);
+      await compaction.stop();
       await stopSpawnedSidecars(join(dataDirectory(), "hub")).catch(() => 0);
       await host.close();
       markStopped();
