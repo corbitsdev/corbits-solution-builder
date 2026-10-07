@@ -245,6 +245,7 @@
 }
 
 .conv {
+  position: relative;
   border-right: 1px solid var(--wb-border);
   display: flex;
   flex-direction: column;
@@ -473,11 +474,12 @@
 }
 
 /* While the specialist gets ready: one tip at a time at the foot of the
-   window, centred on the guide ring (.guide-fab, 44px, inset --space-6) so
-   the two read as one baseline; a tip too long for the width wraps upward.
+   chat column, level with the guide ring (.guide-fab, 44px, inset --space-6)
+   so the two read as one baseline; a tip too long for the width wraps upward.
+   Held to the column, not the window, so an open document never covers it.
    The side padding clears the ring on both sides so the text stays centred. */
 .conv .waiting-tips {
-  position: fixed;
+  position: absolute;
   left: 0;
   right: 0;
   bottom: var(--space-6);
