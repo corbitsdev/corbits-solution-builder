@@ -22,7 +22,12 @@ describe("agentsInstructions", () => {
     expect(text).toContain("It MUST NOT override the PRD.");
     expect(text).toContain("Record unresolved product decisions in QUESTIONS.md");
     expect(text).toContain("Implementation is complete only when AC-1 through AC-3 pass.");
-    expect(text).toContain("A package, service or key you cannot reach is a blocker");
+    const order = ["Implementation is complete only when", "## Build order", "Build in this order.", "## What the plan names is used, never stood in for", "A key or service you cannot reach", "## Documents every build ships"];
+    let last = -1;
+    for (const part of order) {
+      expect(text.indexOf(part)).toBeGreaterThan(last);
+      last = text.indexOf(part);
+    }
   });
 
   test("says what is missing rather than naming a file that is not there", () => {

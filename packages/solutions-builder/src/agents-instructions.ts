@@ -7,6 +7,7 @@
 import { extractRequirementItems, mintRequirementEntries } from "./requirements.js";
 import { buildDocumentsRule } from "@solutions-builder/specialist-runtime/build-documents";
 import { BUILD_DEPENDENCIES_RULE } from "@solutions-builder/specialist-runtime/build-dependencies";
+import { BUILD_ORDER_RULE } from "@solutions-builder/specialist-runtime/build-order";
 
 /** The names the instructions refer to; a caller passes what its package actually holds. */
 export type AgentsFiles = {
@@ -67,6 +68,10 @@ export function agentsInstructions(files: AgentsFiles, requirementsMarkdown: str
     "silently choosing behavior.",
     "",
     range ? `Implementation is complete only when ${range} pass.` : "Implementation is complete only when every acceptance criterion in the PRD passes.",
+    "",
+    "## Build order",
+    "",
+    BUILD_ORDER_RULE,
     "",
     "## What the plan names is used, never stood in for",
     "",
