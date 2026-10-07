@@ -350,6 +350,7 @@ function Stakeholders({
 
 /** What the strip says while `name`'s package is being written. */
 function packageWork(name: string): string {
+  if (isYou({ name })) return "Writing your approval package";
   return `Writing ${name}'s package`;
 }
 
