@@ -49,6 +49,8 @@ these, are listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
 
 ## Read next
 
+- [docs/USER-MANUAL.md](docs/USER-MANUAL.md): how to use the app, from first
+  run to delivery, with pictures.
 - [docs/PRODUCT.md](docs/PRODUCT.md): what it is, who it is for, the nine
   stages, the promises, and what is not finished.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the components, the layout of
