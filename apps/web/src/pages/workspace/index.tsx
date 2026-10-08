@@ -1134,7 +1134,7 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {!agent.error ? (
+      {agentAddress && !agent.error ? (
         <div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>
           {/* The flame burns while a specialist turn is in flight and sits
               still otherwise (#87); the text keeps the state readable. */}
@@ -1151,7 +1151,7 @@ export function StageWorkspace({
             id="stage-inference"
             aria-label="Switch this stage's inference"
             title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
-            disabled={!agentAddress || modelSwitch.switching || inferenceProviders === null}
+            disabled={modelSwitch.switching || inferenceProviders === null}
             value={runningInference?.providerRowId ?? ""}
             onChange={(event) => {
               const option = inferenceChoices.find((entry) => entry.providerRowId === event.target.value);
@@ -1161,11 +1161,9 @@ export function StageWorkspace({
             <option value="" disabled>
               {modelSwitch.switching
                 ? "Switching…"
-                : !agentAddress
-                  ? "Setting up…"
-                  : activeModel
-                    ? `${activeModel.providerLabel} · ${activeModel.canonicalName}`
-                    : "Loading…"}
+                : activeModel
+                  ? `${activeModel.providerLabel} · ${activeModel.canonicalName}`
+                  : "Loading…"}
             </option>
             {inferenceChoices.map((option) => (
               <option key={option.providerRowId} value={option.providerRowId}>

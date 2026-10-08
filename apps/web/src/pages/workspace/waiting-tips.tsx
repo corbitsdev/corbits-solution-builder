@@ -17,13 +17,14 @@ export const WAITING_TIPS = [
 const TIP_MS = 7_000;
 
 /** One tip at a time while the specialist gets ready, fading to the next;
- *  held on one under reduced motion. */
-export function WaitingTips() {
+ *  held on one under reduced motion. `inline` keeps it in the flow, for when
+ *  the zen garden's strip holds the foot of the window. */
+export function WaitingTips({ inline = false }: { inline?: boolean }) {
   const still = useReducedMotion();
   const elapsed = useElapsedMs();
   const index = still ? 0 : Math.floor(elapsed / TIP_MS) % WAITING_TIPS.length;
   return (
-    <aside className="waiting-tips" aria-label="Tips">
+    <aside className="waiting-tips" data-inline={inline ? "" : undefined} aria-label="Tips">
       <p key={index} className="waiting-tip">
         {WAITING_TIPS[index]}
       </p>

@@ -232,15 +232,14 @@ describe("project chrome paint", () => {
     expect(read("./thread.tsx")).toContain("conversationLead");
   });
 
-  test("opening the project uses the two-pane chrome, not a progress essay, and never a timer", () => {
+  test("opening the project uses the two-pane chrome and the opening wait, not a progress essay", () => {
     const chrome = read("./workspace-chrome.tsx");
     expect(chrome).toContain("export function OpeningScreen");
     expect(chrome).not.toContain("Opening the project");
     expect(chrome).not.toContain("Getting the conversation ready");
     expect(chrome).not.toContain("useElapsedMs");
     expect(chrome).not.toContain("elapsed-clock");
-    expect(chrome).toContain("Reconnecting to the");
-    expect(chrome).toContain("is getting ready…");
+    expect(chrome).toContain("<OpeningWait who={specialist} />");
     expect(chrome).toContain("<StagePanes");
     expect(chrome).not.toContain("opening-stage-name");
     expect(chrome).not.toContain("<ChatInput");

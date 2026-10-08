@@ -15,8 +15,7 @@ import { Elapsed } from "./elapsed.jsx";
 import type { StageEvaluator } from "./use-advisory.ts";
 import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { usePanesWidth } from "./use-panes-width.ts";
-import { WaitingTips } from "./waiting-tips.tsx";
-import { BusyLine } from "../../zen-garden.tsx";
+import { OpeningWait } from "./opening-wait.tsx";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
 
@@ -252,13 +251,12 @@ function capitalize(word: string): string {
  *  No composer, since nothing could be sent yet; it arrives with the
  *  conversation once the specialist is live. What shows is only what is
  *  already on hand: the person's opening statement as their own chat bubble
- *  (once a brand-new project's read resolves), a quiet status line in the
- *  specialist's slot, and a rotating tip in the space below. A project
- *  reopening (`resuming`) shows its current stage's own latest persisted
- *  draft (`draft`, read off the artifact fold the same way the document
- *  pane does) beside a "Reconnecting…" status line while the mail thread
- *  catches up; both reads are real, never simulated, so either renders
- *  blank rather than a fake state until its read resolves. */
+ *  (once a brand-new project's read resolves) and the opening wait below it.
+ *  A project reopening (`resuming`) shows its current stage's own latest
+ *  persisted draft (`draft`, read off the artifact fold the same way the
+ *  document pane does) while the mail thread catches up; both reads are
+ *  real, never simulated, so either renders blank rather than a fake state
+ *  until its read resolves. */
 export function OpeningScreen({
   resuming = false,
   who,
@@ -266,8 +264,7 @@ export function OpeningScreen({
   draft,
 }: {
   resuming?: boolean;
-  /** The specialist's name, lowercased, for the reconnect line — e.g.
-   *  "brainstormer". */
+  /** The specialist's name, lowercased — e.g. "brainstormer". */
   who: string;
   /** A brand-new project's own opening statement, once its read resolves. */
   opening?: string | null | undefined;
@@ -292,14 +289,7 @@ export function OpeningScreen({
                   </div>
                 </div>
               ) : null}
-              <div className="think" role="status">
-                <span className="who conv-who">{specialist}</span>
-                <span className="thinking">
-                  {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
-                </span>
-              </div>
-              <BusyLine />
-              <WaitingTips />
+              <OpeningWait who={specialist} />
             </div>
           </div>
         }
