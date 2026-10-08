@@ -54,10 +54,36 @@ describe("assembleBuildPrompt", () => {
     expect(assembleBuildPrompt(input)).toContain("has a shebang line and its executable bit set");
   });
 
-  test("an unreachable dependency is a blocker, never a fallback, in the worker's own briefs too", () => {
+  test("without AGENTS.md the packet carries the rules: build order, dependencies and local development", () => {
     const prompt = assembleBuildPrompt(input);
-    expect(prompt).toContain("A package, service or key you cannot reach is a blocker");
+    expect(prompt).toContain("Build in this order. First, the main flow working end to end");
+    expect(prompt).toContain("Never end your run while an agent you started is still working");
+    expect(prompt).toContain("A key or service you cannot reach, and that has no local instance, is a blocker");
+    expect(prompt).toContain("Running on this machine is configuration, not a fallback.");
     expect(prompt).toContain("never tell one to fall back");
+  });
+
+  test("seeded documents are named, not inlined, and the rules are left to AGENTS.md", () => {
+    const files = [
+      { path: "AGENTS.md", content: "# Implementation instructions" },
+      { path: "product-requirements.md", content: input.requirementsText },
+      { path: "build-plan.md", content: input.planText },
+      { path: "design.html", content: input.designText },
+      { path: "QUESTIONS.md", content: "# Open product decisions" },
+    ];
+    const prompt = assembleBuildPrompt({ ...input, files });
+    expect(prompt).toContain("Read AGENTS.md first");
+    expect(prompt).toContain("Then read product-requirements.md, design.html, build-plan.md in full before you write code.");
+    for (const absent of ["--- REQUIREMENTS ---", "--- DESIGN ---", "--- PLAN ---", "R1 it works.", "Build the thing.", "Build in this order", "Every build ships two documents"]) {
+      expect(prompt).not.toContain(absent);
+    }
+    expect(prompt).toContain("--- STACK");
+    expect(prompt).toContain("Keep STATUS.md at the root");
+    expect(prompt).toContain("Approved plan: art_plan@3.");
+    // A document that is not among the seeded files is still inlined.
+    const partial = assembleBuildPrompt({ ...input, files: files.filter((file) => file.path !== "design.html") });
+    expect(partial).toContain("--- DESIGN ---");
+    expect(partial).not.toContain("--- PLAN ---");
   });
 
   test("asks for a progress record the page can read: task numbers in commits and STATUS.md", () => {

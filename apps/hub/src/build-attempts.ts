@@ -46,6 +46,7 @@ import { BUILD_WORKERS, buildWorker } from "./build-worker.js";
 import { sumUsage, turnLogModels, usageCalls, type AttemptUsage } from "./build-usage.js";
 import { buildDocumentsRule, MANUAL_IMAGES_DIR, README_PATH, USER_MANUAL_PATH } from "@solutions-builder/specialist-runtime/build-documents";
 import { BUILD_DEPENDENCIES_RULE } from "@solutions-builder/specialist-runtime/build-dependencies";
+import { BUILD_ORDER_RULE } from "@solutions-builder/specialist-runtime/build-order";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
@@ -131,11 +132,23 @@ export function safeWorkspacePath(path: string): boolean {
  * attempt ran against is immutable and readable afterwards.
  */
 export function assembleBuildPrompt(input: BuildPromptInput): string {
-  const seeded = (input.files ?? []).map((file) => file.path);
+  const files = input.files ?? [];
+  const seeded = files.map((file) => file.path);
+  const agentsSeeded = seeded.includes("AGENTS.md");
+  // A document already seeded as a file is named, not inlined (CL-9987): the
+  // worker reads the file either way, and inlining paid for it twice.
+  const fileHolding = (text: string): string | undefined => (text ? files.find((file) => file.content === text)?.path : undefined);
+  const requirementsFile = fileHolding(input.requirementsText);
+  const designFile = fileHolding(input.designText);
+  const planFile = fileHolding(input.planText);
+  const documentFiles = [requirementsFile, designFile, planFile].filter((path): path is string => path !== undefined);
   return [
     `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
     ...(seeded.length > 0
-      ? [``, `The documents are also in the current directory as files: ${seeded.join(", ")}. Read AGENTS.md first; it says which document wins where they disagree, and which acceptance criteria mean done.`]
+      ? [
+          ``,
+          `The documents are in the current directory as files: ${seeded.join(", ")}.${agentsSeeded ? " Read AGENTS.md first; it says which document wins where they disagree, what to build first, and which acceptance criteria mean done." : ""}${documentFiles.length > 0 ? ` Then read ${documentFiles.join(", ")} in full before you write code.` : ""}`,
+        ]
       : []),
     ...(input.continuing
       ? [
@@ -153,21 +166,17 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
         ]
       : []),
     ``,
+    // The rules live in AGENTS.md when it is seeded; the packet carries them only when it is not.
+    ...(agentsSeeded ? [] : [BUILD_ORDER_RULE, ``, BUILD_DEPENDENCIES_RULE, ``, buildDocumentsRule(input.language), ``]),
     // The progress record (#697): the person watching reads the plan's
     // task numbers off the worker's own commits and status file, so the
     // page can say how far the build got without inferring anything.
-    BUILD_DEPENDENCIES_RULE,
-    ``,
-    buildDocumentsRule(input.language),
-    ``,
     `Keep a progress record the person can read. Name the plan task every commit is for in its subject, as "(Task N)" or "(Tasks N, M)". Keep STATUS.md at the root of the working directory with one section per finished task, headed with the task's number and name. Your final message says which tasks are done and which are not.`,
     ``,
     ...(input.stackBlock ? [`--- STACK (frozen; build exactly this) ---`, input.stackBlock, ``] : []),
-    ...(input.requirementsText ? [`--- REQUIREMENTS ---`, input.requirementsText, ``] : []),
-    ...(input.designText ? [`--- DESIGN ---`, input.designText, ``] : []),
-    `--- PLAN ---`,
-    input.planText,
-    ``,
+    ...(input.requirementsText && !requirementsFile ? [`--- REQUIREMENTS ---`, input.requirementsText, ``] : []),
+    ...(input.designText && !designFile ? [`--- DESIGN ---`, input.designText, ``] : []),
+    ...(planFile ? [] : [`--- PLAN ---`, input.planText, ``]),
     `Approved plan: ${input.planRef || "unknown"}.`,
     `Target: ${input.target || "unknown"}.`,
   ].join("\n");
