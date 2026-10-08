@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentFor } from "@solutions-builder/app/kit";
+import { defaultExportModule, type PackedSpecialist } from "@solutions-builder/app/specialist-source";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { renderSpecialistSource } from "./specialist-deploy.js";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
@@ -51,25 +51,36 @@ function dependenciesOf(files: Record<string, string>): Record<string, string> {
   return (JSON.parse(files["packages/specialist/package.json"]!) as { dependencies: Record<string, string> }).dependencies;
 }
 
+/** What `scripts/specialist-pack.ts` writes for a role: its entry, and the
+ *  dependencies its own package declares. The render copies the bytes and
+ *  ships what is declared, so stubs exercise the same path;
+ *  `scripts/specialist-pack.test.ts` checks the real packages. */
+const BARE_WORKFLOW = 'import { defineWorkflow, step } from "@intx/workflow";\nimport SOURCE from "./inference-source.js";\nexport default defineWorkflow({});\n';
+const BASE_DECLARED = ["@intx/agent", "@intx/workflow", "@solutions-builder/specialist-shared"];
+const BARE_ENTRY: PackedSpecialist = { roleId: "brainstormer", workflow: BARE_WORKFLOW, dependencies: BASE_DECLARED };
+const DELIVERY_ENTRY: PackedSpecialist = {
+  roleId: "delivery-verifier",
+  workflow: `import { deliver } from "@solutions-builder/tools-delivery/sidecar-bundle";\n${BARE_WORKFLOW}`,
+  dependencies: [...BASE_DECLARED, "@solutions-builder/tools-delivery"],
+};
+const ARTIFACTS_ENTRY: PackedSpecialist = {
+  roleId: "constraints-mapper",
+  workflow: `import { artifacts } from "@corbits/artifacts/sidecar-bundle";\n${BARE_WORKFLOW}`,
+  dependencies: [...BASE_DECLARED, "@corbits/artifacts"],
+};
+
 // #42: every specialist used to ship the whole app package, both tool
 // packages and their npm trees (pptxgenjs, jszip) whatever its entry
 // imported. Now the tree carries the members the entry resolves against.
 describe("renderSpecialistSource members", () => {
-  const render = async (stage: Stage, roleKey = "primary", artifactTools = false) =>
-    renderSpecialistSource(
-      await fullClosure(),
-      "proj_1",
-      stage,
-      { provider: "openai", model: "gpt-5.5" },
-      artifactTools,
-      roleKey,
-      agentFor(stage),
-      artifactTools ? "crd_test" : undefined,
-    );
+  const pin = { provider: "openai", model: "gpt-5.5" } as const;
+  const guidance = "Write in British English.";
+  const render = async (stage: Stage, entry: PackedSpecialist, roleKey = "primary") =>
+    renderSpecialistSource(await fullClosure(), "proj_1", stage, pin, roleKey, entry, guidance);
 
-  test("a specialist that imports no tool ships the vendored workflow alone", async () => {
-    for (const stage of [1, 2, 3, 4, 6, 7, 8] as Stage[]) {
-      const files = await render(stage);
+  test("a role that declares no tool ships the vendored workflow alone", async () => {
+    for (const stage of [1, 2, 3, 4, 5, 6, 7, 8] as Stage[]) {
+      const files = await render(stage, BARE_ENTRY);
       expect(membersOf(files)).toEqual(["intx-workflow"]);
       const deps = dependenciesOf(files);
       expect(Object.keys(deps).filter((name) => name.startsWith("@solutions-builder/"))).toEqual([]);
@@ -77,51 +88,52 @@ describe("renderSpecialistSource members", () => {
     }
   });
 
-  test("stage 5's one deployment ships no tool: the app draws slides from the outline (#435)", async () => {
-    const packages = await render(5);
-    expect(membersOf(packages)).toEqual(["intx-workflow"]);
-    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBeUndefined();
-    expect(dependenciesOf(packages)["@solutions-builder/tools-delivery"]).toBeUndefined();
-  });
-
-  test("stage 9 ships the delivery tool and the runtime, and no stage depends on the shell", async () => {
-    const build = await render(8);
-    expect(membersOf(build)).toEqual(["intx-workflow"]);
-    expect(dependenciesOf(build)["@intx/tools-posix"]).toBeUndefined();
-    const deliver = await render(9);
+  test("a role declaring the delivery tool ships it and the runtime, and no shell", async () => {
+    const deliver = await render(9, DELIVERY_ENTRY);
     expect(membersOf(deliver)).toEqual(["intx-workflow", "specialist-runtime", "tools-delivery"]);
     expect(dependenciesOf(deliver)["@intx/tools-posix"]).toBeUndefined();
   });
 
-  test("the generic artifact bundle ships only when asked for", async () => {
-    const bound = await render(2, "primary", true);
+  test("the generic artifact bundle ships only when the role declares it", async () => {
+    const bound = await render(2, ARTIFACTS_ENTRY);
     expect(membersOf(bound)).toEqual(["corbits-artifacts", "intx-workflow"]);
     expect(dependenciesOf(bound)["@corbits/artifacts"]).toBe("workspace:*");
-    expect(bound["packages/specialist/workflow.js"]).toContain('"resource":"credential:crd_test"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"action":"use"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"source":"creator"');
-    expect(bound["packages/specialist/workflow.js"]).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
-    expect(membersOf(await render(8, "primary", true))).toEqual(["corbits-artifacts", "intx-workflow"]);
   });
 
-  // #41 step 5: the rendered entry for a role is identical across projects;
+  test("the rendered entry is the packed file, and the pin and guidance are the overlays", async () => {
+    const files = await render(1, BARE_ENTRY);
+    expect(files["packages/specialist/workflow.js"]).toBe(BARE_WORKFLOW);
+    expect(files["packages/specialist/inference-source.js"]).toBe(defaultExportModule(pin));
+    expect(files["packages/specialist/workspace-guidance.js"]).toBe(defaultExportModule(guidance));
+    expect(files["packages/specialist/workflow.js"]).not.toContain("gpt-5.5");
+    expect(files["packages/specialist/workflow.js"]).not.toContain(guidance);
+  });
+
+  // #41 step 5: the packed entry for a role is identical across projects;
   // only the package's own name carries the project, since the asset is
-  // named for it. The one exception is the id of the project's own artifacts
-  // credential, which a credential-bound entry's use-grant names (#288).
-  test("the same role renders the same entry for two projects, up to the credential id", async () => {
+  // named for it. The model pin is the overlay, not the entry.
+  test("the same entry is copied unchanged for two projects", async () => {
     const closure = await fullClosure();
-    for (const [stage, artifactTools] of [[1, false], [5, false], [8, false], [8, true], [9, true]] as [Stage, boolean][]) {
-      const one = await renderSpecialistSource(closure, "proj_1", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_one" : undefined);
-      const two = await renderSpecialistSource(closure, "proj_2", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_two" : undefined);
-      const entry = "packages/specialist/workflow.js";
-      expect(one[entry]!.replaceAll("crd_one", "crd_x")).toBe(two[entry]!.replaceAll("crd_two", "crd_x"));
-      expect(one[entry]).not.toContain("proj_1");
+    for (const [stage, entry] of [
+      [1, BARE_ENTRY],
+      [9, DELIVERY_ENTRY],
+    ] as [Stage, PackedSpecialist][]) {
+      const one = await renderSpecialistSource(closure, "proj_1", stage, pin, "primary", entry, guidance);
+      const two = await renderSpecialistSource(closure, "proj_2", stage, pin, "primary", entry, guidance);
+      const path = "packages/specialist/workflow.js";
+      expect(one[path]).toBe(two[path]);
+      expect(one[path]).toBe(entry.workflow);
+      expect(one[path]).not.toContain("proj_1");
     }
   });
 
   test("every member the package depends on is in the tree, and nothing in the tree is undeclared", async () => {
-    for (const [stage, roleKey, artifactTools] of [[1, "primary", false], [5, "primary", false], [8, "primary", false], [9, "primary", true]] as [Stage, string, boolean][]) {
-      const files = await render(stage, roleKey, artifactTools);
+    for (const [stage, entry] of [
+      [1, BARE_ENTRY],
+      [9, DELIVERY_ENTRY],
+      [2, ARTIFACTS_ENTRY],
+    ] as [Stage, PackedSpecialist][]) {
+      const files = await render(stage, entry);
       const declaredMembers = Object.entries(dependenciesOf(files))
         .filter(([, spec]) => spec === "workspace:*")
         .map(([name]) => name);

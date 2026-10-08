@@ -2,6 +2,7 @@ node_modules
 apps/web/dist
 apps/web/public/closure
 apps/web/public/project-workflow
+apps/web/public/specialists
 scratch
 apps/desktop/target
 apps/desktop/binaries

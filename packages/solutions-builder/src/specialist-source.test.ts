@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { agentFor } from "./kit.js";
-import type { Stage } from "./ledger.js";
 import {
   credentialAccess,
   ARTIFACT_TOOL_DEPENDENCIES,
@@ -8,58 +6,53 @@ import {
   DELIVERY_TOOL_DEPENDENCIES,
   POSIX_TOOL_DEPENDENCIES,
   SPECIALIST_BASE_DEPENDENCIES,
+  defaultExportModule,
   specialistDependencies,
-  specialistEntrySource,
   specialistTooling,
   WORKFLOW_PACKAGE_DEPENDENCIES,
 } from "./specialist-source.js";
+import { composeSpecialistPrompt } from "@solutions-builder/specialist-shared/deploy-overlays";
+import { skillTextFor } from "@solutions-builder/specialist-shared/skill-text";
 
 const NONE = { deck: false, posix: false, delivery: false, artifacts: false };
 
-// #42: a specialist ships only what its entry imports. The tooling matrix is
-// what decides both the entry's imports and the members and dependencies
-// beside it, so it is pinned here, stage by stage.
+const BARE = ["@intx/agent", "@intx/workflow", "@solutions-builder/specialist-shared"];
+const DELIVERY = [...BARE, "@solutions-builder/tools-delivery"];
+const ARTIFACTS = [...BARE, "@corbits/artifacts"];
+
+// #42: a specialist ships only what its role package declares, as any
+// Interchange package does, so the tooling is read off those declarations
+// rather than decided a second time here.
 describe("specialistTooling", () => {
-  test("stages 1 to 4, 6 and 7 import no tool", () => {
-    for (const stage of [1, 2, 3, 4, 6, 7] as Stage[]) {
-      expect(specialistTooling({ stage })).toEqual(NONE);
-    }
+  test("a role declaring no tool package carries nothing", () => {
+    expect(specialistTooling(BARE)).toEqual(NONE);
   });
 
-  test("stage 5 carries no tool: the app draws slides from the outline in the reply (#435)", () => {
-    expect(specialistTooling({ stage: 5 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 5, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
+  test("each declared tool package is its tool", () => {
+    expect(specialistTooling(DELIVERY)).toEqual({ ...NONE, delivery: true });
+    expect(specialistTooling(ARTIFACTS)).toEqual({ ...NONE, artifacts: true });
+    expect(specialistTooling([...BARE, "@solutions-builder/tools-deck"])).toEqual({ ...NONE, deck: true });
+    expect(specialistTooling([...BARE, "@intx/tools-posix"])).toEqual({ ...NONE, posix: true });
+    expect(specialistTooling([...DELIVERY, "@corbits/artifacts"])).toEqual({ ...NONE, delivery: true, artifacts: true });
   });
 
-  test("stage 8 carries no tool: the build runs through the host's bridge and its specialist reviews the report", () => {
-    expect(specialistTooling({ stage: 8 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 8, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
-  });
-
-  test("stage 9 carries the delivery tool alone", () => {
-    expect(specialistTooling({ stage: 9 })).toEqual({ ...NONE, delivery: true });
-  });
-
-  test("the generic artifact bundle is opt-in on any stage", () => {
-    expect(specialistTooling({ stage: 2, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
-    expect(specialistTooling({ stage: 9, artifactTools: true })).toEqual({ ...NONE, delivery: true, artifacts: true });
+  test("a similarly named package is not the tool", () => {
+    expect(specialistTooling([...BARE, "@solutions-builder/tools-delivery-extras"])).toEqual(NONE);
   });
 });
 
 describe("specialistDependencies", () => {
   test("a tool-less specialist depends on the base set alone: no app, deck, delivery or pptx", () => {
-    const deps = specialistDependencies(specialistTooling({ stage: 1 }));
+    const deps = specialistDependencies(specialistTooling(BARE));
     expect(deps).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(Object.keys(deps).some((name) => name.startsWith("@solutions-builder/"))).toBe(false);
   });
 
   test("each tool brings its own set, and the runtime package comes with the deck or delivery tool", () => {
-    expect(specialistDependencies(specialistTooling({ stage: 5 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(specialistDependencies({ deck: true, posix: false, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DECK_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 8 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(specialistDependencies({ deck: false, posix: true, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...POSIX_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 9 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 3, artifactTools: true }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling(DELIVERY))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling(ARTIFACTS))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
     expect(DECK_TOOL_DEPENDENCIES["@solutions-builder/specialist-runtime"]).toBe("workspace:*");
     expect(DELIVERY_TOOL_DEPENDENCIES["@solutions-builder/specialist-runtime"]).toBe("workspace:*");
   });
@@ -72,63 +65,29 @@ describe("specialistDependencies", () => {
   });
 });
 
-describe("specialistEntrySource", () => {
-  const entry = (stage: Stage, roleKey = "primary", artifactTools = false) =>
-    specialistEntrySource({
-      stage,
-      source: { provider: "openai", model: "gpt-5.5" },
-      role: agentFor(stage),
-      roleKey,
-      artifactTools,
-      ...(artifactTools ? { artifactCredentialId: "crd_test" } : {}),
-    });
+describe("defaultExportModule", () => {
+  test("exports the value as the default, nothing else", () => {
+    expect(defaultExportModule({ provider: "openai", model: "gpt-5.5" })).toBe(`export default {"provider":"openai","model":"gpt-5.5"};\n`);
+    expect(defaultExportModule("Write in British English.")).toBe(`export default "Write in British English.";\n`);
+  });
+});
 
-  test("imports exactly the tools the tooling matrix names", () => {
-    const stage1 = entry(1);
-    expect(stage1).not.toContain("@solutions-builder/");
-    expect(stage1).not.toContain("@intx/tools-posix");
-    expect(stage1).not.toContain("@corbits/artifacts");
+// The order main rendered: a specialist moved to a packed entry is told
+// exactly what it was told before.
+describe("composeSpecialistPrompt", () => {
+  const role = { id: "probe", system: "Role text." };
 
-    expect(entry(5)).not.toContain("tools-deck");
-
-    const stage8 = entry(8);
-    expect(stage8).not.toContain("@intx/tools-posix");
-    expect(stage8).not.toContain("@solutions-builder/");
-    expect(stage8).not.toContain("@corbits/artifacts/sidecar-bundle");
-
-    expect(entry(9)).toContain('from "@solutions-builder/tools-delivery/sidecar-bundle"');
-    expect(entry(9)).not.toContain("tools-deck");
-
-    expect(entry(2, "primary", true)).toContain('from "@corbits/artifacts/sidecar-bundle"');
+  test("puts the guidance after the role's text and before its skills", () => {
+    expect(composeSpecialistPrompt(role, "Guidance line.")).toBe(`Role text.\n\nGuidance line.\n\n${skillTextFor(role)}`);
   });
 
-  // #41 step 3: who a package is for arrives with the request, so the
-  // rendered entry names no stakeholder and needs no redeploy when the
-  // project's audiences change.
-  // #41 step 4: what a document-writing specialist needs to know is its
-  // stage and kind, fixed per role; the project is the run's own tenant.
-  test("an entry with the artifact tools names its stage and kind, never a project", () => {
-    const stage2 = entry(2, "primary", true);
-    expect(stage2).toContain("## Stage document");
-    expect(stage2).toContain("stage 2 specialist");
-    expect(stage2).toContain("`solution_constraints`");
-    expect(stage2).not.toContain("## Artifact context");
-    expect(stage2).not.toContain("projectId:");
-    expect(entry(2)).not.toContain("## Stage document");
+  test("leaves no guidance section when there is none", () => {
+    expect(composeSpecialistPrompt(role, "")).toBe(`Role text.\n\n${skillTextFor(role)}`);
   });
+});
 
-  // #41 step 5: the entry takes nothing of the project's. The credential
-  // binding is named for the role, so the same role renders the same entry
-  // everywhere.
-  test("a credential-bound entry names its binding for the role", () => {
-    expect(entry(2, "primary", true)).toContain('"name":"workflow-artifacts:constraints-mapper"');
-    expect(entry(8)).not.toContain("publishWorkspaceTool");
-    expect(entry(8, "primary", true)).toContain('"name":"workflow-artifacts:build-supervisor"');
-  });
-
-  // #288: the binding delivers the credential, the requirement lets the run
-  // use it, and both name the same consumer -- the bundle's own id.
-  test("a credential-bound entry declares the use-grant its run needs, scoped to the bound package", () => {
+describe("credentialAccess", () => {
+  test("names the use-grant for the bound package", () => {
     expect(credentialAccess("@corbits/artifacts/sidecar-bundle", "workflow-artifacts:brainstormer", "crd_1")).toEqual({
       credentialBindings: [
         { package: "@corbits/artifacts/sidecar-bundle", handle: "hub", provider: "sb-workflow-artifacts", name: "workflow-artifacts:brainstormer", locator: "tenant" },
@@ -137,20 +96,5 @@ describe("specialistEntrySource", () => {
         { resource: "credential:crd_1", action: "use", source: "creator", conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" } },
       ],
     });
-    const bound = entry(2, "primary", true);
-    expect(bound).toContain('"resource":"credential:crd_test"');
-    expect(bound).toContain('"action":"use"');
-    expect(bound).toContain('"source":"creator"');
-    expect(bound).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
-    expect(entry(2)).not.toContain("grantRequirements");
-    expect(entry(2)).not.toContain("credentialBindings");
-    expect(() => specialistEntrySource({ stage: 2, source: { provider: "openai", model: "gpt-5.5" }, role: agentFor(2), roleKey: "primary", artifactTools: true })).toThrow(/credential/);
-  });
-
-  test("stage 5's entry names no audience", () => {
-    const stage5 = entry(5);
-    expect(stage5).not.toContain("## Audiences");
-    expect(stage5).not.toContain("project_owner");
-    expect(stage5).not.toContain("carries no deck tool");
   });
 });

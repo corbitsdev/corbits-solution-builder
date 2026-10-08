@@ -62,9 +62,9 @@ const UI_BUILD = ["bunx", "vite", "build", "-c", join(root, "apps", "web", "vite
 let watcher: ReturnType<typeof run> | undefined;
 if (spawnHost) {
   // What `bun run ui:build` writes into `apps/web/public/` before Vite: the
-  // closure tarballs and the compiled project-workflow entries the browser
-  // fetches to start a project's workflow. Vite alone leaves them out, and
-  // an interface without them cannot open a project.
+  // closure tarballs, the compiled project-workflow entries and the packed
+  // specialist entries the browser fetches to start a project. Vite alone
+  // leaves them out, and an interface without them cannot open a project.
   const { scripts } = (await Bun.file(join(root, "package.json")).json()) as { scripts: Record<string, string> };
   for (const step of interfacePackSteps(scripts["ui:build"] ?? "")) {
     console.log(`Packing the interface's ${step.replace(/^assets:pack-/, "")}…`);

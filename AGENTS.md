@@ -57,7 +57,10 @@ and why, rather than routing around it.
   lives outside `ProjectState`, is in
   `packages/solutions-builder/src/project-workflow/README.md`.
 - **The app package depends on nothing in the apps.** `packages/solutions-builder/src/`
-  imports only the workflow authoring surface and the platform's types.
+  imports only the workflow authoring surface, the platform's types, and the
+  `packages/specialist-*` role packages whose catalog it assembles (`kit.ts`).
+  Those packages depend on `specialist-shared` and the authoring surface,
+  never on the app package or the apps.
 - **Only the host runtime touches a provider** or an agent runtime:
   `packages/embedded-host` (the process skeleton a product composes — paths,
   pglite, keychain secrets, vendored hub migrations, the hub mount, the serve

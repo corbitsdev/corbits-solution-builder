@@ -5,6 +5,7 @@ describe("interface file requests", () => {
   test("a path with a file extension asks for a file", () => {
     expect(asksForInterfaceFile("/closure/manifest.json")).toBe(true);
     expect(asksForInterfaceFile("/project-workflow/workflow.js")).toBe(true);
+    expect(asksForInterfaceFile("/specialists/brainstormer/workflow.js")).toBe(true);
     expect(asksForInterfaceFile("/assets/index-abc123.css")).toBe(true);
   });
 

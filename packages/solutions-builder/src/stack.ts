@@ -115,27 +115,13 @@ const StackRecordSchema = type({
 });
 
 /**
- * The record's shape as a specialist is told it (#617): the Architect's
- * prompt (`kit.ts`) and the ask the gate's banner sends
- * (`stage-evidence.ts`) both quote this, so what is asked for is what
- * `StackRecordSchema` above accepts. A field added to the schema is added
- * here; `stack.test.ts` holds the two together.
+ * The record's shape as a specialist is told it (#617), kept in the
+ * Architect's package beside the prompt that quotes it. The ask the gate's
+ * banner sends (`stage-evidence.ts`) quotes it too, so what is asked for is
+ * what `StackRecordSchema` above accepts. A field added to the schema is
+ * added there; `stack.test.ts` holds the two together.
  */
-export const STACK_BLOCK_SHAPE = `
-{
-  "mode": one of "plain" | "inference" | "agent" | "local-workflow" |
-    "durable-workflow" | "hub",
-  "hubPlacement": "embedded" | "cloud" (only when mode is "hub"),
-  "runtime": { "choice": string, "reason": string, "cites": [requirement id, ...] },
-  "ui": same shape as "runtime", or null,
-  "storage": same shape as "runtime", or null,
-  "auth": same shape as "runtime", or null,
-  "packaging": { "choice", "reason", "cites", "kind": "compiled-binary" |
-    "web-hosted" | "desktop" | "cli" | "library" },
-  "packages": [{ "choice", "reason", "cites", "name": string }, ...],
-  "deferred": [string, ...]
-}
-`.trim();
+export { STACK_BLOCK_SHAPE } from "@solutions-builder/specialist-architect";
 
 // "## Stack", or a model's harmless variants (#437): a deeper heading level,
 // trailing words such as "## Stack (frozen)", or "Stack record".

@@ -22,7 +22,7 @@ describe("the kit's tool names", () => {
   });
 
   test("a role's skills name only tools its stage's deployment carries", () => {
-    // Mirrors `specialistEntrySource`'s per-stage tool imports; stage 5
+    // Mirrors the packed specialist's per-stage tools; stage 5
     // carries none since #435 (the app draws slides from the outline), and
     // stage 8 none since the build moved to the host's bridge.
     const toolsByStage: Record<number, readonly string[]> = {

@@ -1,24 +1,18 @@
 /**
  * A stage specialist as workflow source.
  *
- * Every live failure traced back to the multi-step lifecycle workflow (loop
- * relay, onTrigger body env, seq collision). Workbench never hits that class
- * of bug because every agent it deploys is a single-step, mail-triggered,
- * unbounded-turn workflow (wb/apps/web/src/agent-deploy.ts's
- * `buildAgentDefinitionJson`): the hub runs it warm and mails the reply back.
- * This renders the same shape for one of our stage roles instead — one
- * specialist per stage per project, deployed lazily
- * (`packages/installer/src/specialist-deploy.ts`'s `ensureSpecialistDeployment`)
- * the first time that stage is opened.
+ * Each `packages/specialist-*` role package authors a real `src/workflow.ts`
+ * (`defineAgent` + `defineWorkflow` + mail trigger). `scripts/specialist-pack.ts`
+ * compiles that to `workflow.js`; the installer copies those bytes and writes
+ * `inference-source.js` (the model pin, same idea as `namer-source.js`) and
+ * `workspace-guidance.js` beside them. There is no string-built entry.
  *
  * There is no chat section, no router, no approve chain: a specialist only
  * ever answers the mail addressed to its own run, and a stage's approval is
  * a client-side artifact write, not a signal this workflow waits on.
  */
 import type { ArtifactKind } from "./artifacts.js";
-import { ARTIFACT_WRITE_RULE, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
-import { skillTextFor } from "./seed-kit.js";
 
 /** CL-8719: the `http` provider every specialist's `@corbits/artifacts/sidecar-bundle`
  *  resolves its `hub` credential handle against; one row per workspace, its
@@ -62,17 +56,6 @@ export const BUILD_STAGE = 8;
 
 /** The stage whose rounds write one package per stakeholder, each behind its own gate. */
 export const PACKAGE_STAGE = 5;
-
-/** Mirrors `installer/src/specialist-deploy.ts`'s `DEFAULT_ROLE_KEY` (kept as
- *  its own literal here rather than imported, since `packages/installer`
- *  depends on this package and not the other way around). Stage 5 has one
- *  deployment per project under this key (#41 step 3): it receives the
- *  stage's opening (the approved design) and, one request at a time, the
- *  package asks that name a stakeholder (`AudiencePackages`'s "Write it").
- *  Its prompt writes one package per request, for the audience the request
- *  names, and renders that one deck -- never every stakeholder's in the
- *  one turn (CL-8873). */
-const PRIMARY_ROLE_KEY = "primary";
 
 /** The stage whose specialist checks a delivery manifest. */
 export const DELIVERY_STAGE = 9;
@@ -130,39 +113,55 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The tools a specialist's rendered entry imports, by stage and role: what
- * `specialistEntrySource` writes into the entry, and therefore what the
- * pushed tree must ship as members and the package must depend on (#42).
- * One place decides, so an entry never imports a tool its closure lacks.
+ * The tools a specialist ships: what the pushed tree must carry as members and
+ * the package must depend on (#42). The role package's own `package.json`
+ * decides by what it declares, as any Interchange package does; the pack
+ * carries those declarations beside `workflow.js` (`PackedSpecialist`).
  */
 export type SpecialistTooling = {
-  /** `render_deck`: a stage 5 per-audience deployment, never the primary one (CL-8873). */
+  /** `@solutions-builder/tools-deck`'s `render_deck`. No stage carries it (#435). */
   readonly deck: boolean;
   /** `@intx/tools-posix`: the shell. No stage carries it; the build runs on the host. */
   readonly posix: boolean;
   /** `@solutions-builder/tools-delivery`: stage 9's `deliver`. */
   readonly delivery: boolean;
-  /** `@corbits/artifacts`' generic bundle: opt-in. */
+  /** `@corbits/artifacts`' generic bundle. */
   readonly artifacts: boolean;
 };
 
-export function specialistTooling(options: {
-  readonly stage: Stage;
-  readonly artifactTools?: boolean | undefined;
-}): SpecialistTooling {
-  const { stage, artifactTools = false } = options;
+/** The tool packages a role package can declare. */
+export const TOOL_PACKAGES: Readonly<Record<keyof SpecialistTooling, string>> = {
+  deck: "@solutions-builder/tools-deck",
+  posix: "@intx/tools-posix",
+  delivery: "@solutions-builder/tools-delivery",
+  artifacts: "@corbits/artifacts",
+};
+
+/** The tooling a role's declared dependencies name. */
+export function specialistTooling(dependencies: readonly string[]): SpecialistTooling {
   return {
-    // The app draws and exports a stakeholder's slides from the deck outline
-    // in the reply; a rendered file nothing reads only cost the model a turn
-    // in which it reported the render instead of the package (#435).
-    deck: false,
-    // Stage 8 builds through the host's bridge; its specialist reviews the
-    // worker's report and carries no shell.
-    posix: false,
-    delivery: stage === DELIVERY_STAGE,
-    artifacts: artifactTools,
+    deck: dependencies.includes(TOOL_PACKAGES.deck),
+    posix: dependencies.includes(TOOL_PACKAGES.posix),
+    delivery: dependencies.includes(TOOL_PACKAGES.delivery),
+    artifacts: dependencies.includes(TOOL_PACKAGES.artifacts),
   };
 }
+
+/**
+ * A role's specialist as the interface ships it: `scripts/specialist-pack.ts`
+ * writes the compiled entry and the role package's declared dependencies under
+ * `specialists/<roleId>/`, and the client fetches both to deploy it.
+ */
+export type PackedSpecialist = {
+  readonly roleId: string;
+  /** The compiled `workflow.js`. */
+  readonly workflow: string;
+  /** The role package's own `dependencies`, by name. */
+  readonly dependencies: readonly string[];
+};
+
+/** Where the pack writes a role's declared dependencies, beside `workflow.js`. */
+export const SPECIALIST_DEPENDENCIES_PATH = "dependencies.json";
 
 /** The `dependencies` a specialist's own package declares: the base set plus
  *  each tool set its entry imports, nothing it does not ship. */
@@ -181,177 +180,26 @@ export const ARTIFACT_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@standard-schema/spec": "^1.0.0",
 };
 
-/** One tool a rendered entry carries: the source lines that import (and,
- *  where a tool is built rather than imported, construct) it, and the
- *  identifier the entry hands to `defineAgent`'s `tools`. */
-export type SpecialistToolImport = {
-  /** The tool's module, for a reader; `lines` is what is rendered. */
-  readonly package: string;
-  readonly lines: readonly string[];
-  readonly tool: string;
-};
-
-/**
- * What a role's entry carries beyond its kit prompt, declared as data (#41
- * step 1): the tools it imports and hands to its agent, the artifact kind
- * its stage's document is recorded under, the notes appended to its prompt,
- * and the tool package its `credentialBindings` entry names when it carries
- * artifact tools. `specialistEntrySource` renders exactly this and decides
- * nothing about a role itself. Nothing here is the project's: who a stage 5
- * package is for arrives with the request that asks for it (#41 step 3),
- * and the project a document belongs to is the run's own tenant, so the
- * prompt names no project (#41 step 4).
- */
-export type SpecialistRoleSpec = {
-  readonly tooling: SpecialistTooling;
-  readonly toolImports: readonly SpecialistToolImport[];
-  readonly artifactKind: ArtifactKind;
-  /** Appended after the kit prompt and its skill text, in order. */
-  readonly promptNotes: readonly string[];
-  /** The tool package the `hub` credential binding is declared against, or null with no binding. */
-  readonly credentialPackage: string | null;
-};
-
-/** What a specialist carrying the artifact tools is told about the document
- *  it writes (#41 step 4): its stage and the kind `artifact_create` records
- *  it under, both fixed per role. Which project it belongs to is the run's
- *  own tenant, never something the prompt names or the model supplies. */
-function stageDocumentNote(stage: Stage, kind: ArtifactKind): string {
-  return `## Stage document\n\nYou are the stage ${stage} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_create.`;
-}
-
-/** The `@corbits/artifacts` bundle (`artifact_create`/`artifact_write`), opt-in. */
-const ARTIFACTS_IMPORT: SpecialistToolImport = {
-  package: "@corbits/artifacts/sidecar-bundle",
-  lines: [`import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};`],
-  tool: "artifacts",
-};
-
-/** Stage 5's `render_deck`. */
-const DECK_IMPORT: SpecialistToolImport = {
-  package: "@solutions-builder/tools-deck/sidecar-bundle",
-  lines: [`import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};`],
-  tool: "deck",
-};
-
-/** Stage 9's `deliver`. */
-const DELIVER_IMPORT: SpecialistToolImport = {
-  package: "@solutions-builder/tools-delivery/sidecar-bundle",
-  lines: [`import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};`],
-  tool: "deliver",
-};
-
-/** The shell, for a tooling that asks for it; none does today. */
-const POSIX_IMPORT: SpecialistToolImport = {
-  package: "@intx/tools-posix/sidecar-bundle",
-  lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
-  tool: "posix",
-};
-
-/**
- * The spec for one deployment, from the same facts `specialistTooling`
- * reads: stage 9 carries `deliver`, and only a credential-bound deployment
- * declares the `hub` binding. Pure: the same inputs always give the same
- * spec, so a render is reproducible for `specialistEntryIsCurrent`.
- */
-export function specialistRoleSpec(options: {
-  readonly stage: Stage;
-  readonly roleKey?: string | undefined;
-  readonly artifactTools?: boolean | undefined;
-}): SpecialistRoleSpec {
-  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
-  const tooling = specialistTooling({ stage, artifactTools });
-  return {
-    tooling,
-    toolImports: [
-      ...(tooling.artifacts ? [ARTIFACTS_IMPORT] : []),
-      ...(tooling.deck ? [DECK_IMPORT] : []),
-      ...(tooling.posix ? [POSIX_IMPORT] : []),
-      ...(tooling.delivery ? [DELIVER_IMPORT] : []),
-    ],
-    artifactKind: STAGE_ARTIFACT_KIND[stage],
-    promptNotes: tooling.artifacts ? [stageDocumentNote(stage, STAGE_ARTIFACT_KIND[stage])] : [],
-    credentialPackage: artifactTools ? "@corbits/artifacts/sidecar-bundle" : null,
-  };
-}
-
 /** The entry module path every specialist package ships, same convention as
  *  the lifecycle's `LIFECYCLE_ENTRY_PATH`. */
 export const SPECIALIST_ENTRY_PATH = "workflow.js";
 
-/** `sb-stage-<N>`: this specialist's workflow id, and the stem of the mail
- *  label its trigger declares (grant configuration only — the hub mints the
- *  real run address at deploy time; see `specialistEntrySource`'s doc). */
-export function specialistWorkflowId(stage: Stage): string {
-  return `sb-stage-${stage}`;
-}
+/** The overlay the packed entry imports for its model pin. Written at deploy,
+ *  never baked into `workflow.js`. */
+export const SPECIALIST_INFERENCE_SOURCE_PATH = "inference-source.js";
 
-/**
- * What a rendered entry depends on: the stage, the model pin, the role and
- * its key, and whether it carries the artifact tools. Nothing of the
- * project's (#41 step 5): the same role renders the same entry for every
- * project, and what is the project's -- the tenant a record lands in, who a
- * package is for -- arrives with the run and the work.
- */
-export type SpecialistSourceOptions = {
-  readonly stage: Stage;
-  readonly source: InferenceSourcePin;
-  /** The agent this deployment runs. Passed in rather than derived from
-   *  `stage` here (`agentFor(stage)`) so a stage's other roles — the
-   *  brief evaluator, the requirements author, a panel principal — can each
-   *  render as their own deployment; `specialist-deploy.ts` still resolves
-   *  the primary per-stage role via `agentFor(stage)` today. */
-  readonly role: AgentRole;
-  /** A short, filesystem/asset-name-safe key identifying `role` within its
-   *  stage — folded into the deployed asset's name by `specialist-deploy.ts`
-   *  (`specialistAssetName`) so each role gets its own asset. */
-  readonly roleKey: string;
-  /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
-   *  `credentialBindings` entry and the `grantRequirements` entry that lets
-   *  the run use the bound credential (#288), and tell the model to call
-   *  `artifact_create`/`artifact_write`. Default false — with it false the
-   *  rendered source is byte-for-byte what it was before #466. Off until a
-   *  browser-driven deploy of a credential-bound specialist is proven; see
-   *  `ensureStageAgent` in `apps/web/src/client.ts`. */
-  readonly artifactTools?: boolean;
-  /** The id of the project tenant's `workflowArtifactsCredentialName(role.id)`
-   *  credential, which the entry's use-grant names (#288). Required whenever
-   *  the deployment is credential-bound; the row must exist before render. */
-  readonly artifactCredentialId?: string;
-};
-
-/**
- * A role's kit prompt has no runtime after render time to load a skill
- * from — an agent step's `systemPrompt` is a static string baked in here —
- * so the skill text rides along with it. `artifactTools` appends the rule
- * telling the model to call `artifact_create`/`artifact_write` — only when
- * it actually carries those tools.
- */
-function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
-  const prompt = `${role.system}\n\n${skillTextFor(role)}`;
-  return artifactTools ? `${prompt}\n\n${ARTIFACT_WRITE_RULE}` : prompt;
-}
-
-/**
- * The primary per-stage specialist's system prompt: its own kit role, and
- * nothing else. The brief evaluator (stage 1) and the requirements author
- * plus the four panel principals (stage 6) no longer fold in here as
- * reference sections — each becomes its own deployment, rendered against its
- * own `role`/`roleKey`, so folding their prompts in here too would run them
- * twice.
- */
-function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
-  return renderedPrompt(role, artifactTools);
-}
+/** The overlay the packed entry imports for the workspace's language and
+ *  design guidance, set between its role text and its skills. Written at
+ *  deploy, like the pin. */
+export const SPECIALIST_GUIDANCE_PATH = "workspace-guidance.js";
 
 /**
  * What a credential-bound deployment declares: the `hub` binding, and the
  * use-grant its run needs on exactly that credential. Interchange delivers
  * the bound credential's material but mints no `credential:<id>` / `use`
  * grant (#388), so the requirement is declared here, scoped to the package
- * the binding is for. The credential row exists before the entry is
- * rendered (`specialist-deploy.ts` ensures it first), so the entry names its
- * id: the one thing in a rendered entry that is the project's.
+ * the binding is for. No packed entry carries a binding yet; a package that
+ * imports `@corbits/artifacts` declares this itself in a later tools-on PR.
  */
 export function credentialAccess(pkg: string, credentialName: string, credentialId: string) {
   return {
@@ -364,92 +212,9 @@ export function credentialAccess(pkg: string, credentialName: string, credential
   };
 }
 
-/**
- * The entry module a stage specialist's workflow asset ships, as source: a
- * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
- * "wait"` and no `timeout` — the same shape `buildAgentDefinitionJson` in
- * `wb/apps/web/src/agent-deploy.ts` builds, so it stays armed across an
- * approval park instead of aborting a run waiting on a person. Which tools,
- * notes and bindings a deployment carries is `specialistRoleSpec`'s call;
- * this only renders it.
- */
-export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, role, roleKey, artifactTools = false, artifactCredentialId } = options;
-  const workflowId = specialistWorkflowId(stage);
-  const triggerAddress = `${workflowId}@solutions-builder.local`;
-
-  // Everything this role carries is its spec's (#41 step 1): the imports and
-  // the tools handed to the agent come from it in order, so an entry never
-  // imports a tool its closure lacks (`specialistTooling` decides both).
-  const spec = specialistRoleSpec({ stage, roleKey, artifactTools });
-  const toolImports = spec.toolImports.map((entry) => `${entry.lines.join("\n")}\n`).join("");
-  const tools = spec.toolImports.map((entry) => entry.tool).join(", ");
-
-  // CL-8719: a credential-bound stage specialist writes its draft as a real
-  // artifact through `@corbits/artifacts`' agent tool bundle, against the
-  // run-scoped mount `mountWorkflowArtifacts` puts on the hub
-  // (`embed-hub/src/index.ts`). `credentialBindings` names the `hub` handle
-  // it declares against a provider/credential the installer ensures at
-  // deploy time (`installer/src/artifacts-credential.ts`) before this
-  // asset's deployment id even exists, so both names are deterministic from
-  // the role alone. Opt-in (`artifactTools`, default off) — see
-  // `SpecialistSourceOptions`; today only stage 8 turns it on, and
-  // `publish_workspace` resolves the same credential itself rather than
-  // through the generic bundle, so stage 8 gets the binding without the
-  // bundle or the rule telling the model to call `artifact_create`.
-  const genericArtifactTools = spec.tooling.artifacts;
-  const credentialName = workflowArtifactsCredentialName(role.id);
-
-  let systemPrompt = systemPromptForRole(role, genericArtifactTools);
-  for (const note of spec.promptNotes) {
-    systemPrompt = `${systemPrompt}\n\n${note}`;
-  }
-
-  // `package` must match the consumer identity the sidecar's source-ref
-  // lineage keys credential capabilities against: a specialist deploys as
-  // `source` (not a pinned `tool-packages-manifest.json`), so
-  // `workflow-substrate-factory.ts`'s `sourceTools` arm sets
-  // `StepToolFactory.packageName` to the bundle's own `defineTool({ id })` --
-  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts` -- not the
-  // bare npm package name `reconcileDeclaredCredentials`/`toolConsumer` would
-  // expect from a pinned closure. Binding against the bare name here builds a
-  // `tool:@corbits/artifacts` consumer that never matches the bundle's own
-  // consumer identity, so the capability is never assembled and the tool's
-  // `resolve("credentials")` fails closed.
-  if (spec.credentialPackage && !artifactCredentialId) {
-    throw new Error(`stage ${stage} ${roleKey} is credential-bound: its entry needs the artifacts credential's id`);
-  }
-  const access = spec.credentialPackage && artifactCredentialId ? credentialAccess(spec.credentialPackage, credentialName, artifactCredentialId) : null;
-  const credentialBindings = access
-    ? `
-  credentialBindings: ${JSON.stringify(access.credentialBindings)},
-  grantRequirements: ${JSON.stringify(access.grantRequirements)},`
-    : "";
-
-  return `import { defineWorkflow, step } from "@intx/workflow/definition";
-import { defineAgent } from "@intx/agent";
-${toolImports}
-const SOURCE = ${JSON.stringify(source)};
-
-const AGENT = defineAgent({
-  id: ${JSON.stringify(role.id)},
-  systemPrompt: ${JSON.stringify(systemPrompt)},
-  tools: [${tools}],
-  capabilities: [],
-  inference: { sources: [SOURCE] },
-});
-
-export default defineWorkflow({
-  id: ${JSON.stringify(workflowId)},
-  triggers: [{ type: "mail", to: ${JSON.stringify(triggerAddress)} }],${credentialBindings}
-  steps: {
-    run: step({
-      agent: AGENT,
-      input: { from: "trigger.payload" },
-      drainBehavior: "wait",
-      triggers: "unbounded",
-    }),
-  },
-});
-`;
+/** A deploy-time module `workflow.js` imports a value from: the inference pin
+ *  (`SPECIALIST_INFERENCE_SOURCE_PATH`) or the workspace guidance
+ *  (`SPECIALIST_GUIDANCE_PATH`). */
+export function defaultExportModule(value: InferenceSourcePin | string): string {
+  return `export default ${JSON.stringify(value)};\n`;
 }

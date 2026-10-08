@@ -10,11 +10,11 @@
  * frontmatter `name` matches that directory).
  *
  * This asset is the record, not the seam a role's prompt is built from: a
- * workflow step's agent is defined once at render time with a static
- * `systemPrompt` string (see `specialist-source.ts`'s `renderedPrompt`), which
- * already carries the skill's instructions. There is no per-turn session
- * mount that reads this asset back into an agent — inventing one would be a
- * second place the same text is read from, not a seam the platform has.
+ * workflow step's agent is defined once in the specialist package's
+ * `src/workflow.ts` with a static `systemPrompt` string. There is no
+ * per-turn session mount that reads this asset back into an agent —
+ * inventing one would be a second place the same text is read from, not a
+ * seam the platform has.
  */
 import type { Transport } from "@intx/hub-client";
 import type { SkillRecord } from "@solutions-builder/app/kit";

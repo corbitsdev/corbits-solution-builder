@@ -15,8 +15,8 @@
     "dev:fresh": "bun scripts/dev.ts --desktop --fresh",
     "dev:stop": "bun scripts/stop-dev.ts",
     "host": "bun apps/hub/src/server.ts",
-    "ui:build": "bun run assets:pack-closure && bun run assets:pack-project-workflow && vite build -c apps/web/vite.config.ts",
-    "ui:watch": "bun run assets:pack-closure && bun run assets:pack-project-workflow && vite build -c apps/web/vite.config.ts --watch",
+    "ui:build": "bun run assets:pack-closure && bun run assets:pack-project-workflow && bun run assets:pack-specialists && vite build -c apps/web/vite.config.ts",
+    "ui:watch": "bun run assets:pack-closure && bun run assets:pack-project-workflow && bun run assets:pack-specialists && vite build -c apps/web/vite.config.ts --watch",
     "desktop:build": "bun scripts/desktop-release.ts",
     "desktop:build:dry": "bun scripts/desktop-release.ts --dry-run",
     "sidecar:build": "bun run vendor:build && bun scripts/build-sidecar.ts",
@@ -29,9 +29,10 @@
     "assets:pack-registry": "bun scripts/pack-registry-asset.ts",
     "assets:pack-closure": "bun scripts/pack-closure-static.ts",
     "assets:pack-project-workflow": "bun scripts/project-workflow-pack.ts",
+    "assets:pack-specialists": "bun scripts/specialist-pack.ts",
     "adopt:legacy-projects": "bun scripts/adopt-legacy-projects.ts",
     "postinstall": "bun run vendor:build",
-    "test": "bun test apps/hub/src packages/embed-hub/src packages/embedded-host/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/specialist-runtime/src packages/tools-deck/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/interface-build.test.ts scripts/stop-dev.test.ts scripts/closure-pack.test.ts scripts/lib/tarball.test.ts",
+    "test": "bun test apps/hub/src packages/embed-hub/src packages/embedded-host/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/specialist-runtime/src packages/tools-deck/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/interface-build.test.ts scripts/stop-dev.test.ts scripts/closure-pack.test.ts scripts/specialist-pack.test.ts scripts/lib/tarball.test.ts",
     "check:build": "bun run ui:build"
   },
   "dependencies": {

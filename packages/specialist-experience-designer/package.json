@@ -1,0 +1,18 @@
+{
+  "name": "@solutions-builder/specialist-experience-designer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The GUI design experience designer: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@intx/agent": "0.4.0",
+    "@intx/workflow": "workspace:*",
+    "@solutions-builder/specialist-shared": "workspace:*"
+  },
+  "interchange": {
+    "workflow": "./workflow.js"
+  }
+}
