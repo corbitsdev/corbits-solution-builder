@@ -62,7 +62,7 @@ import {
   useTheme,
   type WorkflowStep,
 } from "@corbits/react-ui";
-import { subscribeInbox } from "./inbox.ts";
+import { subscribeMailbox } from "./mailbox-events.ts";
 import { EMPTY_ACTIVITY, readActivity, type ActivityState } from "./activity.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
@@ -744,10 +744,15 @@ export function App() {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // A mailbox event refreshes the decision queue immediately rather than
-  // waiting on the poll above — an inbox item is often exactly the nudge
-  // that a decision landed.
-  useEffect(() => subscribeInbox(() => {}, () => void refresh()), [refresh]);
+  // A decision notice is filed to the workspace mailbox (`decision-notify.ts`),
+  // so the workspace tenant's own stream is the nudge that refreshes the
+  // decision queue at once rather than on the poll above. The legacy
+  // un-scoped stream watched one arbitrary principal instead (#834).
+  useEffect(() => {
+    if (tenantId === null) return;
+    const subscription = subscribeMailbox(tenantId, () => void refresh());
+    return () => subscription.unsubscribe();
+  }, [tenantId, refresh]);
 
   // The bell's Activity (#834): every active project's mailbox, on the same
   // cadence as the decision fold (it costs the same per-project reads), and
