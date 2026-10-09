@@ -28,6 +28,7 @@ import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
+import { selectionPopoverPosition } from "./selection-popover.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
@@ -227,7 +228,14 @@ export function StageDocument({
       return;
     }
     setSelNote("");
-    setSelPop({ x: Math.min(event.clientX, window.innerWidth - 280), y: event.clientY + 10, quote });
+    // The words' own bounds, not the pointer's release point (#749); a range
+    // with no box (nothing laid out) falls back to where the mouse let go.
+    const bounds = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+    const anchor =
+      bounds && (bounds.width > 0 || bounds.height > 0)
+        ? bounds
+        : { left: event.clientX, top: event.clientY, bottom: event.clientY };
+    setSelPop({ ...selectionPopoverPosition(anchor, { width: window.innerWidth, height: window.innerHeight }), quote });
   };
   const attachSelection = () => {
     if (!selPop) return;
