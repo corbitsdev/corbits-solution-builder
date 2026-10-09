@@ -28,6 +28,7 @@ import {
   ensureProjectWorkflow,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
+  getArtifactVersion as installerGetArtifactVersion,
   install as installerInstall,
   InstallerError,
   installProjectAuthority,
@@ -2221,6 +2222,25 @@ export const api = {
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
     if (typeof uploadId !== "string") return { content: found.artifact.content };
     return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
+  },
+  /**
+   * Every version of an artifact the store can read, oldest first, the last
+   * being the current one -- what a project export carries (#632). A file
+   * uploaded through `/artifacts/upload` keeps one set of bytes in the blob
+   * store rather than per-version content, so it is one entry: the current
+   * version, its bytes as the same `data:` URL `artifactContent` returns.
+   */
+  artifactVersions: async (tenantId: string, nodeId: string): Promise<{ version: number; content: string }[]> => {
+    const transport = createHubTransport();
+    const found = await findArtifact(transport, tenantId, nodeId);
+    if (!found) return [];
+    const { artifact } = found;
+    const uploadId = (artifact.source as { upload?: { id?: unknown } }).upload?.id;
+    if (typeof uploadId === "string") return [{ version: artifact.version, content: await downloadUploadedArtifact(found.tenantId, nodeId) }];
+    const earlier = await Promise.all(
+      Array.from({ length: artifact.version - 1 }, (_, at) => installerGetArtifactVersion(transport, found.tenantId, nodeId, at + 1)),
+    );
+    return [...earlier.flatMap((row) => (row ? [{ version: row.version, content: row.content }] : [])), { version: artifact.version, content: artifact.content }];
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>

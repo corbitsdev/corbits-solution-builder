@@ -28,7 +28,7 @@ function deps(overrides: Partial<BundleDeps> = {}): BundleDeps {
       tenantId: "tenant_1",
       nodes: [node()],
     }),
-    artifactContent: async () => ({ content: "the brief" }),
+    artifactVersions: async () => [{ version: 1, content: "the brief" }],
     stageAgentAddresses: async (_projectId, stage) => (stage === 1 ? ["dep_1@example"] : []),
     readStageThread: async () => [
       { id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" },
@@ -41,12 +41,13 @@ describe("assembleBundle", () => {
   test("assembles artifacts, conversations, and project fields", async () => {
     const bundle = await assembleBundle("proj_1", deps());
     expect(bundle.format).toBe("solutions-builder.project");
-    expect(bundle.version).toBe(3);
+    expect(bundle.version).toBe(4);
     expect(bundle.notes).toBe("workflow events are not included");
     expect(bundle.workflow).toBeUndefined();
     expect(bundle.project).toEqual({ id: "proj_1", title: "Renew the lease", policy: { audiences: [], audienceQuorum: 0 } });
     expect(bundle.artifacts).toHaveLength(1);
     expect(bundle.artifacts[0]?.content).toBe("the brief");
+    expect(bundle.artifacts[0]?.versions).toEqual([{ version: 1, content: "the brief" }]);
     expect(bundle.artifacts[0]?.node.id).toBe("node_1");
     expect(bundle.conversations).toEqual([
       { stage: 1, messages: [{ id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" }] },
@@ -62,6 +63,34 @@ describe("assembleBundle", () => {
       }),
     );
     expect(bundle.conversations.map((c) => c.stage)).toEqual([1]);
+  });
+
+  // #632: every version rides along, oldest first; `content` stays the current one.
+  test("carries each artifact's version chain, the current content last", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectView: async () => ({ project: { id: "proj_1", title: "Renew the lease", policy: {} }, tenantId: "tenant_1", nodes: [node({ version: 3 })] }),
+        artifactVersions: async (_tenantId, nodeId) => [
+          { version: 1, content: `${nodeId} first` },
+          { version: 2, content: `${nodeId} second` },
+          { version: 3, content: `${nodeId} third` },
+        ],
+      }),
+    );
+    expect(bundle.artifacts[0]?.versions).toEqual([
+      { version: 1, content: "node_1 first" },
+      { version: 2, content: "node_1 second" },
+      { version: 3, content: "node_1 third" },
+    ]);
+    expect(bundle.artifacts[0]?.content).toBe("node_1 third");
+    expect(() => parseBundle(JSON.parse(JSON.stringify(bundle)))).not.toThrow();
+  });
+
+  test("an artifact the store cannot read exports with no versions and empty content", async () => {
+    const bundle = await assembleBundle("proj_1", deps({ artifactVersions: async () => [] }));
+    expect(bundle.artifacts[0]?.versions).toEqual([]);
+    expect(bundle.artifacts[0]?.content).toBe("");
   });
 
   test("never carries a secret-looking field through into the bundle", async () => {
@@ -111,6 +140,14 @@ describe("parseBundle", () => {
     expect(() => parseBundle(rest)).toThrow(/artifacts/);
   });
 
+  test("rejects a malformed versions array, and accepts an artifact without one", () => {
+    const base = validBundle() as Record<string, unknown>;
+    const node = { id: "n", kind: "problem_brief", stage: 1, title: "t", version: 1, artifactId: "n", contentHash: "n@1", createdAt: "2026-01-01T00:00:00.000Z", supersededByNodeId: null, provenance: { producer: "agent" } };
+    expect(() => parseBundle({ ...base, version: 4, artifacts: [{ node, content: "x", versions: [{ version: "1", content: "x" }] }] })).toThrow(/versions/);
+    expect(() => parseBundle({ ...base, version: 4, artifacts: [{ node, content: "x", versions: "x" }] })).toThrow(/versions/);
+    expect(() => parseBundle({ ...base, version: 3, artifacts: [{ node, content: "x" }] })).not.toThrow();
+  });
+
   test("rejects a non-object value", () => {
     expect(() => parseBundle(null)).toThrow();
     expect(() => parseBundle("not a bundle")).toThrow();
@@ -143,7 +180,7 @@ describe("the bundle's workflow", () => {
         }),
       }),
     );
-    expect(bundle.version).toBe(3);
+    expect(bundle.version).toBe(4);
     expect(bundle.workflow).toEqual({
       stage: 8,
       done: false,

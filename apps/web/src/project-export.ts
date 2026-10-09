@@ -1,21 +1,27 @@
 /**
  * A project exported as one JSON bundle, assembled entirely in the browser
- * from reads the client already has: the artifact graph and its content,
- * each deployed stage's mail thread, and the project's own title and policy
- * (CL-8702). No import path exists yet -- see the PR body.
+ * from reads the client already has: the artifact graph with every version
+ * of each artifact (#632), each deployed stage's mail thread, and the
+ * project's own title and policy (CL-8702). `project-import.ts` reads it
+ * back.
  */
 import type { ArtifactNode } from "./client.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
-/** v3 carries the workflow's position (#652); a v2 bundle is still read. */
-export const BUNDLE_VERSION = 3 as const;
-export const READABLE_BUNDLE_VERSIONS: readonly number[] = [2, 3];
+/** v4 carries every version of each artifact (#632), v3 the workflow's position (#652); a v2 or v3 bundle is still read. */
+export const BUNDLE_VERSION = 4 as const;
+export const READABLE_BUNDLE_VERSIONS: readonly number[] = [2, 3, 4];
 const STAGES = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 /** A node as recorded; its lineage position is derived when a project is read. */
 export type ExportedNode = Omit<ArtifactNode, "position">;
-export type ExportedArtifact = { node: ExportedNode; content: string };
+/** One of an artifact's own versions, numbered as the store numbers it. */
+export type ExportedVersion = { version: number; content: string };
+/** `content` is the current version's. `versions` is every version the
+ *  store could read, oldest first, the last being the current one; absent
+ *  from a v2 or v3 bundle, which carried only the current content. */
+export type ExportedArtifact = { node: ExportedNode; content: string; versions?: ExportedVersion[] };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 
 /** The workflow's position as exported (#652): what the import replays so the new project lands where the old one was. */
@@ -39,7 +45,7 @@ export type BundleWorkflow = {
 
 export type ProjectBundle = {
   format: typeof BUNDLE_FORMAT;
-  version: 2 | 3;
+  version: 2 | 3 | 4;
   exportedAt: string;
   project: { id: string; title: string; policy: unknown };
   artifacts: ExportedArtifact[];
@@ -55,7 +61,8 @@ export type BundleDeps = {
     tenantId: string;
     nodes: ArtifactNode[];
   }>;
-  artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
+  /** Every version of the artifact the store can read, oldest first, the last being the current one. */
+  artifactVersions: (tenantId: string, nodeId: string) => Promise<ExportedVersion[]>;
   /** Every address the stage's specialist has run at: a redeploy (send-back,
    *  restart, model switch) leaves earlier mail under earlier addresses. */
   stageAgentAddresses: (projectId: string, stage: number) => Promise<string[]>;
@@ -112,10 +119,10 @@ export async function assembleBundle(projectId: string, deps: BundleDeps): Promi
   const detail = await deps.projectView(projectId);
 
   const artifacts: ExportedArtifact[] = await Promise.all(
-    detail.nodes.map(async (node) => ({
-      node: pickNode(node),
-      content: (await deps.artifactContent(detail.tenantId, node.id)).content,
-    })),
+    detail.nodes.map(async (node) => {
+      const versions = (await deps.artifactVersions(detail.tenantId, node.id)).map(({ version, content }) => ({ version, content }));
+      return { node: pickNode(node), content: versions.at(-1)?.content ?? "", versions };
+    }),
   );
 
   const conversations: ExportedConversation[] = [];
@@ -192,6 +199,13 @@ export function parseBundle(value: unknown): ProjectBundle {
   if (!Array.isArray(record.artifacts)) {
     throw new Error("project bundle is missing artifacts");
   }
+  for (const [index, artifact] of (record.artifacts as unknown[]).entries()) {
+    const versions = typeof artifact === "object" && artifact !== null ? (artifact as Record<string, unknown>).versions : undefined;
+    if (versions === undefined) continue;
+    if (!Array.isArray(versions) || !versions.every(isExportedVersion)) {
+      throw new Error(`project bundle's artifact ${String(index)} has a malformed versions array`);
+    }
+  }
   if (!Array.isArray(record.conversations)) {
     throw new Error("project bundle is missing conversations");
   }
@@ -199,6 +213,10 @@ export function parseBundle(value: unknown): ProjectBundle {
     throw new Error("project bundle is missing notes");
   }
   return record as ProjectBundle;
+}
+
+function isExportedVersion(value: unknown): value is ExportedVersion {
+  return typeof value === "object" && value !== null && typeof (value as ExportedVersion).version === "number" && typeof (value as ExportedVersion).content === "string";
 }
 
 function slug(value: string): string {
