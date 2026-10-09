@@ -6,8 +6,9 @@
  * draft, or the open question.
  */
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiFailure, type ArtifactNode } from "../../client.js";
+import { api, type ArtifactNode } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { failureReason } from "./failure-message.ts";
 import {
   applyWithdrawn,
   parseWithdrawnTurns,
@@ -29,6 +30,10 @@ export type WithdrawnTurnsState = {
   /** Withdraws the pending turn and hands its body back to the composer via
    *  `restoreDraft` — abort restores the draft, it does not discard it. */
   readonly stop: () => Promise<void>;
+  /** The marker could not be read, or is not a marker: a stopped turn's
+   *  reply may show until it can be (#570). */
+  readonly error: string | null;
+  readonly retry: () => void;
 };
 
 export function useWithdrawnTurns(
@@ -45,7 +50,10 @@ export function useWithdrawnTurns(
     [nodes],
   );
   const [marks, setMarks] = useState<WithdrawnMark[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    setError(null);
     if (!withdrawnNode) {
       setMarks([]);
       return;
@@ -56,11 +64,13 @@ export function useWithdrawnTurns(
       .then((result) => {
         if (!cancelled) setMarks(parseWithdrawnTurns(result.content));
       })
-      .catch(() => {});
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(failureReason(cause));
+      });
     return () => {
       cancelled = true;
     };
-  }, [withdrawnNode?.id, tenantId]);
+  }, [withdrawnNode?.id, tenantId, attempt]);
 
   const ids = useMemo(
     () => new Set(marks.filter((mark) => mark.stage === stage).map((mark) => mark.messageId)),
@@ -77,9 +87,9 @@ export function useWithdrawnTurns(
       await api.withdrawTurn(projectId, tenantId, { messageId: withdrawn.id, stage });
       setMarks((current) => [...current, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);
     } catch (cause) {
-      onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      onError(failureReason(cause));
     }
   };
 
-  return { messages, ids, pending, marks, stop };
+  return { messages, ids, pending, marks, stop, error, retry: () => setAttempt((count) => count + 1) };
 }

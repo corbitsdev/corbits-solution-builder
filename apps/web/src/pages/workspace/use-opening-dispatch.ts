@@ -22,10 +22,10 @@ import { useEffect, useRef, useState } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   api,
-  ApiFailure,
   createHubTransport,
   type ProjectDetail,
 } from "../../client.js";
+import { failureReason } from "./failure-message.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { markerAlreadySent } from "../../decision-notify.ts";
 import { stageName } from "../../components.jsx";
@@ -41,9 +41,33 @@ import { approvedChainQuery } from "./approved-chain.ts";
 import { queryClient } from "../../queries/client.ts";
 import { keys } from "../../queries/keys.ts";
 
+export type OpeningFailure = { readonly what: string; readonly detail: string };
+
+/**
+ * A read the opening needs that failed, named by what it was for, so the
+ * failure line says a read failed and which, never that a send did (#570).
+ */
+export class OpeningReadFailure extends Error {
+  constructor(
+    readonly what: string,
+    cause: unknown,
+  ) {
+    super(failureReason(cause));
+  }
+}
+
+/** What the failure line says for whatever the opening's dispatch threw. */
+export function describeOpeningFailure(cause: unknown): OpeningFailure {
+  if (cause instanceof OpeningReadFailure) return { what: cause.what, detail: cause.message };
+  return { what: "The opening message could not be sent", detail: failureReason(cause) };
+}
+
 export type OpeningDispatch = {
-  /** The opening send failed — surfaced with a retry, never retried forever. */
-  readonly error: string | null;
+  /** The opening, or the send-back cue, could not be prepared or sent:
+   *  what, and the reason, surfaced with a retry, never retried forever.
+   *  A read that fails is shown too (#570): dropped, it left an empty
+   *  chat with no reason and nothing to try. */
+  readonly failure: OpeningFailure | null;
   readonly retry: () => void;
   /** `approve()` hands the just-approved draft to the next stage's thread. */
   readonly queueOpening: (stage: number, body: string) => void;
@@ -99,32 +123,24 @@ export function useOpeningDispatch({
   // retrying forever.
   const autoRetriedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<OpeningFailure | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
 
-  // Stage 1's own opening problem statement.
-  const [opening, setOpening] = useState<{ body: string } | null | undefined>(undefined);
-  useEffect(() => {
-    if (stage !== 1) return;
-    let cancelled = false;
-    api
-      .projectOpening(detail.project.id)
-      .then((result) => {
-        if (!cancelled) setOpening(result);
-      })
-      .catch(() => {
-        if (!cancelled) setOpening(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage]);
+  // Stage 1's own opening problem statement. A query, so a read that fails
+  // is held with its reason and refetched from Try again, never dropped as
+  // "no opening" (#570).
+  const opening = useQuery({
+    queryKey: keys.projectOpening.of(detail.project.id),
+    queryFn: () => api.projectOpening(detail.project.id),
+    enabled: stage === 1,
+    staleTime: Infinity,
+  });
 
   // The previous project's opening state must never leak into a newly opened
   // one even if the keyed remount ever regresses.
   useEffect(() => {
     setPendingOpening(null);
-    setError(null);
+    setFailure(null);
     openedRef.current = null;
     inFlightRef.current = null;
     autoRetriedRef.current = null;
@@ -173,6 +189,20 @@ export function useOpeningDispatch({
     // keyed to this project's stage rather than a decision id, so two tabs
     // that both load an empty stage N+1 thread never both send its opening.
     const marker = `[opening:${detail.project.id}:${stage}]`;
+    // Every route in ends here when it fails, a read as much as the send
+    // (#570): shown with its reason, tried once more on its own, then
+    // left to Try again. Dropped, a failed read was an empty chat with no
+    // reason, and nothing to try.
+    const failed = (cause: unknown) => {
+      if (cancelled) return;
+      setFailure(describeOpeningFailure(cause));
+      if (autoRetriedRef.current !== key) {
+        autoRetriedRef.current = key;
+        setTimeout(() => {
+          if (!cancelled) setRetryAttempt((attempt) => attempt + 1);
+        }, 3_000);
+      }
+    };
     const dispatchOpening = (opening: string) => {
       if (cancelled || openedRef.current === key || inFlightRef.current === key) return;
       inFlightRef.current = key;
@@ -187,7 +217,11 @@ export function useOpeningDispatch({
           // Every approved artifact before this stage, and the person's
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
-          const chain = await queryClient.fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage }));
+          const chain = await queryClient
+            .fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage }))
+            .catch((cause: unknown) => {
+              throw new OpeningReadFailure("The record before this stage could not be read", cause);
+            });
           // The workspace's language is in the specialist's own instructions
           // (`localizedGuidance`, client.ts), where a changed setting redeploys
           // it; the mail carries the record and the stage's lead, nothing else.
@@ -198,25 +232,16 @@ export function useOpeningDispatch({
           // a throw above skips this, so a failed send is retried
           // rather than silently treated as sent.
           openedRef.current = key;
-          setError(null);
+          setFailure(null);
           await reloadThread();
         })
-        .catch((cause: unknown) => {
-          if (cancelled) return;
-          setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-          if (autoRetriedRef.current !== key) {
-            autoRetriedRef.current = key;
-            setTimeout(() => {
-              if (!cancelled) setRetryAttempt((attempt) => attempt + 1);
-            }, 3_000);
-          }
-        })
+        .catch(failed)
         .finally(() => {
           if (inFlightRef.current === key) inFlightRef.current = null;
         });
     };
     if (stage === 1) {
-      if (opening?.body) dispatchOpening(opening.body);
+      if (opening.data?.body) dispatchOpening(opening.data.body);
     } else if (stage === 6 && (!workflowView || workflowView.requirements.length === 0)) {
       // The Architect must not draft before `mint_requirements` has run for
       // this project (CL-8862) — `Stage6Panel` mints them off the
@@ -235,7 +260,9 @@ export function useOpeningDispatch({
     } else if (stage === 9) {
       const review = workflowView?.reviews[8];
       const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
-      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
+      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef })
+        .then(dispatchOpening)
+        .catch((cause: unknown) => failed(new OpeningReadFailure(`${stageName(9)}'s opening could not be composed`, cause)));
     } else if (previousApproved) {
       void api
         .artifactContent(tenantId, previousApproved.artifactId)
@@ -263,7 +290,7 @@ export function useOpeningDispatch({
                 : approved;
           dispatchOpening(body);
         })
-        .catch(() => {});
+        .catch((cause: unknown) => failed(new OpeningReadFailure(`${stageName(stage - 1)}'s approved document could not be read`, cause)));
     }
     return () => {
       cancelled = true;
@@ -275,7 +302,7 @@ export function useOpeningDispatch({
     stage,
     detail.project.id,
     detail.nodes,
-    opening,
+    opening.data,
     pendingOpening,
     previousApproved,
     tenantId,
@@ -315,23 +342,38 @@ export function useOpeningDispatch({
     // would be opened with; and the draft the send-back is about, the
     // specialist's latest, whole.
     const draft = [...messages].reverse().find((message) => message.author === "agent" && message.body.trim().length > 0)?.body ?? null;
-    void queryClient
-      .fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage: stage + 1 }))
-      .catch(() => "")
-      .then((record) => {
-        const cue = sendBackResumeCue({ stage, decisions: workflowView?.decisions ?? [], messages, requirements: workflowView?.requirements ?? [], record, draft });
-        if (!cue) return;
-        return api.sendStageMail(tenantId, agentAddress, { body: cue.body, subject: cue.subject }).then(() => reloadThread());
-      })
-      .catch(() => {
-        // Not marked as sent: the next thread or view change retries.
+    void (async () => {
+      let record: string;
+      try {
+        record = await queryClient.fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage: stage + 1 }));
+      } catch (cause) {
+        // The record is what the cue is for (#799): one without it is not
+        // sent, and the failed read is shown instead of read as "" (#570).
         cueInFlightRef.current = null;
-      });
-  }, [stage, agentAddress, addresses, handoffSettled, loadedFor, messages, workflowView, tenantId, reloadThread]);
+        setFailure({ what: "The record for the send-back cue could not be read", detail: failureReason(cause) });
+        return;
+      }
+      const cue = sendBackResumeCue({ stage, decisions: workflowView?.decisions ?? [], messages, requirements: workflowView?.requirements ?? [], record, draft });
+      if (!cue) return;
+      try {
+        await api.sendStageMail(tenantId, agentAddress, { body: cue.body, subject: cue.subject });
+        setFailure(null);
+        await reloadThread();
+      } catch (cause) {
+        // Not marked as sent: the next thread or view change, or Try again, retries.
+        cueInFlightRef.current = null;
+        setFailure({ what: "The send-back cue could not be sent", detail: failureReason(cause) });
+      }
+    })();
+  }, [stage, agentAddress, addresses, handoffSettled, loadedFor, messages, workflowView, tenantId, reloadThread, retryAttempt]);
 
   return {
-    error,
-    retry: () => setRetryAttempt((attempt) => attempt + 1),
+    failure: opening.error ? { what: "The opening could not be read", detail: failureReason(opening.error) } : failure,
+    retry: () => {
+      setFailure(null);
+      if (opening.error) void opening.refetch();
+      setRetryAttempt((attempt) => attempt + 1);
+    },
     queueOpening: (nextStage, body) => setPendingOpening({ stage: nextStage, body }),
     stage6Material,
   };

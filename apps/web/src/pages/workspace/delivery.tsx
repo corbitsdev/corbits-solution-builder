@@ -26,7 +26,8 @@ import {
 } from "../../pending-approvals.ts";
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
-import { Banner, Button, documentName, shortHash } from "../../components.jsx";
+import { failureReason } from "./failure-message.ts";
+import { Banner, Button, FailedRead, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { downloadBuild } from "../graph.jsx";
 
@@ -192,7 +193,9 @@ function DeliveryDecision({
       }
       setPending(null);
       if (lastSeenApprovalId) {
-        const resolved = await approvalById(approvalTenant.current, lastSeenApprovalId, transport).catch(() => null);
+        // A failed read goes to the pane's error line (#570), where the
+        // next poll tick retries it; read as null it showed "not delivered".
+        const resolved = await approvalById(approvalTenant.current, lastSeenApprovalId, transport);
         if (seq !== requestSeq.current) return;
         const isDelivered = resolved !== null && resolved.status === "approved";
         setDelivered(isDelivered ? resolved : null);
@@ -222,8 +225,14 @@ function DeliveryDecision({
   const verificationNode = findVerificationNode(nodes, archiveRef);
   const archive = findArchiveNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
+  // A record that is there but cannot be read is a failed read with its
+  // reason and Try again (#570), never "verification is missing": missing
+  // is only what no record at all is.
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [verificationAttempt, setVerificationAttempt] = useState(0);
 
   useEffect(() => {
+    setVerificationError(null);
     if (!verificationNode) {
       setVerification(parseDeliveryVerification(null));
       return;
@@ -233,19 +242,23 @@ function DeliveryDecision({
       .artifactContent(tenantId, verificationNode.id)
       .then((result) => {
         if (cancelled) return;
+        let parsed: unknown;
         try {
-          setVerification(parseDeliveryVerification(JSON.parse(result.content)));
+          parsed = JSON.parse(result.content);
         } catch {
-          setVerification(parseDeliveryVerification(undefined));
+          throw new Error("The record is not valid JSON.");
         }
+        setVerification(parseDeliveryVerification(parsed));
       })
-      .catch(() => {
-        if (!cancelled) setVerification(parseDeliveryVerification(undefined));
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setVerification(null);
+        setVerificationError(failureReason(cause));
       });
     return () => {
       cancelled = true;
     };
-  }, [tenantId, verificationNode?.id]);
+  }, [tenantId, verificationNode?.id, verificationAttempt]);
 
   if (!loaded) return null;
 
@@ -319,7 +332,7 @@ function DeliveryDecision({
         </>
       ) : null}
       {error ? <Banner tone="error" title={error} /> : null}
-      {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
+      {!pending && !delivered && !error ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
         artifacts.map((artifact, index) => (
@@ -333,6 +346,15 @@ function DeliveryDecision({
         <>
           <h2>{documentName("delivery_verification")}</h2>
           <VerificationList verification={verification} />
+        </>
+      ) : verificationError ? (
+        <>
+          <h2>{documentName("delivery_verification")}</h2>
+          <FailedRead
+            what="The verification record could not be read"
+            detail={verificationError}
+            onRetry={() => setVerificationAttempt((count) => count + 1)}
+          />
         </>
       ) : null}
       {howToRun ? <Markdown source={howToRun} /> : null}

@@ -19,6 +19,11 @@ export type WorkflowViewState = {
   /** The workflow failed to start or load — drive the failure state, never a guessed stage. */
   readonly openingFailed: boolean;
   readonly startError: string | null;
+  /** The first read after ensure failed: the reason, for the banner (#570). */
+  readonly viewError: string | null;
+  /** The last quiet re-read failed: what is shown is the last view that was
+   *  read, and may be behind. Cleared by the next re-read that lands. */
+  readonly reloadError: string | null;
   /** The workflow was moved onto new code, and the new rules refused an
    *  earlier decision (#51): what was refused, in the workflow's own words.
    *  Null when nothing was refused, or no replay happened. */
@@ -55,7 +60,8 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
   const [replayNotice, setReplayNotice] = useState<{ title: string; detail: string } | null>(null);
-  const [viewFailed, setViewFailed] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
@@ -65,7 +71,16 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const reload = useMemo(
     () =>
       singleFlight(async () => {
-        const next = await api.projectWorkflowView(projectId).catch(() => null);
+        let next: ProjectWorkflowView | null;
+        try {
+          next = await api.projectWorkflowView(projectId);
+        } catch (cause) {
+          // Said, not dropped (#570): the view on screen is the last one
+          // read, and the person deciding on it should know it may be behind.
+          setReloadError(describeFailure(cause));
+          return null;
+        }
+        setReloadError(null);
         if (next && next.stage >= 1) {
           setView(next);
           viewSnapshots.set(projectId, next);
@@ -89,7 +104,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
 
   const retryOpening = useCallback(() => {
     setStartError(null);
-    setViewFailed(false);
+    setViewError(null);
     setAttempt((value) => value + 1);
   }, []);
 
@@ -144,8 +159,8 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
           next = await api.projectWorkflowView(projectId);
         }
         if (next && next.stage < 1) throw new Error("the project workflow did not start");
-      } catch {
-        if (!cancelled) setViewFailed(true);
+      } catch (cause) {
+        if (!cancelled) setViewError(describeFailure(cause));
         return;
       }
       if (!cancelled) {
@@ -177,14 +192,17 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setView(viewSnapshots.get(projectId) ?? null);
     setStartError(null);
     setReplayNotice(null);
-    setViewFailed(false);
+    setViewError(null);
+    setReloadError(null);
   }, [projectId]);
 
   return {
     view,
     resolved: view !== null,
-    openingFailed: startError !== null || viewFailed,
+    openingFailed: startError !== null || viewError !== null,
     startError,
+    viewError,
+    reloadError,
     replayNotice,
     retryOpening,
     refreshingAfterAction,

@@ -232,6 +232,20 @@ export function Banner({
   );
 }
 
+/** A read that failed, said in one line where its content would be: what
+ *  could not be read, the reason, and Try again. Never "nothing there"
+ *  (#570): a dropped read left a blank or a stale state with no reason. */
+export function FailedRead({ what, detail, onRetry }: { what: string; detail: string; onRetry: () => void }) {
+  return (
+    <p className="warning-note" role="alert">
+      {what}: {detail}{" "}
+      <button type="button" className="link-button" onClick={onRetry}>
+        Try again
+      </button>
+    </p>
+  );
+}
+
 export function Field({
   label,
   helper,

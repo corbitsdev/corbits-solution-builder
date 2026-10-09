@@ -33,7 +33,7 @@ import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudienceGate, AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Banner, Button, CopyButton, GuideDock, documentName, stageName } from "../../components.jsx";
+import { Banner, Button, CopyButton, FailedRead, GuideDock, documentName, stageName } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { specialistActivity } from "./specialist-activity.ts";
@@ -1044,6 +1044,9 @@ export function StageWorkspace({
       rows={
         <>
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {withdrawn.error ? (
+            <FailedRead what="The stopped turns could not be read, so a stopped turn's reply may show" detail={withdrawn.error} onRetry={withdrawn.retry} />
+          ) : null}
           {/* Stage 4's gate sits above the box like every document stage's
               (#720), not at the end of the design pane's tools row. The
               workflow's verdict is its only gate. */}
@@ -1087,12 +1090,16 @@ export function StageWorkspace({
       {openingFailed ? (
         <Banner
           tone="error"
-          title={
-            workflow.startError
-              ? `The project workflow could not be started: ${workflow.startError}`
-              : "The project workflow could not be read."
-          }
+          title={workflow.startError ? "The project workflow could not be started" : "The project workflow could not be read"}
           action={{ label: "Try again", onClick: workflow.retryOpening }}
+        >
+          {workflow.startError ?? workflow.viewError}
+        </Banner>
+      ) : workflow.reloadError ? (
+        <FailedRead
+          what="The project workflow could not be re-read, so this view may be behind"
+          detail={workflow.reloadError}
+          onRetry={() => void workflow.reload()}
         />
       ) : null}
 
@@ -1262,13 +1269,9 @@ export function StageWorkspace({
         now={agentAddress ? { title: guidance.title, detail: guidance.detail } : null}
       />
 
-      {agentAddress && openingDispatch.error ? (
-        <Banner
-          tone="error"
-          title="The opening message could not be sent"
-          action={{ label: "Try again", onClick: openingDispatch.retry }}
-        >
-          {openingDispatch.error}
+      {agentAddress && openingDispatch.failure ? (
+        <Banner tone="error" title={openingDispatch.failure.what} action={{ label: "Try again", onClick: openingDispatch.retry }}>
+          {openingDispatch.failure.detail}
         </Banner>
       ) : null}
 
