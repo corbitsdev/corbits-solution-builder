@@ -20,8 +20,11 @@ export type ExportedNode = Omit<ArtifactNode, "position">;
 export type ExportedVersion = { version: number; content: string };
 /** `content` is the current version's. `versions` is every version the
  *  store could read, oldest first, the last being the current one; absent
- *  from a v2 or v3 bundle, which carried only the current content. */
-export type ExportedArtifact = { node: ExportedNode; content: string; versions?: ExportedVersion[] };
+ *  from a v2 or v3 bundle, which carried only the current content.
+ *  `sources` names the bundled nodes this one was generated from (the
+ *  graph's edges), so the import can link them again; absent from a bundle
+ *  exported before it was carried. */
+export type ExportedArtifact = { node: ExportedNode; content: string; versions?: ExportedVersion[]; sources?: string[] };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 
 /** The workflow's position as exported (#652): what the import replays so the new project lands where the old one was. */
@@ -63,6 +66,8 @@ export type BundleDeps = {
   }>;
   /** Every version of the artifact the store can read, oldest first, the last being the current one. */
   artifactVersions: (tenantId: string, nodeId: string) => Promise<ExportedVersion[]>;
+  /** The graph's edges, each a node and one it was generated from; a bundle without them imports every node as a root. */
+  artifactEdges?: (projectId: string) => Promise<readonly { childNodeId: string; sourceNodeId: string }[]>;
   /** Every address the stage's specialist has run at: a redeploy (send-back,
    *  restart, model switch) leaves earlier mail under earlier addresses. */
   stageAgentAddresses: (projectId: string, stage: number) => Promise<string[]>;
@@ -118,10 +123,17 @@ function pickMessage(message: ChatMessage): ChatMessage {
 export async function assembleBundle(projectId: string, deps: BundleDeps): Promise<ProjectBundle> {
   const detail = await deps.projectView(projectId);
 
+  const bundled = new Set(detail.nodes.map((node) => node.id));
+  const sourcesOf = new Map<string, string[]>();
+  for (const edge of deps.artifactEdges ? await deps.artifactEdges(projectId).catch(() => []) : []) {
+    if (!bundled.has(edge.childNodeId) || !bundled.has(edge.sourceNodeId)) continue;
+    sourcesOf.set(edge.childNodeId, [...(sourcesOf.get(edge.childNodeId) ?? []), edge.sourceNodeId]);
+  }
+
   const artifacts: ExportedArtifact[] = await Promise.all(
     detail.nodes.map(async (node) => {
       const versions = (await deps.artifactVersions(detail.tenantId, node.id)).map(({ version, content }) => ({ version, content }));
-      return { node: pickNode(node), content: versions.at(-1)?.content ?? "", versions };
+      return { node: pickNode(node), content: versions.at(-1)?.content ?? "", versions, sources: sourcesOf.get(node.id) ?? [] };
     }),
   );
 
@@ -200,10 +212,12 @@ export function parseBundle(value: unknown): ProjectBundle {
     throw new Error("project bundle is missing artifacts");
   }
   for (const [index, artifact] of (record.artifacts as unknown[]).entries()) {
-    const versions = typeof artifact === "object" && artifact !== null ? (artifact as Record<string, unknown>).versions : undefined;
-    if (versions === undefined) continue;
-    if (!Array.isArray(versions) || !versions.every(isExportedVersion)) {
+    const { versions, sources } = typeof artifact === "object" && artifact !== null ? (artifact as Record<string, unknown>) : {};
+    if (versions !== undefined && (!Array.isArray(versions) || !versions.every(isExportedVersion))) {
       throw new Error(`project bundle's artifact ${String(index)} has a malformed versions array`);
+    }
+    if (sources !== undefined && (!Array.isArray(sources) || !sources.every((entry) => typeof entry === "string"))) {
+      throw new Error(`project bundle's artifact ${String(index)} has a malformed sources array`);
     }
   }
   if (!Array.isArray(record.conversations)) {
