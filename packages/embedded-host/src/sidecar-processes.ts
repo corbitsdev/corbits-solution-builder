@@ -1,8 +1,10 @@
 /**
  * Spawned sidecars are child processes of this host, recorded by the process
- * provisioner as `<allocations>/<allocation>/gen-<n>/sidecar.pid`. They outlive
- * a host that exits without stopping them and then dial a hub that is gone,
- * forever. Stopping the host stops them; a smoke does the same on teardown.
+ * provisioner as `<allocations>/<allocation>/gen-<n>/sidecar.pid` beside the
+ * `sidecar.start` that says which incarnation of that pid is meant. They
+ * outlive a host that exits without stopping them and then dial a hub that is
+ * gone, forever. Stopping the host stops them; a smoke does the same on
+ * teardown.
  *
  * Only those two directory levels are read (#146). An allocation directory
  * also holds the sidecar's materialised closure, `node_modules` and all, and
@@ -10,8 +12,9 @@
  * longer than the 10 s `dev:stop` allows before it kills the host outright,
  * so the database close that follows this never ran.
  */
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { ownsGroup, readSidecarProcess, signalGroup, type SidecarProcess } from "@corbits/embed-hub/sidecar-unit";
 
 const PROVISIONER_DIRS = ["process-provisioner", "process-provisioner-probe"];
 const PID_FILE = "sidecar.pid";
@@ -38,20 +41,19 @@ export async function sidecarPidFiles(hubDataDir: string): Promise<string[]> {
   return files;
 }
 
+/**
+ * Each sidecar leads its own process group, so the group is what is signalled
+ * and the workflow processes stop with the sidecar. A record whose pid no
+ * longer names the process it was written for is left alone.
+ */
 export async function stopSpawnedSidecars(
   hubDataDir: string,
-  signal: (pid: number) => void = (pid) => process.kill(pid, "SIGTERM"),
+  stop: (sidecar: SidecarProcess) => boolean = (sidecar) => ownsGroup(sidecar) && signalGroup(sidecar.pid, "SIGTERM"),
 ): Promise<number> {
   let stopped = 0;
   for (const file of await sidecarPidFiles(hubDataDir)) {
-    const pid = Number((await readFile(file, "utf8").catch(() => "")).trim());
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    try {
-      signal(pid);
-      stopped += 1;
-    } catch {
-      // Already gone.
-    }
+    const sidecar = await readSidecarProcess(dirname(file));
+    if (sidecar !== null && stop(sidecar)) stopped += 1;
   }
   return stopped;
 }
