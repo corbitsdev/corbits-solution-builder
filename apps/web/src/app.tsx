@@ -9,7 +9,7 @@ import { keys } from "./queries/keys.ts";
 import { hostLatency } from "./hub.ts";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
-import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, useSyncExternalStore } from "react";
 import {
   api,
   ApiFailure,
@@ -766,7 +766,15 @@ export function App() {
     enabled: tenantId !== null,
     refetchInterval: DECISIONS_POLL_MS,
   });
-  const activityState = activity.data ?? EMPTY_ACTIVITY;
+  // A failed read of the project list itself is shown in the bell, the same
+  // as one project's failed read: an empty Activity would say "nothing new".
+  const activityError = activity.error;
+  const activityState = useMemo<ActivityState>(() => {
+    const state = activity.data ?? EMPTY_ACTIVITY;
+    if (!activityError) return state;
+    const message = activityError instanceof ApiFailure ? activityError.detail.message : String(activityError);
+    return { ...state, failures: [{ projectId: "*", projectTitle: "Every project", message }, ...state.failures] };
+  }, [activity.data, activityError]);
   const refetchActivity = activity.refetch;
   const openBell = useCallback(
     (open: boolean) => {
