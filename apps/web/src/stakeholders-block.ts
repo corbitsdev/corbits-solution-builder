@@ -1,10 +1,11 @@
 /**
- * The roster the Presentation creator confirms at Concept approval, read
- * off its reply (#722). The prompt asks for exactly one fenced block opened
- * with ```json stakeholders; the JSON is parsed leniently, the way the
- * Architect's stack block is (a trailing comma forgiven, nothing else), and
- * the shape is checked strictly: anything short of a clean roster is null,
- * never a best-effort guess, since what is read here is saved as the
+ * What the Presentation creator settles at Concept approval, read off its
+ * replies (#722): the roster it confirms, in exactly one fenced block opened
+ * with ```json stakeholders, and each approver's interview, in one opened
+ * with ```json stakeholder-interview. The JSON is parsed leniently, the way
+ * the Architect's stack block is (a trailing comma forgiven, nothing else),
+ * and the shape is checked strictly: anything short of a clean block is
+ * null, never a best-effort guess, since what is read here is saved as the
  * project's policy.
  */
 import { STAKEHOLDER_ROLE_IDS } from "@solutions-builder/app/stakeholder-roles";
@@ -15,6 +16,13 @@ export type StakeholdersBlock = {
 };
 
 const MAX_NAME = 80;
+const MAX_INTERVIEW_ENTRIES = 5;
+const MAX_INTERVIEW_TEXT = 500;
+
+export type InterviewBlock = {
+  readonly name: string;
+  readonly interview: readonly { readonly question: string; readonly answer: string }[];
+};
 
 export function parseJsonLeniently(text: string): unknown | undefined {
   try {
@@ -72,4 +80,36 @@ export function stakeholdersBlockOf(body: string): StakeholdersBlock | null {
   const json = parseJsonLeniently(blocks[0]!);
   if (json === undefined) return null;
   return rosterOf(json);
+}
+
+function interviewOf(value: unknown): InterviewBlock | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const { name, interview } = value as Record<string, unknown>;
+  if (typeof name !== "string" || name.trim().length === 0 || name.trim().length > MAX_NAME) return null;
+  if (!Array.isArray(interview) || interview.length === 0 || interview.length > MAX_INTERVIEW_ENTRIES) return null;
+  const entries: { question: string; answer: string }[] = [];
+  for (const entry of interview) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { question, answer } = entry as Record<string, unknown>;
+    if (typeof question !== "string" || typeof answer !== "string") return null;
+    const asked = question.trim();
+    const said = answer.trim();
+    if (asked.length === 0 || said.length === 0 || asked.length > MAX_INTERVIEW_TEXT || said.length > MAX_INTERVIEW_TEXT) return null;
+    entries.push({ question: asked, answer: said });
+  }
+  return { name: name.trim(), interview: entries };
+}
+
+/**
+ * One approver's interview as a reply records it, or null on the same
+ * terms as the roster: no block, two, JSON that does not parse, or a shape
+ * with anything wrong in it — no name, no entries, more than five, an entry
+ * without both sides, or one over 500 characters.
+ */
+export function interviewBlockOf(body: string): InterviewBlock | null {
+  const blocks = fencedBlocks(body, "stakeholder-interview");
+  if (blocks.length !== 1) return null;
+  const json = parseJsonLeniently(blocks[0]!);
+  if (json === undefined) return null;
+  return interviewOf(json);
 }

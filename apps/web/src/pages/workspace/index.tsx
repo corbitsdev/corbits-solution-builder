@@ -569,8 +569,11 @@ export function StageWorkspace({
     stage,
     messages: foldedMessages,
     policy: detail.project.policy,
-    onSaved: (saved) => {
-      setRosterFromChat({ saved, at: Date.now() });
+    onSaved: (saved, kind) => {
+      // The interview follows the roster in the same thread and the package
+      // is written from it, so a sole approver's write waits for the
+      // interview rather than landing mid-question.
+      if (kind === "interview") setRosterFromChat({ saved, at: Date.now() });
       void refreshWorkflow();
       void loadThread();
       void openReviewNow();

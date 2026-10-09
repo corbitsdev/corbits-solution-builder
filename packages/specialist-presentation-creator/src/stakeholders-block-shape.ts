@@ -12,6 +12,13 @@ export const STAKEHOLDER_ROLE_IDS = ["project_owner", "budget_approver", "techni
 
 export type StakeholderRoleId = (typeof STAKEHOLDER_ROLE_IDS)[number];
 
+export const STAKEHOLDER_INTERVIEW_BLOCK_SHAPE = `
+{
+  "name": string (the approver's name exactly as in the roster),
+  "interview": [{ "question": string, "answer": string }, ...] (two or three entries, never more than five)
+}
+`.trim();
+
 export const STAKEHOLDERS_BLOCK_SHAPE = `
 {
   "audiences": [{ "name": string, "role": one of ${STAKEHOLDER_ROLE_IDS.map((id) => `"${id}"`).join(" | ")} }, ...],

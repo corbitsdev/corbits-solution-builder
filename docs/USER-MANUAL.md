@@ -518,7 +518,10 @@ Each row has a name, a role (project owner, budget approver, technical
 approver, audience member, builder operator, or delivery recipient), and a
 **Remove** button. **How many must proceed** sets the quorum. Click **Save
 stakeholders**. A new project starts with one stakeholder, "You", and a
-quorum of one.
+quorum of one. The Presentation creator opens the stage by asking who needs
+to approve, saves the answer here, and then asks two or three questions
+about each approver; what they said is shown under their row and their
+package is written from it.
 
 **Packages.** Each stakeholder's package is a tab. When you are the only
 stakeholder, your package is generated as soon as the stakeholders are

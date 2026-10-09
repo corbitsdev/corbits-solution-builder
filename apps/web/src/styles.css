@@ -4112,6 +4112,29 @@ button[aria-disabled="true"] {
   padding-left: var(--space-5);
 }
 
+/* What a stakeholder told the Presentation creator (#722), under their row. */
+.stakeholder-entry {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.stakeholder-interview {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--wb-border);
+  font-size: 0.8125rem;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.stakeholder-interview dt {
+  color: var(--wb-muted-foreground);
+}
+
+.stakeholder-interview dd {
+  margin: 0;
+}
+
 @media (max-width: 640px) {
   .stakeholder-row {
     grid-template-columns: 1fr;

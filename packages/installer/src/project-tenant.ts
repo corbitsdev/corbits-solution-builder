@@ -21,10 +21,16 @@ import {
 import { InstallerError } from "./errors.js";
 import { ensureAuthorityGrants } from "./authority-grants.js";
 
+/** One question put to a stakeholder at Concept approval, and what they said (#722). */
+export type StakeholderInterviewEntry = { question: string; answer: string };
+
 export type ProjectPolicy = {
   costTolerancePercent: number;
   costToleranceAbsolute: number;
-  audiences: { name: string; role: Authority }[];
+  /** `interview` is what the stakeholder told the Presentation creator at
+   *  Concept approval, which their package is written from; absent until
+   *  they were asked, and only ever asked there. */
+  audiences: { name: string; role: Authority; interview?: StakeholderInterviewEntry[] }[];
   audienceQuorum: number;
   allowExternalProviders: boolean;
 };
