@@ -189,4 +189,34 @@ describe("client project tenant writes", () => {
     expect(current().config.solutionsBuilder.policy.audiences.map((row) => row.name)).toEqual(["You", "Dana"]);
     expect(result.audienceQuorum).toBe(2);
   });
+
+  // #722: a stakeholder's interview is kept on their entry, within bounds,
+  // and an entry sent without it keeps the one on record.
+  const said = [{ question: " What do you most need to see to say yes? ", answer: "The cost ceiling. " }];
+
+  test("an entry with an interview survives the save, trimmed", async () => {
+    const { current } = mockHub();
+    const result = await api.setStakeholders("proj-1", { audiences: [{ name: "You", role: "project_owner" }, { name: "Dana", role: "budget_approver", interview: said }], audienceQuorum: 2 });
+    expect(result.audiences[1]).toEqual({ name: "Dana", role: "budget_approver", interview: [{ question: "What do you most need to see to say yes?", answer: "The cost ceiling." }] });
+    expect(result.audiences[0]).toEqual({ name: "You", role: "project_owner" });
+    expect(current().config.solutionsBuilder.policy.audiences[1]).toHaveProperty("interview");
+  });
+
+  test("an entry sent without its interview keeps the one on record; an empty list clears it", async () => {
+    mockHub();
+    await api.setStakeholders("proj-1", { audiences: [{ name: "Dana", role: "budget_approver", interview: said }], audienceQuorum: 1 });
+    const kept = await api.setStakeholders("proj-1", { audiences: [{ name: "dana", role: "technical_approver" }], audienceQuorum: 1 });
+    expect(kept.audiences[0]).toEqual({ name: "dana", role: "technical_approver", interview: [{ question: "What do you most need to see to say yes?", answer: "The cost ceiling." }] });
+    const cleared = await api.setStakeholders("proj-1", { audiences: [{ name: "Dana", role: "budget_approver", interview: [] }], audienceQuorum: 1 });
+    expect(cleared.audiences[0]).toEqual({ name: "Dana", role: "budget_approver" });
+  });
+
+  test("more than five entries, a side missing, a side over 500 characters, or not a list is refused", async () => {
+    mockHub();
+    const attempt = (interview: unknown) => api.setStakeholders("proj-1", { audiences: [{ name: "Dana", role: "budget_approver", interview }], audienceQuorum: 1 });
+    await expect(attempt(Array.from({ length: 6 }, () => ({ question: "q", answer: "a" })))).rejects.toThrow("5 at most");
+    await expect(attempt([{ question: "q", answer: " " }])).rejects.toThrow("without a question or an answer");
+    await expect(attempt([{ question: "q", answer: "a".repeat(501) }])).rejects.toThrow("over 500 characters");
+    await expect(attempt("none")).rejects.toThrow("not a list");
+  });
 });

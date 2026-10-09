@@ -59,6 +59,7 @@ import {
   type EnsuredProjectWorkflow,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
+  type StakeholderInterviewEntry,
   type ProjectWorkflowDeployment,
   type ProjectWorkflowStageInput,
   type SidecarCapability,
@@ -986,6 +987,37 @@ async function asWorkspaceOwner<T>(
 
 export const STAKEHOLDER_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
 const MAX_STAKEHOLDER_NAME = 80;
+const MAX_INTERVIEW_ENTRIES = 5;
+const MAX_INTERVIEW_TEXT = 500;
+
+export type StakeholdersPayload = {
+  audiences: readonly { name: string; role: string; interview?: unknown }[];
+  audienceQuorum: number;
+};
+
+function stakeholderRefused(message: string): never {
+  throw new ApiFailure({ code: "validation_failed", message, correlationId: "-", retryable: false });
+}
+
+/**
+ * A stakeholder's interview as the policy keeps it (#722): up to five
+ * question-and-answer pairs, each side a trimmed string of up to 500
+ * characters. An empty list clears it; anything else wrong is refused.
+ */
+function interviewOf(name: string, value: unknown): StakeholderInterviewEntry[] {
+  if (!Array.isArray(value)) stakeholderRefused(`${name}'s interview is not a list of questions and answers.`);
+  if (value.length > MAX_INTERVIEW_ENTRIES) stakeholderRefused(`${name}'s interview has ${String(value.length)} entries; ${String(MAX_INTERVIEW_ENTRIES)} at most.`);
+  return value.map((entry: unknown) => {
+    const record = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+    const question = typeof record.question === "string" ? record.question.trim() : "";
+    const answer = typeof record.answer === "string" ? record.answer.trim() : "";
+    if (question.length === 0 || answer.length === 0) stakeholderRefused(`${name}'s interview has an entry without a question or an answer.`);
+    if (question.length > MAX_INTERVIEW_TEXT || answer.length > MAX_INTERVIEW_TEXT) {
+      stakeholderRefused(`${name}'s interview has an entry over ${String(MAX_INTERVIEW_TEXT)} characters.`);
+    }
+    return { question, answer };
+  });
+}
 
 const EMPTY_DECK_SETTINGS: DeckSettings = { roles: {} };
 
@@ -1026,11 +1058,8 @@ async function roleStyleGuideTheme(
   return await readTemplateTheme(bytes);
 }
 
-function stakeholdersPolicy(
-  current: ProjectPolicy,
-  payload: { audiences: { name: string; role: string }[]; audienceQuorum: number },
-): ProjectPolicy {
-  const audiences: { name: string; role: Authority }[] = [];
+function stakeholdersPolicy(current: ProjectPolicy, payload: StakeholdersPayload): ProjectPolicy {
+  const audiences: ProjectPolicy["audiences"] = [];
   for (const entry of payload.audiences) {
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
     if (name.length === 0) {
@@ -1066,7 +1095,13 @@ function stakeholdersPolicy(
         retryable: false,
       });
     }
-    audiences.push({ name, role });
+    // An entry sent without its interview keeps the one on record: the
+    // editor and the chat's roster both send names and roles only.
+    const interview =
+      entry.interview === undefined
+        ? current.audiences.find((held) => held.name.toLowerCase() === name.toLowerCase())?.interview
+        : interviewOf(name, entry.interview);
+    audiences.push({ name, role, ...(interview && interview.length > 0 ? { interview } : {}) });
   }
   if (audiences.length === 0) {
     throw new ApiFailure({
@@ -2177,7 +2212,7 @@ export const api = {
         roles: [...STAKEHOLDER_ROLES],
       };
     }),
-  setStakeholders: (projectId: string, payload: { audiences: { name: string; role: string }[]; audienceQuorum: number }) =>
+  setStakeholders: (projectId: string, payload: StakeholdersPayload) =>
     asWorkspaceOwner(async (transport) => {
       const current = await installerRequireProject(transport, projectId);
       const policy = stakeholdersPolicy(current.policy, payload);
