@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
-import { STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
+import { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
 import { SELECTABLE_TARGETS } from "./targets.js";
 
 describe("Experience designer prompt", () => {
@@ -108,5 +108,20 @@ describe("Presentation creator prompt", () => {
     expect(prompt).toContain(STAKEHOLDERS_BLOCK_SHAPE);
     expect(prompt).toContain('one entry named "You" with the role\n"project_owner" and a quorum of 1');
     expect(prompt).toContain("Never use a role outside that list.");
+  });
+});
+
+// #722: each approver is interviewed once the roster is confirmed, one per
+// turn, and what they said comes back as a block the package is written from.
+describe("Presentation creator interview rule", () => {
+  test("interviews each approver in turn, with the three things to ask, at Concept approval only", () => {
+    const prompt = agentById("presentation-creator")!.system;
+    expect(prompt).toContain("interview each approver in turn before any\npackage is written, one approver per turn");
+    expect(prompt).toContain("what they\nmost need to see to say yes, what would make them say no, and how they want\nto be briefed");
+    expect(prompt).toContain("exactly one fenced block, opened with ```json stakeholders");
+    expect(prompt).toContain("opened\nwith ```json stakeholder-interview");
+    expect(prompt).toContain(STAKEHOLDER_INTERVIEW_BLOCK_SHAPE);
+    expect(prompt).toContain("say the packages can be generated now");
+    expect(prompt).toContain("The interview happens here, at Concept approval, once per\napprover");
   });
 });

@@ -1,7 +1,7 @@
 import { AGENT_ECONOMICS, SHARED_RULES, role } from "@solutions-builder/specialist-shared";
-import { STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholders-block-shape.js";
+import { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholders-block-shape.js";
 
-export { STAKEHOLDER_ROLE_IDS, STAKEHOLDERS_BLOCK_SHAPE, type StakeholderRoleId } from "./stakeholders-block-shape.js";
+export { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDER_ROLE_IDS, STAKEHOLDERS_BLOCK_SHAPE, type StakeholderRoleId } from "./stakeholders-block-shape.js";
 
 export const presentationCreator = role({
   id: "presentation-creator",
@@ -47,6 +47,25 @@ is not clear, ask once rather than guess. Never use a role outside that list.
 The block is read by machine and saved as the project's stakeholders; the
 prose is what the person reads. Do not write the block until the roster is
 clear, and write it once.
+
+Once the roster is confirmed, interview each approver in turn before any
+package is written, one approver per turn: two or three questions, what they
+most need to see to say yes, what would make them say no, and how they want
+to be briefed. Put them to the person in the chat, who answers for the
+approver ("What does Brent most need to see to say yes?"); "You" is asked
+directly. These are answered in words, so offer no options under them. When
+an approver's answers are in, write them back as one fenced block, opened
+with \`\`\`json stakeholder-interview, holding a single JSON object of this
+shape, then move to the next approver:
+
+\`\`\`
+${STAKEHOLDER_INTERVIEW_BLOCK_SHAPE}
+\`\`\`
+
+After the last approver's block, say the packages can be generated now and
+ask nothing more. The interview happens here, at Concept approval, once per
+approver; a package request carries what they said under "What <name> told
+us", and you write the package to it rather than asking again.
 
 The deliverable being pitched is built on Interchange and the Corbits packages;
 where that lowers cost or risk relative to building from scratch,

@@ -7,4 +7,4 @@
  * this file holds them to `AUTHORITIES` less "system", the list
  * `STAKEHOLDER_ROLES` in the interface's client is built from.
  */
-export { STAKEHOLDER_ROLE_IDS, STAKEHOLDERS_BLOCK_SHAPE, type StakeholderRoleId } from "@solutions-builder/specialist-presentation-creator";
+export { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDER_ROLE_IDS, STAKEHOLDERS_BLOCK_SHAPE, type StakeholderRoleId } from "@solutions-builder/specialist-presentation-creator";
