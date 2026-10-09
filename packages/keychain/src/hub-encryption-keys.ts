@@ -1,10 +1,11 @@
 /**
- * The hub's at-rest encryption keys.
+ * The hub's at-rest encryption keys, and the one its sidecars seal with.
  *
  * Upstream requires `CREDENTIAL_ENCRYPTION_KEY` and
  * `PRINCIPAL_KEY_ENCRYPTION_KEY` in the environment and fails loudly at boot
  * without them — correct for a deployed service, impossible for a desktop app
- * nobody sets environment variables for.
+ * nobody sets environment variables for. `SIDECAR_CREDENTIAL_ENCRYPTION_KEY`
+ * is the same story for the sidecars the host spawns.
  *
  * So the host mints them on first run and keeps them in the OS keychain.
  * The environment still wins when it is set, which is what lets the identical
@@ -18,11 +19,20 @@ import { readSecretResult, secretReference, storeSecret } from "./store.js";
 const ACCOUNTS = {
   credential: "hub:credential-encryption-key",
   principal: "hub:principal-key-encryption-key",
+  sidecarCredential: "sidecar:credential-encryption-key",
 } as const;
 
 export type HubEncryptionKeys = {
   credentialKeyHex: string;
   principalKeyHex: string;
+  /**
+   * What sidecars seal their run records under. Never the hub's credential
+   * key: a sidecar's environment is readable by any process running as this
+   * user, workflow code included, and the hub's key opens every credential it
+   * stores. Persisted rather than minted per boot because a sidecar reads its
+   * sealed records back when it starts.
+   */
+  sidecarCredentialKeyHex: string;
 };
 
 function mintHexKey(): string {
@@ -64,5 +74,6 @@ export async function hubEncryptionKeys(): Promise<HubEncryptionKeys> {
   return {
     credentialKeyHex: await resolve(ACCOUNTS.credential, "CREDENTIAL_ENCRYPTION_KEY"),
     principalKeyHex: await resolve(ACCOUNTS.principal, "PRINCIPAL_KEY_ENCRYPTION_KEY"),
+    sidecarCredentialKeyHex: await resolve(ACCOUNTS.sidecarCredential, "SIDECAR_CREDENTIAL_ENCRYPTION_KEY"),
   };
 }
