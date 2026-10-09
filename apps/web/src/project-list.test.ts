@@ -88,6 +88,23 @@ describe("displayTurn", () => {
     expect(calls).toBe(1);
   });
 
+  test("reads the thread from the project's own mailbox, not the workspace's (#834)", async () => {
+    const projectId = `proj_${crypto.randomUUID()}`;
+    const tenants: string[] = [];
+    await displayTurn(
+      projectId,
+      1,
+      false,
+      deps({
+        readStageThread: async (tenantId) => {
+          tenants.push(tenantId);
+          return [];
+        },
+      }),
+    );
+    expect(tenants).toEqual([projectId]);
+  });
+
   test("no specialist deployed yet: an empty thread, not a throw", async () => {
     const label = await displayTurn(`proj_${crypto.randomUUID()}`, 1, false, deps({ stageAgentStatus: async () => null }));
     expect(label).toBeNull();
