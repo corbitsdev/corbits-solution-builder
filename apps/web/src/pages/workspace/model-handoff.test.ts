@@ -213,11 +213,25 @@ describe("handoffLanded and handoffPending", () => {
     expect(handoffPending({ address: NEW, addresses: [OLD, NEW], threadLoaded: false, messages: [head, reply] })).toBe(false);
   });
 
-  test("the send-back cue is gated on it, with the stage's addresses passed in", () => {
+  // #718: a hand-off that stood down because the specialist already held a
+  // briefing lands no marker; the hook's own verdict is what ends the wait.
+  test("nothing waits once the hand-off hook has settled the address, marker or not", () => {
+    expect(handoffPending({ address: NEW, addresses: [OLD, NEW], threadLoaded: true, messages: [head, reply], settled: true })).toBe(false);
+    expect(handoffPending({ address: NEW, addresses: [OLD, NEW], threadLoaded: true, messages: [head, reply], settled: false })).toBe(true);
+  });
+
+  test("the send-back cue is gated on it, with the stage's addresses and the hand-off's verdict passed in", () => {
     const dispatch = readFileSync(join(import.meta.dir, "use-opening-dispatch.ts"), "utf8");
-    expect(dispatch).toContain("if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;");
+    expect(dispatch).toContain("if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages, settled: handoffSettled })) return;");
     const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
-    expect(index).toMatch(/useOpeningDispatch\(\{[^}]*addresses: agent\.addresses,/s);
+    expect(index).toMatch(/useOpeningDispatch\(\{[^}]*addresses: agent\.addresses,\s*handoffSettled: modelHandoff\.settled,/s);
+    // The verdict is state the dispatch reads, so the hand-off hook runs first.
+    expect(index.indexOf("useModelHandoff({")).toBeLessThan(index.indexOf("useOpeningDispatch({"));
+  });
+
+  test("a failed hand-off is retried from its banner", () => {
+    const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
+    expect(index).toMatch(/modelHandoff\.error \?[\s\S]*?action=\{\{ label: "Try again", onClick: modelHandoff\.retry \}\}/);
   });
 });
 
