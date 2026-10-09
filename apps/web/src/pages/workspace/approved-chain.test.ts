@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { approvedChainNodes, chainContent, handedContent, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
+import { approvedChainNodes, chainContent, chainNodeIds, handedContent, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
+import { IMPORTED_CONVERSATION_KIND } from "../../project-import.ts";
 
 const node = (over: Partial<ChainNode> & Pick<ChainNode, "id" | "kind" | "stage">): ChainNode => ({
   title: over.id,
@@ -114,6 +115,18 @@ describe("renderApprovedChain", () => {
 
   test("nothing to hand over renders nothing", () => {
     expect(renderApprovedChain([], 2)).toBe("");
+    expect(renderApprovedChain([], 2, "")).toBe("");
+  });
+
+  // #490: an imported stage's history rides inside the record, after the
+  // approved inputs, so the transcript folds it with the rest.
+  test("an imported stage's history goes inside the record, last", () => {
+    const brief = { node: { id: "b", title: "Brief", kind: "problem_brief", stage: 1 }, content: "body" };
+    const text = renderApprovedChain([brief], 3, "This project was imported.\n\nThe conversation so far.");
+    expect(text.indexOf("This project was imported.")).toBeGreaterThan(text.indexOf("--- APPROVED INPUT: Brief"));
+    expect(splitChain(text)?.chain).toContain("The conversation so far.");
+    expect(splitChain(text)?.after).toBe("");
+    expect(renderApprovedChain([], 1, "This project was imported.")).toContain("This project was imported.");
   });
 
   test("the transcript splits an opening back into the record and the stage's own lead", () => {
@@ -123,6 +136,17 @@ describe("renderApprovedChain", () => {
     expect(split?.chain).toContain("--- APPROVED INPUT: Brief (stage 1, problem_brief) ---");
     expect(split?.after).toBe("## In short\n- the constraints");
     expect(splitChain("an ordinary message")).toBeNull();
+  });
+});
+
+describe("chainNodeIds", () => {
+  test("an imported stage's conversation and latest document key the chain, so a chain composed without them is never reused", () => {
+    const brief = node({ id: "brief", kind: "problem_brief", stage: 1, artifactId: "art_brief" });
+    const chat = node({ id: "chat-3", kind: IMPORTED_CONVERSATION_KIND, stage: 3 });
+    const draft = node({ id: "approach-v2", kind: "chosen_approach", stage: 3, createdAt: "2026-01-01T00:02:00.000Z" });
+    const reviews = { 1: approved("art_brief", 1) };
+    expect(chainNodeIds({ tenantId: "tnt", nodes: [brief, chat, draft], reviews, stage: 3 })).toEqual(["brief", "chat-3", "approach-v2"]);
+    expect(chainNodeIds({ tenantId: "tnt", nodes: [brief, draft], reviews, stage: 3 })).toEqual(["brief"]);
   });
 });
 
