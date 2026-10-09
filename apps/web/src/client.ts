@@ -487,7 +487,7 @@ export type ImportOutcome = {
   readonly projectId: string;
   readonly artifacts: number;
   readonly conversations: number;
-  /** Version 1 bundles only: versions written across every artifact. */
+  /** Versions written across every artifact. */
   readonly versions?: number;
   /** The stage the workflow reports after the replay (null when there was
    *  nothing to replay or it never started), why the replay stopped short,
@@ -1641,9 +1641,10 @@ export const api = {
    * (`project-export.ts`'s `assembleBundle`) as a NEW project — client-driven,
    * no host route. `parseBundle` gives a clear message for the wrong format,
    * version, or a missing key; `project-import.ts`'s `importPlan` re-keys
-   * every bundled artifact's `sb` metadata to the new project id. The new
-   * project's own workflow starts fresh at stage 1 — no approval is forged
-   * from the bundle's history.
+   * every bundled artifact's `sb` metadata to the new project id and writes
+   * each artifact's versions back in order (#632). The new project's own
+   * workflow then replays the bundle's position as real decisions (#652) —
+   * no approval is forged outside it.
    *
    * A version 1 bundle, exported from `main`, carries every artifact
    * version and the ledger the project's position lived in
@@ -1674,7 +1675,11 @@ export const api = {
               content,
               metadata: { sb },
             });
-            return { id: artifact.id };
+            return { id: artifact.id, version: artifact.version };
+          },
+          reviseArtifact: async (artifactId, { title, content, sb }) => {
+            const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
+            return { version: artifact.version };
           },
         });
       });
@@ -1686,8 +1691,8 @@ export const api = {
         if (node.kind === "source_material" || node.kind === "material_reading") continue;
         digests.set(node.id, await digestOf(content));
       }
-      const plan = bundleAdoptionPlan(bundle, written.projectId, written.ids, digests);
-      const { ids: _ids, ...outcome } = written;
+      const plan = bundleAdoptionPlan(bundle, written.projectId, written.written, digests);
+      const { written: _written, ...outcome } = written;
       if (plan.steps.length === 0) return { ...outcome, landing: { landed: null, stopped: null, notes: plan.notes } };
       const landing = await api
         .ensureProjectWorkflow(written.projectId)

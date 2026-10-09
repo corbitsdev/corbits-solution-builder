@@ -1,9 +1,10 @@
 /**
  * Importing a project bundle `project-export.ts`'s `assembleBundle` wrote
- * (CL-8725). The bundle's process history is never replayed: every artifact
- * and conversation is recreated fresh under a NEW project id, and that
- * project's own workflow starts at stage 1 like any other new project.
- * Approvals are for the person to make again.
+ * (CL-8725). Every artifact and conversation is recreated fresh under a NEW
+ * project id, an artifact's versions written back in the order the export
+ * carried them (#632). The workflow's position is landed afterwards by
+ * `bundle-adoption.ts`, as real decisions on the new project's own workflow
+ * (#652); nothing here writes a decision.
  *
  * Mail history cannot be recreated (there is no mailbox to write into before
  * a stage specialist deploys), so each bundled conversation becomes one
@@ -21,8 +22,14 @@ export type ImportWrite = {
   readonly sb: Record<string, unknown>;
 };
 
+/** One bundled node's writes, oldest version first: the first creates the artifact, each later one revises it. */
+export type ArtifactImport = {
+  readonly nodeId: string;
+  readonly versions: readonly ImportWrite[];
+};
+
 export type ImportPlan = {
-  readonly artifacts: readonly ImportWrite[];
+  readonly artifacts: readonly ArtifactImport[];
   readonly conversations: readonly ImportWrite[];
 };
 
@@ -40,17 +47,17 @@ export function transcript(messages: ProjectBundle["conversations"][number]["mes
 
 /**
  * The pure write plan for one bundle under a freshly created project id: no
- * network, nothing minted here. Every artifact becomes its own fresh
- * version-1 write -- `sourceVersionIds` reset to none -- with
+ * network, nothing minted here. Every artifact becomes a fresh one --
+ * `sourceVersionIds` reset to none -- with
  * `kind`/`stage`/`variant`/`mediaType`/`provenance` carried over from the
- * bundled node, re-keyed to `newProjectId`. Content, including a `data:` URL
- * for a binary original, is kept exactly as bundled.
+ * bundled node, re-keyed to `newProjectId`, and one write per bundled
+ * version, oldest first; a v2 or v3 bundle carried only the current content,
+ * so it is one write. Content, including a `data:` URL for a binary
+ * original, is kept exactly as bundled.
  */
 export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportPlan {
-  const artifacts: ImportWrite[] = bundle.artifacts.map(({ node, content }) => ({
-    title: node.title,
-    content,
-    sb: {
+  const artifacts: ArtifactImport[] = bundle.artifacts.map(({ node, content, versions }) => {
+    const sb = {
       projectId: newProjectId,
       kind: node.kind,
       stage: node.stage,
@@ -58,8 +65,10 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
       sourceVersionIds: [],
       provenance: { ...node.provenance },
       ...(node.mediaType !== undefined ? { mediaType: node.mediaType } : {}),
-    },
-  }));
+    };
+    const chain = versions && versions.length > 0 ? [...versions].sort((a, b) => a.version - b.version).map((entry) => entry.content) : [content];
+    return { nodeId: node.id, versions: chain.map((text) => ({ title: node.title, content: text, sb })) };
+  });
 
   return { artifacts, conversations: bundle.conversations.map((conversation) => conversationWrite(conversation, newProjectId)) };
 }
@@ -83,42 +92,67 @@ export function conversationWrite({ stage, messages }: ProjectBundle["conversati
 
 export type ImportDeps = {
   readonly createProject: (input: { title: string; policy: unknown }) => Promise<{ projectId: string }>;
-  readonly createArtifact: (write: ImportWrite) => Promise<{ id: string }>;
-  /** Called after each write, `done` counting both artifacts and conversations together. */
+  /** Creates an artifact, returning the version the store numbered it. */
+  readonly createArtifact: (write: ImportWrite) => Promise<{ id: string; version: number }>;
+  /** Writes the next version of an artifact, returning the number the store gave it. */
+  readonly reviseArtifact: (artifactId: string, write: ImportWrite) => Promise<{ version: number }>;
+  /** Called after each write, `done` counting every version and conversation together. */
   readonly onProgress?: (done: number, total: number) => void;
 };
+
+/** Where a bundled node landed: the artifact written for it, at the version its last write got. */
+export type WrittenArtifact = { readonly artifactId: string; readonly version: number };
 
 export type ImportResult = {
   readonly projectId: string;
   readonly artifacts: number;
+  /** Versions written across every artifact. */
+  readonly versions: number;
   readonly conversations: number;
-  /** The artifact written for each bundled node, by the node's id (#652): what the replay re-points approvals at. */
-  readonly ids: ReadonlyMap<string, string>;
+  /** What each bundled node became, by the node's id (#652): what the replay re-points approvals at. */
+  readonly written: ReadonlyMap<string, WrittenArtifact>;
 };
 
 /**
- * Creates the new project, then writes `importPlan`'s artifacts and
+ * Creates the new project, then writes `importPlan`'s versions and
  * conversations into it one at a time -- an artifact-store write has no
- * batch form here, the same as `attachMaterial`.
+ * batch form here, the same as `attachMaterial`. The store numbers the
+ * versions as it writes them; what each node landed at is reported, not
+ * assumed, since a chain the export could only partly read starts over at 1.
  */
 export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Promise<ImportResult> {
   const { projectId } = await deps.createProject({ title: importedProjectTitle(bundle), policy: bundle.project.policy });
   const plan = importPlan(bundle, projectId);
-  const ids = new Map<string, string>();
-  const total = plan.artifacts.length + plan.conversations.length;
+  const written = new Map<string, WrittenArtifact>();
+  const total = plan.artifacts.reduce((count, artifact) => count + artifact.versions.length, 0) + plan.conversations.length;
   let done = 0;
-  for (const [index, write] of plan.artifacts.entries()) {
-    const written = await deps.createArtifact(write);
-    ids.set(bundle.artifacts[index]!.node.id, written.id);
+  for (const artifact of plan.artifacts) {
+    const [first, ...later] = artifact.versions;
+    if (!first) continue;
+    const created = await deps.createArtifact(first);
+    let landed: WrittenArtifact = { artifactId: created.id, version: created.version };
     done += 1;
     deps.onProgress?.(done, total);
+    for (const write of later) {
+      const revised = await deps.reviseArtifact(created.id, write);
+      landed = { artifactId: created.id, version: revised.version };
+      done += 1;
+      deps.onProgress?.(done, total);
+    }
+    written.set(artifact.nodeId, landed);
   }
   for (const write of plan.conversations) {
     await deps.createArtifact(write);
     done += 1;
     deps.onProgress?.(done, total);
   }
-  return { projectId, artifacts: plan.artifacts.length, conversations: plan.conversations.length, ids };
+  return {
+    projectId,
+    artifacts: plan.artifacts.length,
+    versions: total - plan.conversations.length,
+    conversations: plan.conversations.length,
+    written,
+  };
 }
 
 function looksLikeZip(file: File): boolean {

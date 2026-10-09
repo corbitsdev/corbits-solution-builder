@@ -45,10 +45,10 @@ function startedLabel(createdAt: string): string {
   return `Started ${new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
-/** What the import did, and, for a bundle from `main`, where the project landed. */
+/** What the import did and where the project landed; the version count only when an artifact had more than one. */
 export function importNotice(fileName: string, brought: ImportOutcome): string {
   const written =
-    brought.versions === undefined
+    brought.versions === undefined || brought.versions === brought.artifacts
       ? `${plural(brought.artifacts, "artifact")} and ${plural(brought.conversations, "conversation")}`
       : `${plural(brought.artifacts, "artifact")} (${plural(brought.versions, "version")}) and ${plural(brought.conversations, "conversation")}`;
   const parts = [`Imported ${fileName}: ${written}.`];
