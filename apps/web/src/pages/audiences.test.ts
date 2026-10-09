@@ -69,3 +69,14 @@ describe("the stakeholder editor's control", () => {
     expect(source).toContain('<div className="stakeholder-editor" id="stakeholder-panel">');
   });
 });
+
+// #722: the panel's controls say what they make.
+describe("the package controls", () => {
+  test("say what they generate, not \"Write it\"", () => {
+    expect(source).toContain("Generate approval package");
+    expect(source).toContain("Generate the package again");
+    expect(source).toContain("Generate all {missing.length} packages");
+    expect(source).not.toMatch(/>\s*Write it\s*</);
+    expect(source).not.toContain('"Write it again"');
+  });
+});

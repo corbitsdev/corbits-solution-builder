@@ -378,8 +378,8 @@ export function AudiencePackages({
    *  unopened until it is reachable. */
   onStakeholdersSaved?: () => void;
 }) {
-  // Which stakeholders' packages are being written right now: "Write it"
-  // sends the mail, then waits for the reply that follows it and keeps
+  // Which stakeholders' packages are being written right now: "Generate
+  // approval package" sends the mail, then waits for the reply that follows it and keeps
   // that reply as each named audience's package artifact — nothing else
   // turns the reply into what the packages list reads. One round at a
   // time; the rows say "Writing…" instead of offering another.
@@ -465,7 +465,7 @@ export function AudiencePackages({
     // Not every reply is a package (#220): one with no deck outline is
     // refused and never recorded. The specialist is asked once more in the
     // same thread, told what was missing and that the reply itself is the
-    // package (#225); a second miss is said so "Write it" stays offered.
+    // package (#225); a second miss is said so the button stays offered.
     let problem = packageReplyProblem(name, reply.body);
     if (problem) {
       const seenBefore = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
@@ -826,7 +826,7 @@ export function AudiencePackages({
                   <StateLabel tone="info">Writing…</StateLabel>
                 ) : (
                   <Button loading={false} disabled={writing.size > 0} onClick={() => void writePackages([audience.name])}>
-                    Write it
+                    Generate approval package
                   </Button>
                 )}
               </li>
@@ -839,7 +839,7 @@ export function AudiencePackages({
               disabled={writing.size > 0}
               onClick={() => void writePackages(missing.map((audience) => audience.name))}
             >
-              Write all {missing.length}
+              Generate all {missing.length} packages
             </Button>
           ) : null}
         </div>
@@ -972,7 +972,7 @@ export function AudiencePackages({
                     doing={packageWork(selected.variant)}
                     onClick={() => void writePackages([selected.variant!])}
                   >
-                    {writing.has(selected.variant) ? "Writing…" : "Write it again"}
+                    {writing.has(selected.variant) ? "Writing…" : "Generate the package again"}
                   </Button>
                 ) : null}
               </div>
