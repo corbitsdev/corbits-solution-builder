@@ -99,7 +99,11 @@ export async function displayTurn(
   if (cached && Date.now() - cached.at < TURN_CACHE_MS) return cached.label;
   const tenantId = await deps.workspaceTenantId();
   const status = tenantId ? await deps.stageAgentStatus(projectId, stage).catch(() => null) : null;
-  const messages = status && tenantId ? await deps.readStageThread(tenantId, [status.address]).catch(() => []) : [];
+  // The thread is in the project's own mailbox (#29; the workspace page
+  // reads it as `detail.tenantId`, which is the project id). Read from the
+  // workspace tenant instead, the card saw an empty thread and never said
+  // whose turn it was (#834).
+  const messages = status && tenantId ? await deps.readStageThread(projectId, [status.address]).catch(() => []) : [];
   const label = turnLabel(stage, messages, hasPendingApproval);
   turnCache.set(key, { label, at: Date.now() });
   return label;

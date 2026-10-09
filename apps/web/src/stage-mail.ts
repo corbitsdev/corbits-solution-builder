@@ -23,6 +23,13 @@ export type ChatMessage = {
    *  minted for the mail it delivered, which the reply's `inReplyTo` names
    *  (#62). Absent for a turn sent before this was recorded, or refused. */
   readonly triggerMessageId?: string;
+  /** An agent reply nobody has read yet (#834): INBOX mail without the
+   *  `\\Seen` flag. Never set on a person turn. */
+  readonly unread?: boolean;
+  /** The mailbox an agent reply was read from (#834): a stage's thread can
+   *  span the project tenant and the workspace, and a uid names a message
+   *  only within one mailbox, so marking it read needs both. */
+  readonly mailTenantId?: string;
 };
 
 /** The flag the hub sets on a Sent copy it delivered as a trigger; see
@@ -32,6 +39,9 @@ export const TRIGGER_FLAG_PREFIX = "sb-trigger:";
 /** How many pages one folder read follows before giving up: a stage's
  * thread is a few dozen messages; a workspace's folder can hold thousands. */
 const MAX_FOLDER_PAGES = 50;
+
+/** The IMAP flag `@corbits/mailbox` sets on a message marked read. */
+export const SEEN_FLAG = "\\Seen";
 
 type Envelope = {
   readonly messageId: string;
@@ -237,6 +247,7 @@ async function readFolder(
       ...(message.envelope.subject ? { subject: message.envelope.subject } : {}),
       ...(message.envelope.inReplyTo !== undefined ? { inReplyTo: message.envelope.inReplyTo } : {}),
       ...(triggerMessageId !== undefined ? { triggerMessageId } : {}),
+      ...(folder === "INBOX" ? { unread: !(message.flags ?? []).includes(SEEN_FLAG), mailTenantId: tenantId } : {}),
     });
   }
   return messages;
@@ -255,6 +266,25 @@ export async function readStageThread(
     readFolder(transport, tenantId, "Sent", addresses),
   ]);
   return [...inbox, ...sent].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+/**
+ * Marks one INBOX message read (#834): `POST .../mailbox/me/inbox/:uid/read`,
+ * the `@corbits/mailbox` route the bell's Activity clears by. The flag is
+ * the server's, so every device sees it; the cached copy is flagged too, as
+ * the hub is never re-asked for a message already held (`refreshFolder`).
+ */
+export async function markStageMailRead(
+  tenantId: string,
+  uid: number,
+  transport: Transport = createHubTransport(),
+): Promise<void> {
+  await transport.fetch("POST", `${mailboxPath(tenantId)}/${String(uid)}/read`);
+  const cache = cacheFor(tenantId, "INBOX");
+  const held = cache.get(uid);
+  if (held && !(held.flags ?? []).includes(SEEN_FLAG)) {
+    cache.set(uid, { ...held, flags: [...(held.flags ?? []), SEEN_FLAG] });
+  }
 }
 
 /** Sends (or replies in) a stage conversation: the same send seam a

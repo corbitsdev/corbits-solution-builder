@@ -3,11 +3,10 @@
  * (`/api/tenants/:tenantId/mailbox/me/inbox/events`), so a caller can refetch
  * a thread the moment a specialist replies rather than waiting on a poll.
  *
- * Same shape as the legacy un-scoped stream in `inbox.ts`: a `mailbox` event
- * carries only `{ id, op }`, never the row, so every relevant event just
- * triggers a refetch. The id is scoped on this stream, though -- see
- * `shouldRefetch`. Unlike `inbox.ts`, the caller decides what "relevant"
- * means (`shouldRefetch`) and drives its own reconnect backoff.
+ * A `mailbox` event carries only `{ id, op }`, never the row, so every
+ * relevant event just triggers a refetch. The id is tenant-scoped on this
+ * stream -- see `shouldRefetch`. The caller decides what "relevant" means
+ * (`shouldRefetch`) and drives its own reconnect backoff.
  */
 import { hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
 import { openSharedEventSource } from "./shared-event-source.ts";
