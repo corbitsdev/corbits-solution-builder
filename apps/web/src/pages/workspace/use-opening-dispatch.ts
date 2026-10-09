@@ -64,6 +64,7 @@ export function useOpeningDispatch({
   stage,
   agentAddress,
   addresses,
+  handoffSettled,
   messages,
   loadedFor,
   workflowView,
@@ -78,6 +79,9 @@ export function useOpeningDispatch({
   /** Every address this stage's mail has lived at (`useStageAgent.addresses`):
    *  the live one among others means a redeploy, and a hand-off owed. */
   addresses: readonly string[];
+  /** `useModelHandoff.settled`: the hand-off went, or stood down because
+   *  the specialist was briefed some other way (#718). */
+  handoffSettled: boolean;
   messages: ChatMessage[];
   loadedFor: string | null;
   workflowView: ProjectWorkflowView | null;
@@ -295,8 +299,9 @@ export function useOpeningDispatch({
     // says the stage came back, the hand-off says what the stage is. Sent
     // ahead of it, the cue was the mail that made the hand-off stand down,
     // and the specialist answered from the cue alone (#105). The hand-off's
-    // own reload of the thread re-runs this once it has landed.
-    if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;
+    // own reload of the thread re-runs this once it has landed; its verdict
+    // re-runs this when it stood down instead, since no mail lands then.
+    if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages, settled: handoffSettled })) return;
     const pending = sendBackResumeCue({
       stage,
       decisions: workflowView?.decisions ?? [],
@@ -322,7 +327,7 @@ export function useOpeningDispatch({
         // Not marked as sent: the next thread or view change retries.
         cueInFlightRef.current = null;
       });
-  }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread]);
+  }, [stage, agentAddress, addresses, handoffSettled, loadedFor, messages, workflowView, tenantId, reloadThread]);
 
   return {
     error,

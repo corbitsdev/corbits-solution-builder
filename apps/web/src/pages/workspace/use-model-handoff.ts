@@ -44,7 +44,7 @@
  * `switchEvents` de-duplicates by `handoffId` when rendering the system
  * line, so the rare duplicate shows once even though two mails went out.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { isHtmlDocument } from "./guidance.ts";
@@ -260,13 +260,20 @@ export function handoffLanded(address: string, messages: readonly ChatMessage[])
  * cue, attached material) go after it; and since #801 a sender that does
  * not, a decision notice say, no longer makes the hand-off stand down: it
  * stands down only once the address holds a briefing.
+ *
+ * A stand-down lands no marker, so read off the transcript alone the
+ * hand-off looked owed for good and the cue never went (#718). `settled`
+ * is `useModelHandoff`'s own verdict for the address, sent or stood down,
+ * and nothing waits once it is in.
  */
 export function handoffPending(args: {
   readonly address: string | null;
   readonly addresses: readonly string[];
   readonly threadLoaded: boolean;
   readonly messages: readonly ChatMessage[];
+  readonly settled?: boolean;
 }): boolean {
+  if (args.settled) return false;
   const priorHead = args.messages.at(-1) ?? null;
   if (!handoffDue({ address: args.address, addresses: args.addresses, threadLoaded: args.threadLoaded, priorHead })) return false;
   return !handoffLanded(args.address!, args.messages);
@@ -276,6 +283,16 @@ export type ModelSwitchState = {
   readonly switching: boolean;
   readonly error: string | null;
   readonly switchTo: (offeringId: string) => Promise<void>;
+};
+
+export type ModelHandoffState = {
+  readonly error: string | null;
+  /** Tries the failed hand-off again, from its banner. */
+  readonly retry: () => void;
+  /** The live address's specialist holds its briefing: the hand-off went,
+   *  or stood down because one was already there. What `handoffPending`'s
+   *  `settled` is fed. */
+  readonly settled: boolean;
 };
 
 /** Deploys the stage's specialist onto `offeringId` (CL-8899). Sends
@@ -324,11 +341,17 @@ export function useModelHandoff(args: {
   readonly providerLabel: string | null;
   readonly modelName: string | null;
   readonly reloadThread: () => Promise<void>;
-}): { readonly error: string | null } {
+}): ModelHandoffState {
   // Which address this hook has already resolved (sent to, or found already
   // handled) — never re-attempted for the same address.
   const resolvedRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The address whose specialist is known to hold its briefing: this hook
+  // sent the hand-off, or stood down because one was already there. State,
+  // not the ref above, because the senders gated on `handoffPending` need
+  // the render that follows a stand-down (#718).
+  const [settledFor, setSettledFor] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     // A brand-new stage (no other address has ever held this stage's mail)
@@ -355,6 +378,7 @@ export function useModelHandoff(args: {
         if (cancelled) return;
         if (specialistBriefed(own)) {
           resolvedRef.current = args.address;
+          setSettledFor(args.address);
           return;
         }
         resolvedRef.current = args.address;
@@ -367,6 +391,8 @@ export function useModelHandoff(args: {
           modelName: args.modelName,
         });
         await api.sendStageMail(args.tenantId, args.address!, { body });
+        // Settled even if this run was superseded meanwhile: the mail went.
+        setSettledFor(args.address);
         if (!cancelled) await args.reloadThread();
       } catch (cause) {
         if (!cancelled) {
@@ -383,8 +409,16 @@ export function useModelHandoff(args: {
     // transition, off whatever those hold at that moment, not re-run every
     // time the transcript changes underneath it. `threadLoaded` IS a dep:
     // it is the one signal that the transcript is there to read at all.
+    // `attempt` is the banner's Try again (#718): a failed send used to
+    // wait on the address list or the thread load moving, which after a
+    // reload they never did.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [args.address, args.addresses.join(","), args.tenantId, args.threadLoaded]);
+  }, [args.address, args.addresses.join(","), args.tenantId, args.threadLoaded, attempt]);
 
-  return { error };
+  const retry = useCallback(() => {
+    setError(null);
+    setAttempt((count) => count + 1);
+  }, []);
+
+  return { error, retry, settled: settledFor !== null && settledFor === args.address };
 }

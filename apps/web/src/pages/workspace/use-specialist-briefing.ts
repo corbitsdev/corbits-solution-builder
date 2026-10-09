@@ -68,6 +68,8 @@ export function useSpecialistBriefing(args: {
   readonly stage: number;
   readonly address: string | null;
   readonly addresses: readonly string[];
+  /** `useModelHandoff.settled` (#718): nothing is judged while a hand-off is due, and a stand-down lands no mail to say it no longer is. */
+  readonly handoffSettled: boolean;
   /** `useStageThread`'s `loadedFor === address`. */
   readonly threadLoaded: boolean;
   /** The merged thread; what the hand-off is judged against, and whose person turns say when to look again. */
@@ -83,7 +85,7 @@ export function useSpecialistBriefing(args: {
   const judgedFor = useRef<string | null>(null);
 
   const personTurns = args.messages.filter((message) => message.author === "me").length;
-  const stillDue = handoffPending({ address: args.address, addresses: args.addresses, threadLoaded: args.threadLoaded, messages: args.messages });
+  const stillDue = handoffPending({ address: args.address, addresses: args.addresses, threadLoaded: args.threadLoaded, messages: args.messages, settled: args.handoffSettled });
 
   useEffect(() => {
     if (!args.address || !args.threadLoaded) {

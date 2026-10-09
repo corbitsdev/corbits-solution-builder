@@ -273,18 +273,6 @@ export function StageWorkspace({
   const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
   useBusyWhile(busy, specialistActivity(stage, pendingAsk));
 
-  const openingDispatch = useOpeningDispatch({
-    detail,
-    tenantId,
-    stage,
-    agentAddress,
-    addresses: agent.addresses,
-    messages: thread.messages,
-    loadedFor: thread.loadedFor,
-    workflowView,
-    reloadThread: loadThread,
-  });
-
   // Withdrawn turns are folded out before anything below reads the thread,
   // so a reply Stop hid can never surface as the latest turn, the draft, or
   // the open question (CL-8695).
@@ -495,6 +483,20 @@ export function StageWorkspace({
     modelName: activeModel?.canonicalName ?? null,
     reloadThread: loadThread,
   });
+  // After the hand-off on purpose: the send-back cue waits on its verdict
+  // (#718), and a stand-down leaves no mail for the cue to notice.
+  const openingDispatch = useOpeningDispatch({
+    detail,
+    tenantId,
+    stage,
+    agentAddress,
+    addresses: agent.addresses,
+    handoffSettled: modelHandoff.settled,
+    messages: thread.messages,
+    loadedFor: thread.loadedFor,
+    workflowView,
+    reloadThread: loadThread,
+  });
   // Whether the live specialist has its briefing at all (#804): when its
   // own thread holds mail and no opening, hand-off or record-carrying cue,
   // the stage cannot be approved, and one click briefs it by hand.
@@ -504,6 +506,7 @@ export function StageWorkspace({
     stage,
     address: agentAddress,
     addresses: agent.addresses,
+    handoffSettled: modelHandoff.settled,
     threadLoaded,
     messages: foldedMessages,
     draft: draftMessage,
@@ -647,6 +650,7 @@ export function StageWorkspace({
     nodes: detail.nodes,
     agentAddress,
     addresses: agent.addresses,
+    handoffSettled: modelHandoff.settled,
     messages: thread.messages,
     loadedFor: thread.loadedFor,
     busy: busy || sending,
@@ -1221,7 +1225,11 @@ export function StageWorkspace({
 
       {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
       {modelHandoff.error ? (
-        <Banner tone="error" title="The new specialist could not be told about the prior conversation">
+        <Banner
+          tone="error"
+          title="The new specialist could not be told about the prior conversation"
+          action={{ label: "Try again", onClick: modelHandoff.retry }}
+        >
           {modelHandoff.error}
         </Banner>
       ) : null}

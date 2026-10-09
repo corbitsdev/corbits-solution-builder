@@ -24,14 +24,16 @@ import { handoffPending } from "./use-model-handoff.ts";
 export function materialToSend(input: {
   readonly agentAddress: string | null;
   readonly addresses: readonly string[];
+  /** `useModelHandoff.settled` (#718); the hand-off's own verdict. */
+  readonly handoffSettled?: boolean;
   readonly loadedFor: string | null;
   readonly busy: boolean;
   readonly nodes: readonly ChainNode[];
   readonly messages: readonly ChatMessage[];
 }): ChainNode[] {
-  const { agentAddress, addresses, loadedFor, busy, nodes, messages } = input;
+  const { agentAddress, addresses, handoffSettled, loadedFor, busy, nodes, messages } = input;
   if (!agentAddress || loadedFor !== agentAddress || messages.length === 0 || busy) return [];
-  if (handoffPending({ address: agentAddress, addresses, threadLoaded: true, messages: [...messages] })) return [];
+  if (handoffPending({ address: agentAddress, addresses, threadLoaded: true, messages: [...messages], settled: handoffSettled ?? false })) return [];
   return owedMaterial({ nodes, messages });
 }
 
@@ -41,6 +43,7 @@ export function useMaterialDispatch({
   nodes,
   agentAddress,
   addresses,
+  handoffSettled,
   messages,
   loadedFor,
   busy,
@@ -54,6 +57,7 @@ export function useMaterialDispatch({
   agentAddress: string | null;
   /** Every address this stage's mail has lived at. */
   addresses: readonly string[];
+  handoffSettled: boolean;
   /** The thread as loaded, withdrawn turns included: a stopped turn was still sent. */
   messages: readonly ChatMessage[];
   loadedFor: string | null;
@@ -71,7 +75,7 @@ export function useMaterialDispatch({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const owed = materialToSend({ agentAddress, addresses, loadedFor, busy, nodes, messages });
+    const owed = materialToSend({ agentAddress, addresses, handoffSettled, loadedFor, busy, nodes, messages });
     if (!agentAddress || owed.length === 0) return;
     const key = `${agentAddress}:${owed.map((node) => node.id).join(",")}`;
     if (attemptedRef.current === key) return;
@@ -90,7 +94,7 @@ export function useMaterialDispatch({
     })().catch((cause: unknown) => {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     });
-  }, [tenantId, stage, nodes, agentAddress, addresses, messages, loadedFor, busy, revising, reloadThread]);
+  }, [tenantId, stage, nodes, agentAddress, addresses, handoffSettled, messages, loadedFor, busy, revising, reloadThread]);
 
   // One stage's failure is not the next one's.
   useEffect(() => {
