@@ -23,8 +23,10 @@ function fakeRunner(options: FakeOptions = {}) {
   const leaders = new Map<number, string>();
   const groups = new Set<number>();
   const signals: string[] = [];
+  const environments: Record<string, string>[] = [];
   const runner: SidecarProcessRunner = {
-    spawn: () => {
+    spawn: ({ env }) => {
+      environments.push(env);
       const pid = ++nextPid;
       leaders.set(pid, `started-${pid}`);
       groups.add(pid);
@@ -40,8 +42,10 @@ function fakeRunner(options: FakeOptions = {}) {
       if (signal === "SIGKILL" || !options.childrenOutliveTerm) groups.delete(pid);
     },
   };
-  return { runner, leaders, groups, signals };
+  return { runner, leaders, groups, signals, environments };
 }
+
+const SIDECAR_KEY = "e".repeat(64);
 
 let dataDir: string;
 let groups: Set<number>;
@@ -62,6 +66,7 @@ function create(runner: SidecarProcessRunner): SidecarProvisioner {
     runtimePath: "/bin/bun",
     sidecarEntryPath: "/sidecar/index.ts",
     hubWebSocketUrl: "ws://127.0.0.1:1/api/sidecars/ws",
+    sidecarCredentialKeyHex: SIDECAR_KEY,
     runner,
     terminationGraceMs: 10,
   });
@@ -129,6 +134,30 @@ describe("process provisioner", () => {
     expect(provisioner.bindingFingerprint).toBe("process:v1:deployment");
   });
 
+  test("hands the sidecar its own key, and nothing the host's environment holds under that name", async () => {
+    // The host's environment carrying a key is the leak this guards against,
+    // whichever name it is under; neither may reach a sidecar.
+    const canaries = {
+      CREDENTIAL_ENCRYPTION_KEY: "hub-key-in-host-env",
+      SIDECAR_CREDENTIAL_ENCRYPTION_KEY: "hub-key-under-the-sidecar-name",
+    };
+    const previous = Object.fromEntries(Object.keys(canaries).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, canaries);
+    try {
+      const fake = fakeRunner();
+      provisioner = create(fake.runner);
+      await ensure(1, "sc_a");
+      const env = fake.environments[0]!;
+      expect(env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"]).toBe(SIDECAR_KEY);
+      for (const leaked of Object.values(canaries)) expect(Object.values(env)).not.toContain(leaked);
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   test("kills the children a sidecar leaves behind before removing its unit", async () => {
     const fake = fakeRunner({ childrenOutliveTerm: true });
     provisioner = create(fake.runner);
@@ -192,6 +221,7 @@ describe("process provisioner", () => {
       runtimePath: process.execPath,
       sidecarEntryPath: entry,
       hubWebSocketUrl: "ws://127.0.0.1:1/api/sidecars/ws",
+      sidecarCredentialKeyHex: SIDECAR_KEY,
       terminationGraceMs: 200,
     });
     const accepted = await ensure(1, "sc_old");

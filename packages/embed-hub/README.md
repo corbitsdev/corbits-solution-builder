@@ -9,7 +9,7 @@ serves like any other Hono app.
 import { createEmbeddedHub } from "@corbits/embed-hub";
 
 const hub = await createEmbeddedHub({
-  pglite, credentialKeyHex, principalKeyHex, signingKey,
+  pglite, credentialKeyHex, principalKeyHex, sidecarCredentialKeyHex, signingKey,
   dataDir, hubWebSocketUrl, sidecarEntry, sidecarRuntime,
   callbackPageCopy,   // OAuth callback page copy — the mounting product's
   notificationSender, // local-part of <sender>@<tenant>.local inbox rows

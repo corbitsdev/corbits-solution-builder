@@ -67,6 +67,8 @@ export type ProcessProvisionerOptions = {
   readonly runtimePath: string;
   readonly sidecarEntryPath: string;
   readonly hubWebSocketUrl: string;
+  /** What the sidecar seals its run records under; handed to it alone, never read from this process's environment. */
+  readonly sidecarCredentialKeyHex: string;
   readonly runner?: SidecarProcessRunner;
   readonly terminationGraceMs?: number;
 };
@@ -197,7 +199,7 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
       spawned = runner.spawn({
         command: [options.runtimePath, options.sidecarEntryPath],
         cwd: dirname(options.sidecarEntryPath),
-        env: sidecarEnv(request, dataDir),
+        env: sidecarEnv(request, dataDir, options.sidecarCredentialKeyHex),
       });
     } catch (error) {
       await rm(dir, { recursive: true, force: true });
@@ -248,8 +250,8 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
 }
 
 /** The sidecar learns everything else over the wire; nothing else of the host's environment is inherited. */
-function sidecarEnv(request: EnsureSidecarRequest, dataDir: string): Record<string, string> {
-  const inherited = ["PATH", "HOME", "TMPDIR", "SIDECAR_CREDENTIAL_ENCRYPTION_KEY", "SIDECAR_ADAPTER_MANIFEST"];
+function sidecarEnv(request: EnsureSidecarRequest, dataDir: string, credentialKeyHex: string): Record<string, string> {
+  const inherited = ["PATH", "HOME", "TMPDIR", "SIDECAR_ADAPTER_MANIFEST"];
   const env: Record<string, string> = {};
   for (const name of inherited) {
     const value = process.env[name];
@@ -261,6 +263,7 @@ function sidecarEnv(request: EnsureSidecarRequest, dataDir: string): Record<stri
     HUB_WS_URL: request.hubWebSocketUrl,
     SIDECAR_ID: request.sidecarId,
     SIDECAR_TOKEN: request.token,
+    SIDECAR_CREDENTIAL_ENCRYPTION_KEY: credentialKeyHex,
   };
 }
 
