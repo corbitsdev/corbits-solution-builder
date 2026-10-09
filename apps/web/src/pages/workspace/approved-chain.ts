@@ -22,6 +22,7 @@ import { DESIGN_TEXT_CAP, designAsText } from "../../design-handoff.ts";
 import { capMaterialText } from "../../material-reading.ts";
 import { isHtmlDocument } from "./guidance.ts";
 import { OPENING_VARIANT } from "../../project-list.ts";
+import { importedHistory, importedHistoryNodes } from "./imported-history.ts";
 
 export type ChainNode = Pick<ArtifactNode, "id" | "kind" | "stage" | "title" | "artifactId" | "version" | "variant" | "supersededByNodeId" | "createdAt" | "mediaType">;
 
@@ -93,10 +94,15 @@ export function handedContent(node: ChainNode, content: string): string {
   return isTextMaterial(node) ? capMaterialText(chainContent(content)) : chainContent(content);
 }
 
-/** The chain as the specialist reads it, or "" when there is nothing to hand over. */
-export function renderApprovedChain(items: Inputs, stage: number): string {
-  if (items.length === 0) return "";
-  return `${CHAIN_LEAD}\n\n${renderInputs(items, stage)}\n\n${CHAIN_END}`;
+/**
+ * The chain as the specialist reads it, an imported stage's own history
+ * last (#490), or "" when there is nothing to hand over. The history goes
+ * inside the record so the transcript folds it with the rest.
+ */
+export function renderApprovedChain(items: Inputs, stage: number, history = ""): string {
+  const parts = [items.length > 0 ? renderInputs(items, stage) : "", history].filter((part) => part.length > 0);
+  if (parts.length === 0) return "";
+  return [CHAIN_LEAD, ...parts, CHAIN_END].join("\n\n");
 }
 
 /** An opening mail split for the transcript: what precedes the chain, the chain, and the stage's own lead. Null for any other message. */
@@ -134,7 +140,9 @@ export async function readHandedItems(tenantId: string, nodes: readonly ChainNod
 
 /**
  * Reads each chain node's content and renders the chain. A node whose
- * content cannot be read is left out; the opening still goes.
+ * content cannot be read is left out; the opening still goes. An imported
+ * stage's own history is the exception (#490): without it the stage
+ * starts over, so its failed read fails the compose, which is shown.
  */
 export async function composeApprovedChain(deps: {
   readonly tenantId: string;
@@ -143,16 +151,25 @@ export async function composeApprovedChain(deps: {
   readonly stage: number;
 }): Promise<string> {
   const chain = approvedChainNodes(deps.nodes, deps.reviews, deps.stage);
-  return renderApprovedChain(await readHandedItems(deps.tenantId, chain), deps.stage);
+  const history = await importedHistory(deps.tenantId, deps.nodes, deps.stage);
+  return renderApprovedChain(await readHandedItems(deps.tenantId, chain), deps.stage, history);
+}
+
+/** Every node a composed chain reads, in order: what its query is keyed on. */
+export function chainNodeIds(deps: Parameters<typeof composeApprovedChain>[0]): string[] {
+  const { conversation, draft } = importedHistoryNodes(deps.nodes, deps.stage);
+  return [...approvedChainNodes(deps.nodes, deps.reviews, deps.stage), conversation, draft].flatMap((node) => (node ? [node.id] : []));
 }
 
 /**
  * The chain as a query, keyed on the exact nodes it reads: the architect's
  * opening and stage 6's requirements author read one composition. A node's
  * content never changes under its id, so a composed chain is never stale.
+ * An imported stage's history nodes are in the key too, so a chain
+ * composed before they were in `nodes` is never reused without them.
  */
 export function approvedChainQuery(deps: Parameters<typeof composeApprovedChain>[0]) {
-  const nodeIds = approvedChainNodes(deps.nodes, deps.reviews, deps.stage).map((node) => node.id);
+  const nodeIds = chainNodeIds(deps);
   return queryOptions({
     queryKey: keys.approvedChain.of(deps.tenantId, deps.stage, nodeIds),
     queryFn: () => composeApprovedChain(deps),

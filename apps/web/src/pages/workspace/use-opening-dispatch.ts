@@ -16,6 +16,11 @@
  * `freeze`). Stage 9's is always composed from the delivery manifest and
  * stage 8's own status reply, never the raw stage-8 artifact (it may be the
  * binary archive itself).
+ *
+ * An imported project's landed stage has a history and no mail (#490): its
+ * transcript and latest document ride inside the record the chain hands
+ * over (`imported-history.ts`), so the specialist continues the stage
+ * rather than starting it over.
  */
 import { designHandoff } from "../../design-handoff.ts";
 import { useEffect, useRef, useState } from "react";
