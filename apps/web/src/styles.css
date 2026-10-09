@@ -3648,7 +3648,10 @@ button[aria-disabled="true"] {
 
 /* Opening the draft is the largest layout change in the app; a hard cut reads
    as a glitch rather than a panel arriving. */
-.document-layout {
+/* Not when the split is resized by hand: easing the track made the divider
+   trail the pointer and drift on after release (#753). The document's own
+   entrance is the stage-document-in animation in workspace-layout.css. */
+.document-layout:not(:has(> .panes-splitter)) {
   transition: grid-template-columns var(--duration-large, 300ms) var(--ease-out, ease);
 }
 

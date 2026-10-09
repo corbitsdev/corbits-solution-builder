@@ -169,6 +169,13 @@ describe("project chrome paint", () => {
     );
   });
 
+  // #753: the grid eased toward each pointer position, so the divider
+  // trailed the pointer and kept moving after release.
+  test("a split with a splitter is never transitioned; the easing is only for a grid without one", () => {
+    expect(global).toContain(".document-layout:not(:has(> .panes-splitter)) {\n  transition: grid-template-columns");
+    expect(global).not.toMatch(/^\.document-layout \{[^}]*transition:/m);
+  });
+
   test("narrow stacks at 900px with conversation first — no order swap", () => {
     expect(css).toContain("@media (max-width: 900px)");
     expect(css).not.toContain("@media (max-width: 1080px)");
