@@ -104,10 +104,10 @@ export const ENDED_DEPLOYMENT_STATUSES: ReadonlySet<string> = new Set(["releasin
  * explicit switch target over this, and every caller that means "the
  * deployment mail should route to right now" (`stageSpecialistStatus`,
  * `ensureSpecialistDeploymentOnce`'s own existing-check) goes through that,
- * not this function directly. This stays oldest-wins so a restart-driven
- * replacement deployment -- which never touches the switch record -- is
- * picked exactly as it always was, with no special-casing for CL-8899 at
- * this layer at all.
+ * not this function directly. This stays oldest-wins, with no special-casing
+ * for CL-8899 at this layer at all: a replacement deployment that honoured
+ * the stage's pick (#507) is named by the rewritten record, not by anything
+ * here.
  */
 function pickDeployment(deployments: readonly HubDeployment[], sidecar?: SidecarCapability): HubDeployment | undefined {
   // CL-9698: with the host's placement facts known, a live deployment this
@@ -129,13 +129,12 @@ function pickDeployment(deployments: readonly HubDeployment[], sidecar?: Sidecar
  * target (`StageModelSwitchRecord`, `project-tenant.ts`) while it is still
  * live; otherwise falls back to the default `pickDeployment` (oldest-wins).
  *
- * The switch record is written ONLY by `switchSpecialistDeployment` below,
- * on a person's explicit choice -- never by an ordinary deploy, and never by
- * a restart-driven replacement. So once a switch's target deployment ends
- * (the hub replaces it for any reason, including a restart recovery), this
- * silently reverts to oldest-wins exactly as if no switch had ever happened
- * -- a restart never "redirects" an active session onto stale switch
- * intent, because nothing here treats a dead switch target as special.
+ * Once the record's deployment has ended (the hub replaces it for any
+ * reason, including a restart recovery), this reverts to oldest-wins: mail
+ * never routes to a dead target. The record's offering still outlives that
+ * deployment -- `ensureSpecialistDeploymentOnce` leads the stage's next
+ * deployment with it and rewrites the record to name that one (#507) -- so
+ * nothing here needs to treat a dead target as special.
  */
 async function resolveLiveDeployment(
   transport: Transport,
@@ -448,6 +447,23 @@ export function leadingOffering<T extends { readonly id: string }>(
 }
 
 /**
+ * The chain a fresh deploy hands the hub: `leadId` first when one is named
+ * -- an explicit switch, or the stage's recorded pick -- else the catalog's
+ * own order. A named offering that is no longer in the catalog is refused
+ * rather than answered on another model: the person chose it, and only the
+ * person moves the stage off it (#507).
+ */
+export function freshDeployOfferings<T extends { readonly id: string }>(
+  catalogOfferings: readonly T[],
+  leadId: string | undefined,
+): T[] {
+  if (leadId === undefined) return [...catalogOfferings];
+  const chosen = catalogOfferings.find((offering) => offering.id === leadId);
+  if (!chosen) throw new Error("the chosen model is no longer a connected offering");
+  return [chosen, ...catalogOfferings.filter((offering) => offering.id !== leadId)];
+}
+
+/**
  * Whether the entry at the asset's head -- what its live deployment runs --
  * is the packed `workflow.js` for this role today, with today's workspace
  * guidance beside it. The entry and guidance alone, not the whole tree: the
@@ -620,14 +636,12 @@ async function ensureSpecialistDeploymentOnce(
   }
   // A switch reorders the chain so the chosen offering leads -- the same
   // `sourceOfferingIds`/`defaultSourceOfferingId` story every other deploy
-  // uses, just with the person's pick standing in for "offerings[0]".
-  const offerings = switchToOfferingId
-    ? (() => {
-        const chosen = catalogOfferings.find((offering) => offering.id === switchToOfferingId);
-        if (!chosen) throw new Error("the chosen model is no longer a connected offering");
-        return [chosen, ...catalogOfferings.filter((offering) => offering.id !== switchToOfferingId)];
-      })()
-    : catalogOfferings;
+  // uses, just with the person's pick standing in for "offerings[0]". With
+  // nothing live to hand back -- a restart ends every deployment, a failed
+  // run (#806) ends one -- the stage's recorded pick leads the same way
+  // (#507): the person chose a model for the stage, not for one deployment.
+  const recorded = switchToOfferingId ? null : await readStageSwitch(transport, projectId, stage);
+  const offerings = freshDeployOfferings(catalogOfferings, switchToOfferingId ?? recorded?.offeringId);
   const source = pinFor(catalog, offerings[0]!);
   if (!source) {
     throw new Error("the tenant's offering does not resolve to a known model");
@@ -698,6 +712,19 @@ async function ensureSpecialistDeploymentOnce(
   const winner = switchToOfferingId
     ? deployment
     : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar)) ?? deployment);
+
+  // The record still names the deployment that ended. Naming the winner
+  // instead is what keeps mail routing here (`resolveLiveDeployment`) and
+  // what a kit refresh reads to redeploy onto the same model
+  // (`leadingOffering`). A concurrent caller that won honoured the same
+  // record, so naming its deployment is right too.
+  if (recorded) {
+    await writeStageSwitch(transport, projectId, stage, {
+      deploymentId: winner.id,
+      offeringId: recorded.offeringId,
+      switchedAt: new Date().toISOString(),
+    });
+  }
 
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, tenantId };
 }

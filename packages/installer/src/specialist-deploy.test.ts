@@ -1,10 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
+import {
+  ensureSpecialistDeployment,
+  freshDeployOfferings,
+  leadingOffering,
+  specialistEntryIsCurrent,
+  stageSpecialistAddresses,
+  stageSpecialistStatus,
+} from "./specialist-deploy.js";
+import type { StageModelSwitchRecord } from "./project-tenant.js";
 import { visibleCatalog } from "./visible-catalog.js";
-import { sourceFor } from "./workflow-deploy.js";
+import { sourceFor, type ClosureSource, type WorkflowGitPush } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
-import { SPECIALIST_ENTRY_PATH, SPECIALIST_GUIDANCE_PATH, defaultExportModule } from "@solutions-builder/app/specialist-source";
+import {
+  SPECIALIST_ENTRY_PATH,
+  SPECIALIST_GUIDANCE_PATH,
+  SPECIALIST_INFERENCE_SOURCE_PATH,
+  defaultExportModule,
+} from "@solutions-builder/app/specialist-source";
 
 const TENANT = {
   id: "tnt_ws",
@@ -288,4 +301,158 @@ describe("deploying into a project tenant", () => {
     expect(catalog.offerings.map((row) => row.id)).toEqual(["off_1"]);
   });
 
+});
+
+// #507: the chain a fresh deploy leads with. A named offering leads; one no
+// longer in the catalog is refused, never swapped for the catalog's first.
+describe("freshDeployOfferings", () => {
+  const offerings = [{ id: "off_primary" }, { id: "off_pick" }];
+
+  test("the catalog's own order when nothing is named", () => {
+    expect(freshDeployOfferings(offerings, undefined)).toEqual(offerings);
+  });
+
+  test("the named offering first, the rest in catalog order", () => {
+    expect(freshDeployOfferings(offerings, "off_pick")).toEqual([{ id: "off_pick" }, { id: "off_primary" }]);
+  });
+
+  test("refuses a named offering that is no longer connected", () => {
+    expect(() => freshDeployOfferings(offerings, "off_gone")).toThrow("the chosen model is no longer a connected offering");
+  });
+});
+
+// #507: a model picked for a stage outlives the deployment the pick named.
+// After a restart nothing is live, so the specialist is deployed fresh --
+// on the pick, with the record rewritten to name the fresh deployment --
+// or refused when the pick's provider is gone. Run against an in-memory
+// hub so the whole path is exercised, not one branch of it.
+describe("a fresh deploy honours the stage's recorded pick (#507)", () => {
+  const ASSET = assetRow("asset_1", "sb-project-p1-stage-1");
+  const providers = [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }];
+  const models = [
+    { id: "mdl_primary", canonicalName: "gpt-primary" },
+    { id: "mdl_pick", canonicalName: "gpt-pick" },
+  ];
+  const offering = (id: string, modelId: string, priority: number) => ({
+    id,
+    providerId: "mpv_1",
+    modelId,
+    priority,
+    disabled: false,
+    capabilities: [],
+    quirks: null,
+  });
+  const PRIMARY = offering("off_primary", "mdl_primary", 0);
+  const PICK = offering("off_pick", "mdl_pick", 1);
+  /** The host started after the pre-restart deployment was created. */
+  const SIDECAR = { canPlaceSidecars: true, sidecarsLostBefore: "2026-01-02T00:00:00.000Z" };
+  const WAIT = { stallMs: 20, pollMs: 1, ceilingMs: 100 };
+  const PACKED = { roleId: "experience-designer", workflow: 'export default defineWorkflow({ id: "sb-stage-1" });\n', dependencies: [] };
+  const CLOSURE: ClosureSource = {
+    manifest: { digest: "test", packages: [], catalog: {} },
+    fetchTarball: async () => {
+      throw new Error("no closure member is shipped for a role with no dependencies");
+    },
+  };
+
+  /** A hub with one project tenant under the workspace, the workspace's
+   *  catalog, and the stage's asset already deployed once before. */
+  function fakeHub(args: {
+    offerings: ReturnType<typeof offering>[];
+    deployments: ReturnType<typeof deploymentRow>[];
+    modelSwitch?: Record<string, StageModelSwitchRecord>;
+  }) {
+    let config: Record<string, unknown> = {
+      solutionsBuilder: { revision: 1, ...(args.modelSwitch ? { modelSwitch: args.modelSwitch } : {}) },
+    };
+    const deployments = [...args.deployments];
+    const deploys: { sourceOfferingIds: string[]; defaultSourceOfferingId: string }[] = [];
+    let pushed: Record<string, string> = {};
+    const page = (data: unknown[]) => ({ data, nextCursor: null });
+    const transport = {
+      async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+        const url = new URL(path, "http://hub");
+        const { pathname } = url;
+        if (method === "GET" && pathname === `/api/tenants/${TENANT.id}`) return TENANT as T;
+        if (method === "GET" && pathname === `/api/tenants/${PROJECT_TENANT.id}`) return { ...PROJECT_TENANT, config } as T;
+        if (method === "PATCH" && pathname === `/api/tenants/${PROJECT_TENANT.id}`) {
+          config = (body as { config: Record<string, unknown> }).config;
+          return { ...PROJECT_TENANT, config } as T;
+        }
+        const assets = /^\/api\/tenants\/([^/]+)\/assets$/.exec(pathname);
+        if (method === "GET" && assets) {
+          return [ASSET].filter((row) => url.searchParams.get("inherited") !== "false" || row.tenantId === assets[1]) as T;
+        }
+        if (method === "GET" && pathname === `/api/tenants/${PROJECT_TENANT.id}/assets/${ASSET.id}/blob`) {
+          const content = pushed[url.searchParams.get("path")!];
+          if (content === undefined) throw new ApiError(404, "not_found", "no such blob");
+          return { content: btoa(String.fromCharCode(...new TextEncoder().encode(content))) } as T;
+        }
+        if (method === "POST" && pathname === `/api/tenants/${PROJECT_TENANT.id}/git-tokens`) return { id: "tok_1", secret: "shh" } as T;
+        if (method === "DELETE" && pathname === `/api/tenants/${PROJECT_TENANT.id}/git-tokens/tok_1`) return undefined as T;
+        const catalog = /^\/api\/tenants\/([^/]+)\/catalog\/(offerings|providers|models)$/.exec(pathname);
+        if (method === "GET" && catalog) {
+          if (catalog[1] !== TENANT.id) return page([]) as T;
+          return page(catalog[2] === "offerings" ? args.offerings : catalog[2] === "providers" ? providers : models) as T;
+        }
+        const listing = /^\/api\/tenants\/([^/]+)\/workflows\/deployments$/.exec(pathname);
+        if (method === "GET" && listing) return deployments.filter((row) => row.tenantId === listing[1]) as T;
+        if (method === "POST" && pathname === `/api/tenants/${PROJECT_TENANT.id}/workflows/deployments`) {
+          deploys.push(body as (typeof deploys)[number]);
+          const fresh = { ...deploymentRow("dep_fresh", ASSET.id, "deployed"), createdAt: "2026-01-03T00:00:00.000Z" };
+          deployments.push(fresh);
+          return fresh as T;
+        }
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    } as Transport;
+    const gitPush: WorkflowGitPush = async ({ tree }) => {
+      pushed = tree;
+      return "sha_fresh";
+    };
+    const run = () =>
+      ensureSpecialistDeployment(transport, SIDECAR, CLOSURE, gitPush, PROJECT_TENANT.id, 1, PACKED, "Write plainly.", undefined, WAIT);
+    const recorded = () =>
+      (config.solutionsBuilder as { modelSwitch?: Record<string, StageModelSwitchRecord> }).modelSwitch?.["1"] ?? null;
+    const pinned = () => pushed[`packages/specialist/${SPECIALIST_INFERENCE_SOURCE_PATH}`];
+    return { run, deploys, recorded, pinned };
+  }
+
+  /** The pick, made before the restart, naming a deployment the hub has since released. */
+  const PICKED_BEFORE_RESTART = { "1": { deploymentId: "dep_old", offeringId: PICK.id, switchedAt: "2026-01-01T12:00:00.000Z" } };
+  const RELEASED_OLD = { ...deploymentRow("dep_old", ASSET.id, "released"), createdAt: "2026-01-01T00:00:00.000Z" };
+
+  test("after a restart the stage is deployed on the pick, and the record names the fresh deployment", async () => {
+    const hub = fakeHub({ offerings: [PRIMARY, PICK], deployments: [RELEASED_OLD], modelSwitch: PICKED_BEFORE_RESTART });
+    const deployment = await hub.run();
+    expect(deployment.deploymentId).toBe("dep_fresh");
+    expect(hub.deploys).toMatchObject([{ sourceOfferingIds: ["off_pick", "off_primary"], defaultSourceOfferingId: "off_pick" }]);
+    expect(hub.pinned()).toContain("gpt-pick");
+    expect(hub.recorded()).toMatchObject({ deploymentId: "dep_fresh", offeringId: "off_pick" });
+  });
+
+  test("with the pick's provider disconnected, the deploy is refused rather than answered on the primary", async () => {
+    const hub = fakeHub({ offerings: [PRIMARY], deployments: [RELEASED_OLD], modelSwitch: PICKED_BEFORE_RESTART });
+    await expect(hub.run()).rejects.toThrow("the chosen model is no longer a connected offering");
+    expect(hub.deploys).toEqual([]);
+    expect(hub.recorded()).toEqual(PICKED_BEFORE_RESTART["1"]);
+  });
+
+  // #806: a specialist whose run died is replaced on the next write without
+  // any restart -- the same fresh-deploy path, so it, too, lands on the pick.
+  test("a specialist the hub failed on this host is replaced on the pick", async () => {
+    const failed = { ...deploymentRow("dep_old", ASSET.id, "failed"), createdAt: "2026-01-03T00:00:00.000Z" };
+    const hub = fakeHub({ offerings: [PRIMARY, PICK], deployments: [failed], modelSwitch: PICKED_BEFORE_RESTART });
+    const deployment = await hub.run();
+    expect(deployment.deploymentId).toBe("dep_fresh");
+    expect(hub.deploys.map((deploy) => deploy.defaultSourceOfferingId)).toEqual(["off_pick"]);
+    expect(hub.recorded()).toMatchObject({ deploymentId: "dep_fresh", offeringId: "off_pick" });
+  });
+
+  test("a stage never switched deploys on the catalog's first and records nothing", async () => {
+    const hub = fakeHub({ offerings: [PRIMARY, PICK], deployments: [RELEASED_OLD] });
+    await hub.run();
+    expect(hub.deploys.map((deploy) => deploy.defaultSourceOfferingId)).toEqual(["off_primary"]);
+    expect(hub.recorded()).toBeNull();
+  });
 });
