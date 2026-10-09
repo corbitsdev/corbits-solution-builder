@@ -366,6 +366,7 @@ export function AudiencePackages({
   onChanged,
   workflowView,
   onStakeholdersSaved,
+  rosterSavedInChat = null,
   messages = [],
 }: {
   detail: ProjectDetail;
@@ -383,6 +384,10 @@ export function AudiencePackages({
    *  policy (CL-8891). Best-effort: a review not yet open simply stays
    *  unopened until it is reachable. */
   onStakeholdersSaved?: () => void;
+  /** A roster the Presentation creator confirmed in the chat and the page
+   *  saved (#722), `at` making each save a fresh signal: it arms the sole
+   *  approver's write exactly as the editor's own save does. */
+  rosterSavedInChat?: { readonly saved: SavedStakeholders; readonly at: number } | null;
 }) {
   // Which stakeholders' packages are being written right now: "Generate
   // approval package" sends the mail, then waits for the reply that follows it and keeps
@@ -516,6 +521,11 @@ export function AudiencePackages({
   const armAutoWrite = (saved: SavedStakeholders) => {
     autoWriteRef.current = saved.audiences.length === 1 ? saved.audiences[0]!.name : null;
   };
+  // Declared before the write below: effects run in order, so a roster
+  // saved from the chat is armed in the same pass that may write for it.
+  useEffect(() => {
+    if (rosterSavedInChat) armAutoWrite(rosterSavedInChat.saved);
+  }, [rosterSavedInChat]);
   useEffect(() => {
     const name = autoWriteRef.current;
     if (name === null || writing.size > 0) return;
@@ -525,7 +535,7 @@ export function AudiencePackages({
     void writePackages([name]);
     // `policy` and `packages` are derived from `detail`; `writePackages` is this render's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.project.policy, detail.nodes, writing]);
+  }, [detail.project.policy, detail.nodes, writing, rosterSavedInChat]);
 
   // A package the presentation creator rewrote on request in the chat is
   // recorded as the stakeholder's next version (#597); until now only

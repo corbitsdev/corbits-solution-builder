@@ -170,12 +170,18 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  onAnswer,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
   onSend: () => void;
+  /** Sends a tapped choice as the person's turn (#722). Set, the latest
+   *  specialist turn's offered options are buttons, as a document stage's
+   *  are; absent, a list stays a list. Only the latest turn, with nothing
+   *  said since, can be answered. */
+  onAnswer?: ((answer: string) => void) | undefined;
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
@@ -206,6 +212,8 @@ export function StageConversation({
   onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
   const opening = pending && !messages.some((message) => message.author === "agent");
+  const lastTurn = messages.at(-1);
+  const answerableId = onAnswer && !pending && lastTurn?.author === "agent" ? lastTurn.id : null;
   // Before the first reply the opening wait says who is working and on
   // what; the "Working on it…" row would repeat it.
   const workingRow = pending && !opening;
@@ -303,6 +311,8 @@ export function StageConversation({
                       <DraftReference draft={draft} onOpen={onOpenVersion} />
                       {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
                     </>
+                  ) : message.id === answerableId && onAnswer ? (
+                    <SpecialistTurn text={text} note={null} onOpenVersion={onOpenVersion ?? NO_VERSION} onAnswer={onAnswer} busy={working} />
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -348,6 +358,7 @@ export function StageConversation({
   );
 }
 
+const NO_VERSION = () => {};
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();

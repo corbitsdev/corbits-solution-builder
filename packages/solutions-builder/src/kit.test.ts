@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
+import { STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
 import { SELECTABLE_TARGETS } from "./targets.js";
 
 describe("Experience designer prompt", () => {
@@ -89,5 +90,23 @@ describe("Estimator prompt", () => {
   test("asks which target the approval is for when several targets price differently", () => {
     const prompt = agentById("estimator")!.system;
     expect(prompt).toContain("when the plan declares more than one target and\nthe figure differs materially by target, ask which target the approval is for");
+  });
+});
+
+// #722: Concept approval opens by asking who must approve; the roster comes
+// back as a block the app saves as the policy, with the roles it accepts.
+describe("Presentation creator prompt", () => {
+  test("opens with one question whose options the composer renders as buttons, Just me first", () => {
+    const prompt = agentById("presentation-creator")!.system;
+    expect(prompt).toContain("It asks for\nno package, so write none and announce none");
+    expect(prompt).toContain("Who needs to approve to move forward?\n1. Just me\n2. Me and others (I'll name them and their roles)\n3. Someone else approves (I'll name them)");
+  });
+
+  test("gives the stakeholders block's fence, its exact shape, and what Just me means", () => {
+    const prompt = agentById("presentation-creator")!.system;
+    expect(prompt).toContain("exactly one fenced block, opened with ```json stakeholders");
+    expect(prompt).toContain(STAKEHOLDERS_BLOCK_SHAPE);
+    expect(prompt).toContain('one entry named "You" with the role\n"project_owner" and a quorum of 1');
+    expect(prompt).toContain("Never use a role outside that list.");
   });
 });

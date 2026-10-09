@@ -31,7 +31,8 @@ import {
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { AudienceGate, AudiencePackages } from "../audiences.jsx";
+import { AudienceGate, AudiencePackages, type SavedStakeholders } from "../audiences.jsx";
+import { useStakeholdersBlock } from "./use-stakeholders-block.ts";
 import { DesignFeedbackView } from "../design.jsx";
 import { Banner, Button, CopyButton, FailedRead, GuideDock, documentName, stageName } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
@@ -272,7 +273,10 @@ export function StageWorkspace({
   // busy indicator at the foot of the window counts it alongside the flame.
   // A composed opening is mail the app wrote, not words of the person's to
   // read an ask off: the specialist is drafting, whatever the mail says.
-  const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  // At Concept approval the draft is a package (#722): until one is
+  // recorded, a turn in the chat is the roster being settled, not a redraft.
+  const hasDraft = stage === 5 ? detail.nodes.some((node) => node.kind === "audience_package") : foldedMessages.some((message) => message.author === "agent");
+  const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, hasDraft);
   useBusyWhile(busy, specialistActivity(stage, pendingAsk));
 
   // Withdrawn turns are folded out before anything below reads the thread,
@@ -555,6 +559,23 @@ export function StageWorkspace({
     mintRequirements,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
+
+  // The roster the Presentation creator confirms in the chat is saved as the
+  // policy (#722), and the panel is told as it is for its own save: the
+  // review recaptures the policy and a sole approver's package is written.
+  const [rosterFromChat, setRosterFromChat] = useState<{ saved: SavedStakeholders; at: number } | null>(null);
+  const stakeholdersBlock = useStakeholdersBlock({
+    projectId: detail.project.id,
+    stage,
+    messages: foldedMessages,
+    policy: detail.project.policy,
+    onSaved: (saved) => {
+      setRosterFromChat({ saved, at: Date.now() });
+      void refreshWorkflow();
+      void loadThread();
+      void openReviewNow();
+    },
+  });
 
   // Holding send raises the send-back picker over the composer; whatever is
   // typed goes along as the reason. The full picker also lives in Guidance —
@@ -1043,6 +1064,9 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
+      // Concept approval asks who needs to approve with offered choices
+      // (#722); a tapped one is sent as the answer, as typing it would be.
+      onAnswer={stage === 5 ? (answer) => void send(answer) : undefined}
       rows={
         <>
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
@@ -1295,6 +1319,9 @@ export function StageWorkspace({
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
+              {stakeholdersBlock.failure ? (
+                <FailedRead what={stakeholdersBlock.failure.what} detail={stakeholdersBlock.failure.detail} onRetry={stakeholdersBlock.retry} />
+              ) : null}
               <AudiencePackages
                 detail={detail}
                 tenantId={tenantId}
@@ -1305,6 +1332,7 @@ export function StageWorkspace({
                 }}
                 workflowView={workflowView}
                 onStakeholdersSaved={() => void openReviewNow()}
+                rosterSavedInChat={rosterFromChat}
               />
             </div>
           )}

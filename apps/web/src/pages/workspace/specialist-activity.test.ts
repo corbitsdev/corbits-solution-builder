@@ -6,7 +6,8 @@ import { specialistActivity } from "./specialist-activity.ts";
 describe("specialistActivity", () => {
   test("names the stage's specialist and its task", () => {
     expect(specialistActivity(4)).toBe("Experience designer is drawing the design");
-    expect(specialistActivity(5)).toBe("Presentation creator is writing the stakeholder packages and their slides");
+    // #722: Concept approval opens by asking who approves; the packages are written by the panel's own round.
+    expect(specialistActivity(5)).toBe("Presentation creator is finding out who needs to approve");
     expect(specialistActivity(8)).toBe("Build supervisor is reviewing the build");
   });
 

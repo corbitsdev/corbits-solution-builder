@@ -144,3 +144,27 @@ describe("SpecialistTurn questions", () => {
     expect(html).not.toContain('aria-pressed="true"');
   });
 });
+
+// #722: Concept approval's "Who needs to approve to move forward?" offers
+// choices; in the plain conversation they are buttons only on the latest
+// turn, with nothing said since, and only when the thread can send one.
+describe("StageConversation offered choices", () => {
+  const QUESTION = "Who needs to approve to move forward?\n1. Just me\n2. Me and others (I'll name them and their roles)\n3. Someone else approves (I'll name them)";
+  const ask = (id: string): ChatMessage => ({ id, author: "agent", body: QUESTION, at: "2026-10-09T10:00:00Z" });
+  const say = (id: string, body: string): ChatMessage => ({ id, author: "me", body, at: "2026-10-09T10:01:00Z" });
+  const render = (messages: ChatMessage[], props: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(StageConversation, { stage: 5, messages, value: "", onValueChange: () => {}, onSend: () => {}, ...props }));
+
+  test("the latest turn's options are buttons when the thread can answer", () => {
+    const html = render([ask("a1")], { onAnswer: () => {} });
+    expect(html).toContain('class="turn-option"');
+    expect(html).toContain(">Just me<");
+    expect(html).toContain("Someone else approves (I&#x27;ll name them)");
+  });
+
+  test("without onAnswer, or once the person has spoken, the list stays a list", () => {
+    expect(render([ask("a1")])).not.toContain("turn-option");
+    expect(render([ask("a1"), say("m1", "Just me")], { onAnswer: () => {} })).not.toContain("turn-option");
+    expect(render([ask("a1")], { onAnswer: () => {}, pending: true })).not.toContain("turn-option");
+  });
+});
