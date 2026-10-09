@@ -98,6 +98,9 @@ async function awaitPackageReply(
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
+/** The stakeholder policy as `api.setStakeholders` saved it. */
+export type SavedStakeholders = { readonly audiences: readonly { readonly name: string; readonly role: string }[]; readonly audienceQuorum: number };
+
 /** A role's name as a person reads it. */
 /** The stakeholder named "You": the person themselves. */
 function isYou(entry: { name: string }): boolean {
@@ -243,10 +246,11 @@ function Stakeholders({
   audiences: { name: string; role: string }[];
   quorum: number;
   onChanged: () => void;
-  /** Fires after a successful save, in addition to `onChanged` — a stage-5
-   *  review already open must recapture the new policy rather than sit on
-   *  whatever quorum was in effect when it opened (CL-8891). */
-  onSaved?: () => void;
+  /** Fires after a successful save, in addition to `onChanged`, with the
+   *  policy as saved — a stage-5 review already open must recapture the new
+   *  policy rather than sit on whatever quorum was in effect when it opened
+   *  (CL-8891), and a sole approver's package is written from it (#722). */
+  onSaved?: (saved: SavedStakeholders) => void;
 }) {
   const [rows, setRows] = useState(audiences);
   const [needed, setNeeded] = useState(quorum);
@@ -264,10 +268,10 @@ function Stakeholders({
     setBusy(true);
     setError(null);
     try {
-      await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
+      const saved = await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
       setEditing(false);
       onChanged();
-      onSaved?.();
+      onSaved?.(saved);
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -500,6 +504,28 @@ export function AudiencePackages({
   // the tabs and the decisions table read the same way, the person's own
   // first (#122).
   const packages = packagesByStakeholder(detail.nodes, audiences);
+
+  // A sole approver never sees an empty list (#722): when a one-approver
+  // policy is saved, that approver's package is written at once rather than
+  // waiting for the button. Armed only by a save, so an old project opening
+  // on this pane writes nothing; one save arms one write, and a save that
+  // lands while a round is in flight waits for it. The write looks the name
+  // up in `detail`'s policy, so it holds until the refresh after the save
+  // has landed there.
+  const autoWriteRef = useRef<string | null>(null);
+  const armAutoWrite = (saved: SavedStakeholders) => {
+    autoWriteRef.current = saved.audiences.length === 1 ? saved.audiences[0]!.name : null;
+  };
+  useEffect(() => {
+    const name = autoWriteRef.current;
+    if (name === null || writing.size > 0) return;
+    if (!(policy.audiences ?? []).some((entry) => entry.name === name)) return;
+    autoWriteRef.current = null;
+    if (packages.some((node) => node.variant === name)) return;
+    void writePackages([name]);
+    // `policy` and `packages` are derived from `detail`; `writePackages` is this render's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.project.policy, detail.nodes, writing]);
 
   // A package the presentation creator rewrote on request in the chat is
   // recorded as the stakeholder's next version (#597); until now only
@@ -806,7 +832,10 @@ export function AudiencePackages({
         audiences={audiences}
         quorum={quorum}
         onChanged={onChanged}
-        {...(onStakeholdersSaved ? { onSaved: onStakeholdersSaved } : {})}
+        onSaved={(saved) => {
+          armAutoWrite(saved);
+          onStakeholdersSaved?.();
+        }}
       />
 
       {missing.length > 0 ? (
