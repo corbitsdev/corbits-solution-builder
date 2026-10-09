@@ -63,9 +63,12 @@ describe("the stakeholder editor's control", () => {
     expect(source).not.toMatch(/>\s*Edit\s*</);
   });
 
-  // #678: a disclosure, in place whether the panel is open or closed, that toggles it.
-  test("is a disclosure that opens and closes the panel", () => {
-    expect(source).toMatch(/<button type="button" className="disclosure" aria-expanded=\{editing\} aria-controls="stakeholder-panel" onClick=\{\(\) => setEditing\(!editing\)\}>/);
+  // #678: a disclosure, in place whether the panel is open or closed, that
+  // toggles it. #722: styled as a control, the repo's Button, not a bare
+  // text button that reads as a label.
+  test("is a Button that discloses the panel, and says so to assistive tech", () => {
+    expect(source).toMatch(/<Button aria-expanded=\{editing\} aria-controls="stakeholder-panel" onClick=\{\(\) => setEditing\(!editing\)\}>/);
+    expect(source).not.toContain('className="disclosure"');
     expect(source).toContain('<div className="stakeholder-editor" id="stakeholder-panel">');
   });
 });

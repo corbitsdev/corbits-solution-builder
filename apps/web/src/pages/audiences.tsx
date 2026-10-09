@@ -282,11 +282,13 @@ function Stakeholders({
         <p className="inline-note">
           {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
         </p>
-        {/* A disclosure (#678): the same control opens and closes the panel. */}
-        <button type="button" className="disclosure" aria-expanded={editing} aria-controls="stakeholder-panel" onClick={() => setEditing(!editing)}>
-          <ChevronRight className="disclosure-chevron" aria-hidden="true" />
+        {/* The same control opens and closes the panel (#678), and reads as a
+            control rather than a label (#722): it is the edit path, not the
+            way in. */}
+        <Button aria-expanded={editing} aria-controls="stakeholder-panel" onClick={() => setEditing(!editing)}>
+          {editing ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
           Manage stakeholders
-        </button>
+        </Button>
       </div>
       {editing ? (
         <div className="stakeholder-editor" id="stakeholder-panel">
