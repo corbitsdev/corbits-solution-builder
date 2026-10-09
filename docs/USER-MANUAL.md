@@ -520,11 +520,13 @@ approver, audience member, builder operator, or delivery recipient), and a
 stakeholders**. A new project starts with one stakeholder, "You", and a
 quorum of one.
 
-**Packages.** Each stakeholder's package is a tab. A stakeholder without one
-is listed with a **Write it** button; **Write all N** writes every missing
-package at once. **Write it again** redrafts one package and leaves the
-others as they stand. Asking for a rewrite in the conversation does the
-same.
+**Packages.** Each stakeholder's package is a tab. When you are the only
+stakeholder, your package is generated as soon as the stakeholders are
+saved. Otherwise a stakeholder without one is listed with a **Generate
+approval package** button; **Generate all N packages** writes every missing
+package at once. **Generate the package again** redrafts one package and
+leaves the others as they stand. Asking for a rewrite in the conversation
+does the same.
 
 **Slides.** Under each package is its deck. Use the arrows or the arrow keys
 to move between slides, and click the large slide to play them full screen.

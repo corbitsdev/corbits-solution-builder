@@ -98,6 +98,9 @@ async function awaitPackageReply(
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
+/** The stakeholder policy as `api.setStakeholders` saved it. */
+export type SavedStakeholders = { readonly audiences: readonly { readonly name: string; readonly role: string }[]; readonly audienceQuorum: number };
+
 /** A role's name as a person reads it. */
 /** The stakeholder named "You": the person themselves. */
 function isYou(entry: { name: string }): boolean {
@@ -243,10 +246,11 @@ function Stakeholders({
   audiences: { name: string; role: string }[];
   quorum: number;
   onChanged: () => void;
-  /** Fires after a successful save, in addition to `onChanged` — a stage-5
-   *  review already open must recapture the new policy rather than sit on
-   *  whatever quorum was in effect when it opened (CL-8891). */
-  onSaved?: () => void;
+  /** Fires after a successful save, in addition to `onChanged`, with the
+   *  policy as saved — a stage-5 review already open must recapture the new
+   *  policy rather than sit on whatever quorum was in effect when it opened
+   *  (CL-8891), and a sole approver's package is written from it (#722). */
+  onSaved?: (saved: SavedStakeholders) => void;
 }) {
   const [rows, setRows] = useState(audiences);
   const [needed, setNeeded] = useState(quorum);
@@ -264,10 +268,10 @@ function Stakeholders({
     setBusy(true);
     setError(null);
     try {
-      await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
+      const saved = await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
       setEditing(false);
       onChanged();
-      onSaved?.();
+      onSaved?.(saved);
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -282,11 +286,13 @@ function Stakeholders({
         <p className="inline-note">
           {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
         </p>
-        {/* A disclosure (#678): the same control opens and closes the panel. */}
-        <button type="button" className="disclosure" aria-expanded={editing} aria-controls="stakeholder-panel" onClick={() => setEditing(!editing)}>
-          <ChevronRight className="disclosure-chevron" aria-hidden="true" />
+        {/* The same control opens and closes the panel (#678), and reads as a
+            control rather than a label (#722): it is the edit path, not the
+            way in. */}
+        <Button aria-expanded={editing} aria-controls="stakeholder-panel" onClick={() => setEditing(!editing)}>
+          {editing ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
           Manage stakeholders
-        </button>
+        </Button>
       </div>
       {editing ? (
         <div className="stakeholder-editor" id="stakeholder-panel">
@@ -378,8 +384,8 @@ export function AudiencePackages({
    *  unopened until it is reachable. */
   onStakeholdersSaved?: () => void;
 }) {
-  // Which stakeholders' packages are being written right now: "Write it"
-  // sends the mail, then waits for the reply that follows it and keeps
+  // Which stakeholders' packages are being written right now: "Generate
+  // approval package" sends the mail, then waits for the reply that follows it and keeps
   // that reply as each named audience's package artifact — nothing else
   // turns the reply into what the packages list reads. One round at a
   // time; the rows say "Writing…" instead of offering another.
@@ -465,7 +471,7 @@ export function AudiencePackages({
     // Not every reply is a package (#220): one with no deck outline is
     // refused and never recorded. The specialist is asked once more in the
     // same thread, told what was missing and that the reply itself is the
-    // package (#225); a second miss is said so "Write it" stays offered.
+    // package (#225); a second miss is said so the button stays offered.
     let problem = packageReplyProblem(name, reply.body);
     if (problem) {
       const seenBefore = new Set((await api.readStageThread(tenantId, [deployment.address])).map((message) => message.id));
@@ -498,6 +504,28 @@ export function AudiencePackages({
   // the tabs and the decisions table read the same way, the person's own
   // first (#122).
   const packages = packagesByStakeholder(detail.nodes, audiences);
+
+  // A sole approver never sees an empty list (#722): when a one-approver
+  // policy is saved, that approver's package is written at once rather than
+  // waiting for the button. Armed only by a save, so an old project opening
+  // on this pane writes nothing; one save arms one write, and a save that
+  // lands while a round is in flight waits for it. The write looks the name
+  // up in `detail`'s policy, so it holds until the refresh after the save
+  // has landed there.
+  const autoWriteRef = useRef<string | null>(null);
+  const armAutoWrite = (saved: SavedStakeholders) => {
+    autoWriteRef.current = saved.audiences.length === 1 ? saved.audiences[0]!.name : null;
+  };
+  useEffect(() => {
+    const name = autoWriteRef.current;
+    if (name === null || writing.size > 0) return;
+    if (!(policy.audiences ?? []).some((entry) => entry.name === name)) return;
+    autoWriteRef.current = null;
+    if (packages.some((node) => node.variant === name)) return;
+    void writePackages([name]);
+    // `policy` and `packages` are derived from `detail`; `writePackages` is this render's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.project.policy, detail.nodes, writing]);
 
   // A package the presentation creator rewrote on request in the chat is
   // recorded as the stakeholder's next version (#597); until now only
@@ -804,7 +832,10 @@ export function AudiencePackages({
         audiences={audiences}
         quorum={quorum}
         onChanged={onChanged}
-        {...(onStakeholdersSaved ? { onSaved: onStakeholdersSaved } : {})}
+        onSaved={(saved) => {
+          armAutoWrite(saved);
+          onStakeholdersSaved?.();
+        }}
       />
 
       {missing.length > 0 ? (
@@ -826,7 +857,7 @@ export function AudiencePackages({
                   <StateLabel tone="info">Writing…</StateLabel>
                 ) : (
                   <Button loading={false} disabled={writing.size > 0} onClick={() => void writePackages([audience.name])}>
-                    Write it
+                    Generate approval package
                   </Button>
                 )}
               </li>
@@ -839,7 +870,7 @@ export function AudiencePackages({
               disabled={writing.size > 0}
               onClick={() => void writePackages(missing.map((audience) => audience.name))}
             >
-              Write all {missing.length}
+              Generate all {missing.length} packages
             </Button>
           ) : null}
         </div>
@@ -972,7 +1003,7 @@ export function AudiencePackages({
                     doing={packageWork(selected.variant)}
                     onClick={() => void writePackages([selected.variant!])}
                   >
-                    {writing.has(selected.variant) ? "Writing…" : "Write it again"}
+                    {writing.has(selected.variant) ? "Writing…" : "Generate the package again"}
                   </Button>
                 ) : null}
               </div>

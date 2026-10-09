@@ -102,6 +102,9 @@ export function Button({
   "data-tour"?: string;
   /** Why the control is disabled, or what it does, on hover (#787). */
   title?: string;
+  /** A control that opens and closes a panel says so (#722). */
+  "aria-expanded"?: boolean;
+  "aria-controls"?: string;
 }) {
   const inert = disabled || loading;
   // A loading button is the one mark most actions make, and the busy

@@ -63,9 +63,40 @@ describe("the stakeholder editor's control", () => {
     expect(source).not.toMatch(/>\s*Edit\s*</);
   });
 
-  // #678: a disclosure, in place whether the panel is open or closed, that toggles it.
-  test("is a disclosure that opens and closes the panel", () => {
-    expect(source).toMatch(/<button type="button" className="disclosure" aria-expanded=\{editing\} aria-controls="stakeholder-panel" onClick=\{\(\) => setEditing\(!editing\)\}>/);
+  // #678: a disclosure, in place whether the panel is open or closed, that
+  // toggles it. #722: styled as a control, the repo's Button, not a bare
+  // text button that reads as a label.
+  test("is a Button that discloses the panel, and says so to assistive tech", () => {
+    expect(source).toMatch(/<Button aria-expanded=\{editing\} aria-controls="stakeholder-panel" onClick=\{\(\) => setEditing\(!editing\)\}>/);
+    expect(source).not.toContain('className="disclosure"');
     expect(source).toContain('<div className="stakeholder-editor" id="stakeholder-panel">');
+  });
+});
+
+// #722: the panel's controls say what they make, and a sole approver never
+// waits on a button for the one package there is.
+describe("the package controls", () => {
+  test("say what they generate, not \"Write it\"", () => {
+    expect(source).toContain("Generate approval package");
+    expect(source).toContain("Generate the package again");
+    expect(source).toContain("Generate all {missing.length} packages");
+    expect(source).not.toMatch(/>\s*Write it\s*</);
+    expect(source).not.toContain('"Write it again"');
+  });
+
+  test("a one-approver policy just saved writes that approver's package at once", () => {
+    // Armed only by the editor's save, never on mount, through a ref one
+    // save sets and one write clears.
+    expect(source).toContain("const autoWriteRef = useRef<string | null>(null);");
+    expect(source).toContain("autoWriteRef.current = saved.audiences.length === 1 ? saved.audiences[0]!.name : null;");
+    expect(source).toContain("armAutoWrite(saved);");
+    const effect = source.slice(source.indexOf("const name = autoWriteRef.current;"));
+    // Never while a round is in flight; cleared before the write so it fires once.
+    expect(effect.indexOf("if (name === null || writing.size > 0) return;")).toBeLessThan(effect.indexOf("autoWriteRef.current = null;"));
+    expect(effect.indexOf("autoWriteRef.current = null;")).toBeLessThan(effect.indexOf("void writePackages([name]);"));
+    // The editor's save hands the policy as saved to both listeners.
+    expect(source).toContain("const saved = await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });");
+    expect(source).toContain("onSaved?.(saved);");
+    expect(source).toContain("onStakeholdersSaved?.();");
   });
 });
