@@ -108,6 +108,18 @@ describe("project chrome paint", () => {
     expect(css).toMatch(/\.composer \.sendbtn,[\s\S]*?background: var\(--wb-foreground\)/);
   });
 
+  // #756: a person's turn is often only its fold's summary ("What GUI design
+  // opened with"); coloured with the muted surface it was near-invisible.
+  test("a fold's summary line is drawn in the muted foreground, never a surface colour", () => {
+    const summary = css.slice(
+      css.indexOf(".conv .bubble .bubble-fold > summary {"),
+      css.indexOf("}", css.indexOf(".conv .bubble .bubble-fold > summary {")),
+    );
+    expect(summary).toContain("color: var(--wb-muted-foreground);");
+    expect(summary).not.toContain("color: var(--wb-muted);");
+    expect(css).not.toContain("color: var(--wb-muted);");
+  });
+
   test("composer is stacked box/foot with ink send and destructive stop", () => {
     expect(css).toContain(".composer .composer-foot");
     expect(css).toContain('[data-slot="chat-input-footer"]');
