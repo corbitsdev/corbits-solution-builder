@@ -31,7 +31,8 @@ import {
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
-import { AudienceGate, AudiencePackages } from "../audiences.jsx";
+import { AudienceGate, AudiencePackages, type SavedStakeholders } from "../audiences.jsx";
+import { useStakeholdersBlock } from "./use-stakeholders-block.ts";
 import { DesignFeedbackView } from "../design.jsx";
 import { Banner, Button, CopyButton, FailedRead, GuideDock, documentName, stageName } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
@@ -558,6 +559,23 @@ export function StageWorkspace({
     mintRequirements,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
+
+  // The roster the Presentation creator confirms in the chat is saved as the
+  // policy (#722), and the panel is told as it is for its own save: the
+  // review recaptures the policy and a sole approver's package is written.
+  const [rosterFromChat, setRosterFromChat] = useState<{ saved: SavedStakeholders; at: number } | null>(null);
+  const stakeholdersBlock = useStakeholdersBlock({
+    projectId: detail.project.id,
+    stage,
+    messages: foldedMessages,
+    policy: detail.project.policy,
+    onSaved: (saved) => {
+      setRosterFromChat({ saved, at: Date.now() });
+      void refreshWorkflow();
+      void loadThread();
+      void openReviewNow();
+    },
+  });
 
   // Holding send raises the send-back picker over the composer; whatever is
   // typed goes along as the reason. The full picker also lives in Guidance —
@@ -1298,6 +1316,9 @@ export function StageWorkspace({
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
+              {stakeholdersBlock.failure ? (
+                <FailedRead what={stakeholdersBlock.failure.what} detail={stakeholdersBlock.failure.detail} onRetry={stakeholdersBlock.retry} />
+              ) : null}
               <AudiencePackages
                 detail={detail}
                 tenantId={tenantId}
@@ -1308,6 +1329,7 @@ export function StageWorkspace({
                 }}
                 workflowView={workflowView}
                 onStakeholdersSaved={() => void openReviewNow()}
+                rosterSavedInChat={rosterFromChat}
               />
             </div>
           )}
