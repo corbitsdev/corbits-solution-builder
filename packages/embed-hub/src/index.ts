@@ -125,6 +125,12 @@ export type CreateEmbeddedHubOptions = {
   readonly pglite: PGlite;
   readonly credentialKeyHex: string;
   readonly principalKeyHex: string;
+  /**
+   * What sidecars seal their run records under: a key of their own, never
+   * `credentialKeyHex`. A sidecar's environment is readable by any process
+   * running as this user, workflow code included.
+   */
+  readonly sidecarCredentialKeyHex: string;
   readonly signingKey: HubSigningKey;
   /**
    * Where the agent-repo store and the process provisioner keep their state.
@@ -377,9 +383,9 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const auth = createAuth(db.db);
 
   // Workflows execute in Interchange's own sidecar, spawned as a child process
-  // of this host per allocation. The sidecar seals credentials under a key of
-  // its own; it gets the hub's from the environment the provisioner forwards.
-  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.credentialKeyHex;
+  // of this host per allocation. Its key reaches it through the provisioner
+  // alone, never through this process's environment, which every child of
+  // the host inherits.
   // Responses-only backends (ChatGPT/Codex) are catalog rows on this adapter,
   // configured per offering by quirks.
   process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([
@@ -396,6 +402,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       runtimePath: options.sidecarRuntime,
       sidecarEntryPath: options.sidecarEntry,
       hubWebSocketUrl: options.hubWebSocketUrl,
+      sidecarCredentialKeyHex: options.sidecarCredentialKeyHex,
     });
   const deploymentProvisioner = provisionerFor("deployment");
   const bindingFingerprint = deploymentProvisioner.bindingFingerprint;

@@ -119,6 +119,7 @@ export async function mountHub(): Promise<MountedHub> {
     pglite: host.raw,
     credentialKeyHex: keys.credentialKeyHex,
     principalKeyHex: keys.principalKeyHex,
+    sidecarCredentialKeyHex: keys.sidecarCredentialKeyHex,
     signingKey,
     dataDir: hubDataDir,
     hubWebSocketUrl: `ws://127.0.0.1:${hostPort}${SIDECAR_WS_PATH}`,
