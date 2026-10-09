@@ -223,6 +223,59 @@ describe("applyDecision open_review/approve/send-back/reapprove lifecycle", () =
   });
 });
 
+// #859: a delivered project can go back. The send-back is the one decision
+// it still takes; it clears `done`, and the project is approved again from
+// the target stage on.
+describe("a send-back after delivery", () => {
+  function delivered(): ProjectState {
+    const afterStage1 = applyDecision(input(withOpenReview(), OWNER, approveD1()));
+    const openStage2 = applyDecision(
+      input(afterStage1, OWNER, { decisionId: "d3", kind: "open_review", projectId: "p1", stage: 2, artifactId: "p1-stage-2-artifact", version: 1, sha256: "sha-stage-2-v1", at: AT }),
+    );
+    const state = applyDecision(
+      input(openStage2, OWNER, { decisionId: "d4", kind: "approve", projectId: "p1", stage: 2, reviewId: "stage-2-review-1", artifactId: "p1-stage-2-artifact", version: 1, sha256: "sha-stage-2-v1", at: AT }),
+    );
+    expect(state.done).toBe(true);
+    return state;
+  }
+
+  test("every decision but a send-back is still refused as already done", () => {
+    const state = delivered();
+    const opened = applyDecision(
+      input(state, OWNER, { decisionId: "d5", kind: "open_review", projectId: "p1", stage: 2, artifactId: "p1-stage-2-artifact", version: 2, sha256: "sha-stage-2-v2", at: AT }),
+    );
+    expect(opened.done).toBe(true);
+    expect(opened.decisions.at(-1)).toMatchObject({ decisionId: "d5", accepted: false, reason: "already_done" });
+  });
+
+  test("a send-back is taken, clears done, and stales the last stage's approval with the rest", () => {
+    const state = delivered();
+    const next = applyDecision(input(state, OWNER, { decisionId: "d5", kind: "send_back", projectId: "p1", stage: 2, targetStage: 1, reason: "the delivered app lost the login flow", at: AT }));
+    expect(next.done).toBe(false);
+    expect(next.stage).toBe(1);
+    expect(next.decisions.at(-1)).toMatchObject({ decisionId: "d5", accepted: true, kind: "send_back", targetStage: 1 });
+    expect(next.reviews[1]).toMatchObject({ status: "stale" });
+    expect(next.reviews[2]).toMatchObject({ status: "stale" });
+    // Reopened, the project is decided on again from the target stage.
+    const reopened = applyDecision(
+      input(next, OWNER, { decisionId: "d6", kind: "open_review", projectId: "p1", stage: 1, artifactId: "p1-stage-1-artifact", version: 2, sha256: "sha-stage-1-v2", at: AT }),
+    );
+    expect(reopened.decisions.at(-1)).toMatchObject({ decisionId: "d6", accepted: true });
+    expect(reopened.reviews[1]).toMatchObject({ status: "open" });
+  });
+
+  test("a send-back after delivery with no target goes to the previous stage, as a delivery rejection does", () => {
+    const next = applyDecision(input(delivered(), OWNER, { decisionId: "d5", kind: "send_back", projectId: "p1", stage: 2, reason: "not what was asked for", at: AT }));
+    expect(next).toMatchObject({ done: false, stage: 1 });
+  });
+
+  test("a send-back after delivery must still name the stage the project is at", () => {
+    const next = applyDecision(input(delivered(), OWNER, { decisionId: "d5", kind: "send_back", projectId: "p1", stage: 1, targetStage: 1, reason: "wrong stage", at: AT }));
+    expect(next.done).toBe(true);
+    expect(next.decisions.at(-1)).toMatchObject({ decisionId: "d5", accepted: false, reason: "wrong_stage" });
+  });
+});
+
 describe("mint_requirements", () => {
   const mintDecision = (id: string) => ({
     decisionId: id,

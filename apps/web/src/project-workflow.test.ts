@@ -138,6 +138,6 @@ describe("foldProjectWorkflow", () => {
     const view = foldProjectWorkflow(topEvents, { "run1__rework__5": [stepCompleted("apply", { ...finalState, done: false })] });
     expect(view.done).toBe(true);
     expect(view.stage).toBe(2);
-    expect(view.allowed).toEqual({ openReview: false, approve: false, sendBack: false, approveReason: "already_done" });
+    expect(view.allowed).toEqual({ openReview: false, approve: false, sendBack: true, approveReason: "already_done" });
   });
 });
