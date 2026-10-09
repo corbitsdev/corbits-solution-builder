@@ -6,7 +6,8 @@
   "description": "Embeds an Interchange hub in-process: binds a pglite handle, composes createApp/createAuth, and places sidecars through the process provisioner.",
   "exports": {
     ".": "./src/index.ts",
-    "./pg-compat": "./src/pg-compat.ts"
+    "./pg-compat": "./src/pg-compat.ts",
+    "./sidecar-unit": "./src/sidecar-unit.ts"
   },
   "dependencies": {
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",

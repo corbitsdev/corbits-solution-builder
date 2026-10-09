@@ -8,10 +8,10 @@
  * provisioner. Keying fences by allocation alone fails every replacement.
  *
  * Units live at `<dataDir>/allocations/<allocation>/gen-<n>/` holding
- * `sidecar.pid`, `sidecar.id` and the sidecar's `data/`. That layout is what
- * `stopSpawnedSidecars` reads, and it is the only state: the hub's allocation
- * store is the authority, so the process tree on disk only has to be found
- * again after a restart, not re-derived.
+ * `sidecar.pid`, `sidecar.start`, `sidecar.id` and the sidecar's `data/`. That
+ * layout is what `stopSpawnedSidecars` reads, and it is the only state: the
+ * hub's allocation store is the authority, so the process tree on disk only
+ * has to be found again after a restart, not re-derived.
  */
 import { writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
@@ -26,6 +26,20 @@ import type {
 } from "@intx/hub-sessions";
 import type { SidecarCapabilityDeclaration } from "@intx/types";
 
+import {
+  groupAlive,
+  ownsGroup,
+  PID_FILE,
+  processStartedAt,
+  readSidecarProcess,
+  sidecarAlive,
+  signalGroup,
+  START_FILE,
+  type GroupSignal,
+  type ProcessProbe,
+  type SidecarProcess,
+} from "./sidecar-unit.js";
+
 export const PROCESS_PROVISIONER_ID = "process";
 
 /**
@@ -35,10 +49,16 @@ export const PROCESS_PROVISIONER_ID = "process";
  */
 export type ProcessProvisionerRole = "deployment" | "probe";
 
-export interface SidecarProcessRunner {
-  spawn(args: { command: readonly string[]; cwd: string; env: Record<string, string> }): number;
-  isAlive(pid: number): boolean;
-  signal(pid: number, signal: "SIGTERM" | "SIGKILL"): void;
+/**
+ * A sidecar runs as the leader of its own process group. `signal` and
+ * `groupAlive` address that group, the sidecar and the workflow processes it
+ * spawns, and `startedAt` tells one incarnation of a pid from another, so a
+ * pid file left by a crash or a reboot never leads to a process that is not
+ * ours.
+ */
+export interface SidecarProcessRunner extends ProcessProbe {
+  spawn(args: { command: readonly string[]; cwd: string; env: Record<string, string> }): SidecarProcess;
+  signal(pid: number, signal: GroupSignal): void;
 }
 
 export type ProcessProvisionerOptions = {
@@ -51,7 +71,6 @@ export type ProcessProvisionerOptions = {
   readonly terminationGraceMs?: number;
 };
 
-const PID_FILE = "sidecar.pid";
 const ID_FILE = "sidecar.id";
 const UNIT_PREFIX = "gen-";
 const ALLOCATION_ID = /^[A-Za-z0-9._-]+$/;
@@ -64,7 +83,7 @@ const CAPABILITIES: readonly SidecarCapabilityDeclaration[] = [
   { capability: "isolation:vm", state: "blocked" },
 ];
 
-type Unit = { generation: number; dir: string; pid: number | null; sidecarId: string | null };
+type Unit = { generation: number; dir: string; process: SidecarProcess | null; sidecarId: string | null };
 
 export function createProcessProvisioner(options: ProcessProvisionerOptions): SidecarProvisioner {
   if (!process.env["PATH"]) throw new Error("the host has no PATH to forward; a sidecar cannot resolve its runtime");
@@ -103,30 +122,30 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
       const generation = Number(entry.slice(UNIT_PREFIX.length));
       if (!Number.isInteger(generation) || generation < 0) continue;
       const dir = join(root, entry);
-      const pid = Number((await readOptional(join(dir, PID_FILE)))?.trim());
       const sidecarId = (await readOptional(join(dir, ID_FILE)))?.trim() || null;
-      found.push({ generation, dir, pid: Number.isInteger(pid) && pid > 0 ? pid : null, sidecarId });
+      found.push({ generation, dir, process: await readSidecarProcess(dir), sidecarId });
     }
     return found;
   }
 
   async function exited(pid: number, withinMs: number): Promise<boolean> {
     const deadline = Date.now() + withinMs;
-    while (runner.isAlive(pid)) {
+    while (runner.groupAlive(pid)) {
       if (Date.now() >= deadline) return false;
       await Bun.sleep(50);
     }
     return true;
   }
 
-  /** The unit's directory, and with it its pid file, goes only once its process has. */
+  /** The unit's directory, and with it its pid file, goes only once its process group has. */
   async function stop(unit: Unit): Promise<void> {
-    if (unit.pid !== null && runner.isAlive(unit.pid)) {
-      runner.signal(unit.pid, "SIGTERM");
-      if (!(await exited(unit.pid, graceMs))) {
-        runner.signal(unit.pid, "SIGKILL");
-        if (!(await exited(unit.pid, KILL_WAIT_MS))) {
-          throw new Error(`sidecar process ${unit.pid} is still alive after SIGKILL`);
+    if (unit.process !== null && ownsGroup(unit.process, runner)) {
+      const { pid } = unit.process;
+      runner.signal(pid, "SIGTERM");
+      if (!(await exited(pid, graceMs))) {
+        runner.signal(pid, "SIGKILL");
+        if (!(await exited(pid, KILL_WAIT_MS))) {
+          throw new Error(`sidecar process group ${pid} is still alive after SIGKILL`);
         }
       }
     }
@@ -154,17 +173,17 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
       return rejected("generation_destroyed", `Generation ${request.generation} was already destroyed`, false);
     }
     const current = existing.find((unit) => unit.generation === request.generation);
-    const currentAlive = current?.pid != null && runner.isAlive(current.pid);
-    if (current !== undefined && currentAlive && current.sidecarId !== request.sidecarId) {
+    const running = current?.process && sidecarAlive(current.process, runner) ? current.process : null;
+    if (current !== undefined && running !== null && current.sidecarId !== request.sidecarId) {
       return rejected(
         "sidecar_identity_conflict",
         `Generation ${request.generation} already belongs to another sidecar identity`,
         false,
       );
     }
-    if (current !== undefined && currentAlive) {
+    if (running !== null) {
       fence(request.allocationId, request.generation);
-      return { kind: "accepted", externalRef: externalRef(request, current.pid!) };
+      return { kind: "accepted", externalRef: externalRef(request, running.pid) };
     }
     for (const unit of existing) await stop(unit);
 
@@ -173,9 +192,9 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     await mkdir(dataDir, { recursive: true, mode: 0o700 });
     await writeFile(join(dir, ID_FILE), `${request.sidecarId}\n`, { mode: 0o600 });
     request.signal?.throwIfAborted();
-    let pid: number;
+    let spawned: SidecarProcess;
     try {
-      pid = runner.spawn({
+      spawned = runner.spawn({
         command: [options.runtimePath, options.sidecarEntryPath],
         cwd: dirname(options.sidecarEntryPath),
         env: sidecarEnv(request, dataDir),
@@ -187,13 +206,14 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     try {
       // Synchronously, so no await separates a live process from its record:
       // a unit without a pid file cannot be stopped.
-      writeFileSync(join(dir, PID_FILE), `${pid}\n`, { mode: 0o600 });
+      writeFileSync(join(dir, PID_FILE), `${spawned.pid}\n`, { mode: 0o600 });
+      writeFileSync(join(dir, START_FILE), `${spawned.startedAt ?? ""}\n`, { mode: 0o600 });
     } catch (error) {
-      await stop({ generation: request.generation, dir, pid, sidecarId: request.sidecarId });
+      await stop({ generation: request.generation, dir, process: spawned, sidecarId: request.sidecarId });
       throw error;
     }
     fence(request.allocationId, request.generation);
-    return { kind: "accepted", externalRef: externalRef(request, pid) };
+    return { kind: "accepted", externalRef: externalRef(request, spawned.pid) };
   }
 
   async function destroy(request: DestroySidecarRequest): Promise<DestroySidecarResult> {
@@ -265,23 +285,24 @@ function errno(error: unknown): unknown {
 
 const bunRunner: SidecarProcessRunner = {
   spawn({ command, cwd, env }) {
-    const child = Bun.spawn([...command], { cwd, env, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    // Detached: a session of its own, so the group the sidecar leads holds
+    // it and its workflow processes and nothing else.
+    const child = Bun.spawn([...command], {
+      cwd,
+      env,
+      detached: true,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
     // Sidecars are stopped by `stopSpawnedSidecars` from their pid files, not
     // by waiting on them here.
     child.unref();
-    return child.pid;
+    return { pid: child.pid, startedAt: processStartedAt(child.pid) };
   },
-  isAlive(pid) {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      if (errno(error) === "ESRCH") return false;
-      if (errno(error) === "EPERM") return true;
-      throw error;
-    }
-  },
+  startedAt: processStartedAt,
+  groupAlive,
   signal(pid, signal) {
-    process.kill(pid, signal);
+    signalGroup(pid, signal);
   },
 };
