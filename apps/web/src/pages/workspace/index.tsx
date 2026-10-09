@@ -1424,6 +1424,8 @@ export function StageWorkspace({
                 latestReply={latestSpecialistMessage}
                 onAccept={acceptDelivery}
                 onRejectSendBack={() => void sendBack(8)}
+                onSendBack={(target, reason) => void sendBack(target, reason)}
+                sendingBack={decisions.sendingBack}
               />
             </div>
           )}
