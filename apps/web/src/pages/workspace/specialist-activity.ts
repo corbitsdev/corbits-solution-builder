@@ -13,7 +13,7 @@ const STAGE_ACTIVITY: Record<number, string> = {
   2: "mapping the constraints",
   3: "comparing two approaches",
   4: "drawing the design",
-  5: "writing the stakeholder packages and their slides",
+  5: "finding out who needs to approve",
   6: "writing the build plan",
   7: "preparing the estimate",
   8: "reviewing the build",
@@ -33,7 +33,7 @@ const STAGE_DOCUMENT: Record<number, string> = {
   9: "the delivery",
 };
 
-/** "Presentation creator is writing the stakeholder packages and their slides". */
+/** "Presentation creator is finding out who needs to approve". */
 export function specialistActivity(stage: number, ask: AskKind = "draft"): string {
   const inRange = stage >= 1 && stage <= 9;
   const who = inRange ? agentFor(stage as Stage).title : "The specialist";

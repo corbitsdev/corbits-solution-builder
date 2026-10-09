@@ -272,7 +272,10 @@ export function StageWorkspace({
   // busy indicator at the foot of the window counts it alongside the flame.
   // A composed opening is mail the app wrote, not words of the person's to
   // read an ask off: the specialist is drafting, whatever the mail says.
-  const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  // At Concept approval the draft is a package (#722): until one is
+  // recorded, a turn in the chat is the roster being settled, not a redraft.
+  const hasDraft = stage === 5 ? detail.nodes.some((node) => node.kind === "audience_package") : foldedMessages.some((message) => message.author === "agent");
+  const pendingAsk = pending && isComposedOpening(pending) ? "draft" : askKind(pending?.body ?? null, hasDraft);
   useBusyWhile(busy, specialistActivity(stage, pendingAsk));
 
   // Withdrawn turns are folded out before anything below reads the thread,

@@ -22,7 +22,8 @@
  * over (`imported-history.ts`), so the specialist continues the stage
  * rather than starting it over.
  */
-import { designHandoff } from "../../design-handoff.ts";
+import { conceptApprovalOpening } from "../../concept-approval-opening.ts";
+import { rosterOf } from "../../package-request.ts";
 import { useEffect, useRef, useState } from "react";
 import { skipToken, useQuery } from "@tanstack/react-query";
 import {
@@ -281,9 +282,9 @@ export function useOpeningDispatch({
           // Stage 6's opening leads with the workflow-minted requirement ids
           // (CL-8862) — the Architect may cite only these, never invent one.
           const requirementsBlock = stage === 6 && workflowView ? renderRequirementsBlock(workflowView.requirements) : null;
-          // Stage 5 opens on the stage 4 design, usually an HTML mockup:
-          // handed over as its text, not its markup (#219).
-          const approved = stage === 5 ? designHandoff(result.content) : result.content;
+          // Stage 5 opens on the stage 4 design, usually an HTML mockup,
+          // handed over as its text (#219) behind the stage's lead (#722).
+          const approved = stage === 5 ? conceptApprovalOpening(result.content, rosterOf(detail.project.policy)) : result.content;
           const body =
             stage === 8 && workflowView?.freeze
               ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({

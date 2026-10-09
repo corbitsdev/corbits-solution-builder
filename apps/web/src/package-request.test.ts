@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { packageAsk, packageNudge, packageReplyProblem, packageRequest } from "./package-request.ts";
-import { rosterLine } from "./package-request.ts";
+import { rosterLine, rosterOf } from "./package-request.ts";
 
 // #41 step 3: the request names the stakeholder and their role, since the
 // one stage 5 specialist's prompt names nobody. #115: it carries the
@@ -81,5 +81,17 @@ describe("the roster in the request", () => {
   test("a roster of one says nothing extra", () => {
     expect(rosterLine({ name: "You", role: "project_owner" }, { audiences: [{ name: "You", role: "project_owner" }], quorum: 1 })).toBeNull();
     expect(packageRequest({ name: "Mr Tech", role: "security_reviewer" }, null)).toBe("Write the package for: Mr Tech, the security reviewer.");
+  });
+});
+
+// #722: the roster off a policy as the record holds it, for the opening's lead and the chat's save.
+describe("rosterOf", () => {
+  test("reads the entries with a name and a role, and the quorum", () => {
+    expect(rosterOf({ audiences: [{ name: "You", role: "project_owner" }, { name: 3 }, null], audienceQuorum: 1, costTolerancePercent: 15 })).toEqual({ audiences: [{ name: "You", role: "project_owner" }], quorum: 1 });
+  });
+
+  test("an old or missing policy is an empty roster", () => {
+    expect(rosterOf(null)).toEqual({ audiences: [], quorum: 0 });
+    expect(rosterOf({ audiences: "You" })).toEqual({ audiences: [], quorum: 0 });
   });
 });

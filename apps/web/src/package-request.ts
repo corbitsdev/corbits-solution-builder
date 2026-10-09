@@ -55,6 +55,19 @@ export function packageNudge(audience: PackageAudience, problem: string): string
 /** Everyone the Concept approval decision rests with, and how many of them must proceed. */
 export type PackageRoster = { readonly audiences: readonly PackageAudience[]; readonly quorum: number };
 
+/** The roster off a project's policy, however old the record: entries with a name and a role, and the quorum. */
+export function rosterOf(policy: unknown): PackageRoster {
+  const record = typeof policy === "object" && policy !== null ? (policy as Record<string, unknown>) : {};
+  const audiences: PackageAudience[] = Array.isArray(record.audiences)
+    ? record.audiences.flatMap((entry: unknown) => {
+        if (typeof entry !== "object" || entry === null) return [];
+        const { name, role } = entry as Record<string, unknown>;
+        return typeof name === "string" && typeof role === "string" ? [{ name, role }] : [];
+      })
+    : [];
+  return { audiences, quorum: typeof record.audienceQuorum === "number" ? record.audienceQuorum : 0 };
+}
+
 /** The roster as the request states it (#690), so the specialist never takes one reader for the only approver. */
 export function rosterLine(audience: PackageAudience, roster: PackageRoster): string | null {
   const others = roster.audiences.filter((entry) => entry.name !== audience.name);

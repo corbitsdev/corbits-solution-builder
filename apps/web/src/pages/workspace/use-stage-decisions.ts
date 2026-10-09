@@ -28,7 +28,8 @@ import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from
 import { frozenSummaryLine, openReviewFailureMessage, stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, stage6StackRemediation, isCitationProblem, citationProblemDetail, stage6CitationRemediation } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
-import { designHandoff } from "../../design-handoff.ts";
+import { conceptApprovalOpening } from "../../concept-approval-opening.ts";
+import { rosterOf } from "../../package-request.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 import { clearQuotedDraft } from "./quote-store.js";
 
@@ -447,9 +448,10 @@ export function useStageDecisions({
                 fallbackBuildStatusBody: reviewMessage.body,
               })
             : stage === 4
-              ? // The design goes to the presentation creator as its text, not
-                // its markup (#219), in session exactly as on reload (#418).
-                designHandoff(reviewMessage.body)
+              ? // Concept approval's opening (#722): the design as its text
+                // (#219) led by who is on record and that no package is asked
+                // for yet, in session exactly as on reload (#418).
+                conceptApprovalOpening(reviewMessage.body, rosterOf(detail.project.policy))
               : reviewMessage.body;
       queueOpening(result.stage, openingBody);
     } catch (cause) {
