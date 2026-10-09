@@ -133,6 +133,7 @@ import { openCreatedProject } from "./create-project-open.ts";
 import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
 import {
+  markStageMailRead as markStageMailReadViaHub,
   readStageThread as readStageThreadViaHub,
   sendStageMail as sendStageMailViaHub,
   type ChatMessage,
@@ -2299,6 +2300,15 @@ export const api = {
         [...groups.entries()].map(([mailTenantId, addresses]) => readStageThreadViaHub(mailTenantId, addresses)),
       );
       return threads.flat().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  /** Marks one agent reply read in the mailbox it was read from (#834):
+   *  `mailTenantId` and the uid in `id` are what `readStageThread` recorded on it. */
+  markStageReplyRead: async (mailTenantId: string, uid: number): Promise<void> => {
+    try {
+      await markStageMailReadViaHub(mailTenantId, uid);
     } catch (cause) {
       installerFailure(cause);
     }

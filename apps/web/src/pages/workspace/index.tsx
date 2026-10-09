@@ -54,6 +54,7 @@ import { ArrowLeft, Check, Flame, Send, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
+import { useMarkRepliesRead } from "./use-mark-replies-read.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
@@ -228,6 +229,7 @@ export function StageWorkspace({
   // stream every render since it is a dep of the thread effect.
   const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
   const thread = useStageThread(tenantId, agentAddress, agent.addresses, nudgeWorkflow, setError);
+  useMarkRepliesRead(thread.messages, setError);
   const loadThread = thread.reload;
 
   // What Stop put back into the box: the composer below for a plain-chat

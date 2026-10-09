@@ -92,6 +92,8 @@ export const keys = {
   },
   projects: ["projects"] as const,
   decisions: ["decisions"] as const,
+  /** The bell's Activity: unread agent replies grouped by project and stage (#834). */
+  activity: ["activity"] as const,
   thread: {
     all: ["thread"] as const,
     of: (tenantId: string, addresses: readonly string[]) => ["thread", tenantId, [...addresses].sort()] as const,
