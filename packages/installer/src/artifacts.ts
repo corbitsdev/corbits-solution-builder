@@ -4,9 +4,8 @@
  * `packages/embedded-host/src/hub-client.ts`'s `artifacts` helpers are built on, rebuilt
  * here because `packages/installer/src` may not import `apps/hub/src`.
  *
- * `content` on `Artifact` is always the CURRENT version: the module's HTTP
- * surface has no route for an older version's body, only its metadata
- * (`versions`).
+ * `content` on `Artifact` is the current version's; `getArtifactVersion`
+ * reads an older one's.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 
@@ -90,6 +89,25 @@ export async function getArtifact(
     const { artifact } = await transport.fetch<{ artifact: Artifact }>(
       "GET",
       tenantPathFor(tenantId, `/artifacts/${artifactId}`),
+    );
+    return artifact;
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/** One version of an artifact, content included, or null if the artifact or the version does not exist (or is not visible). */
+export async function getArtifactVersion(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+  version: number,
+): Promise<Artifact | null> {
+  try {
+    const { artifact } = await transport.fetch<{ artifact: Artifact }>(
+      "GET",
+      tenantPathFor(tenantId, `/artifacts/${artifactId}/versions/${String(version)}`),
     );
     return artifact;
   } catch (cause) {

@@ -10,13 +10,15 @@
  * earlier stage's head document taken as approved, and every stakeholder's
  * vote taken as proceed, which the notes say plainly.
  *
- * Every bundled node was written as its own fresh version 1 under a new
- * artifact id, so a reference points at that id, version 1, and the digest
- * of the content as written.
+ * Every bundled node was written as a fresh artifact under a new id, its
+ * versions in the export's order (#632), so a reference points at that id,
+ * the version its last write landed at, and the digest of the current
+ * content as written.
  */
 import { LEGACY_STAGE_DRAFT_KIND, adoptionPlan, type AdoptionPlan, type AudienceVote, type LegacyNode, type LegacyPosition, type LegacyVersion } from "@solutions-builder/app/legacy-adoption";
 import { stageName } from "./components.jsx";
 import type { ProjectBundle } from "./project-export.ts";
+import type { WrittenArtifact } from "./project-import.ts";
 
 const NOT_DOCUMENTS = new Set(["source_material", "material_reading", "imported_conversation", "design_feedback", "build_evidence", "delivery_manifest", "withdrawn_turns"]);
 
@@ -110,23 +112,23 @@ export function bundlePosition(bundle: ProjectBundle, digests: ReadonlyMap<strin
 
 /**
  * The adoption plan for the imported project: references re-pointed at the
- * artifacts written here (`ids`, bundled node id to new artifact id), each
- * at version 1 with the digest of its content.
+ * artifacts written here (`written`, bundled node id to the new artifact and
+ * the version it landed at), each with the digest of its current content.
  */
 export function bundleAdoptionPlan(
   bundle: ProjectBundle,
   newProjectId: string,
-  ids: ReadonlyMap<string, string>,
+  written: ReadonlyMap<string, WrittenArtifact>,
   digests: ReadonlyMap<string, string>,
 ): AdoptionPlan {
   const { position, notes } = bundlePosition(bundle, digests);
   const nodes: LegacyNode[] = bundle.artifacts
-    .filter(({ node }) => ids.has(node.id))
+    .filter(({ node }) => written.has(node.id))
     .map(({ node }) => ({
       id: node.id,
       projectId: newProjectId,
-      artifactId: ids.get(node.id)!,
-      version: 1,
+      artifactId: written.get(node.id)!.artifactId,
+      version: written.get(node.id)!.version,
       kind: node.kind,
       stage: node.stage,
       variant: node.variant,
@@ -134,11 +136,11 @@ export function bundleAdoptionPlan(
       provenance: node.provenance,
       supersededByNodeId: node.supersededByNodeId,
     }));
-  const content = new Map(bundle.artifacts.filter(({ node }) => ids.has(node.id)).map(({ node, content }) => [ids.get(node.id)!, content]));
+  const content = new Map(bundle.artifacts.filter(({ node }) => written.has(node.id)).map(({ node, content }) => [written.get(node.id)!.artifactId, content]));
   // The references name the new ids: rewrite the position's versions.
   const approvals: Record<number, LegacyVersion[]> = {};
   for (const [stage, versions] of Object.entries(position.approvals)) {
-    approvals[Number(stage)] = versions.flatMap((v) => (ids.has(v.versionId) ? [{ ...v, artifactId: ids.get(v.versionId)! }] : []));
+    approvals[Number(stage)] = versions.flatMap((v) => (written.has(v.versionId) ? [{ ...v, artifactId: written.get(v.versionId)!.artifactId }] : []));
   }
   const plan = adoptionPlan({
     projectId: newProjectId,

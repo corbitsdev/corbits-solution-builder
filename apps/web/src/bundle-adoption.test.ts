@@ -35,7 +35,7 @@ function bundle(over: Partial<ProjectBundle> = {}): ProjectBundle {
     ...over,
   };
 }
-const ids = (b: ProjectBundle) => new Map(b.artifacts.map(({ node }) => [node.id, `new-${node.id}`]));
+const ids = (b: ProjectBundle, versions: Record<string, number> = {}) => new Map(b.artifacts.map(({ node }) => [node.id, { artifactId: `new-${node.id}`, version: versions[node.id] ?? 1 }]));
 const digests = (b: ProjectBundle) => new Map(b.artifacts.map(({ node }) => [node.id, `sha-${node.id}`]));
 
 // #652: an import lands where the export was.
@@ -66,6 +66,15 @@ describe("a v2 bundle, from its heads", () => {
     expect(six.ref.artifactId).toBe("new-plan");
     expect(six.requirementItems?.map((i) => i.kind)).toEqual(["FR", "AC"]);
     expect(plan.notes.join(" ")).toContain("Cost approval");
+  });
+
+  // #632: a node written as a chain is named at the version its last write landed at.
+  test("names each reference at the version the import wrote, not at 1", () => {
+    const b = bundle();
+    const plan = bundleAdoptionPlan(b, "proj_new", ids(b, { brief: 3, design: 2 }), digests(b));
+    expect(plan.steps[0]!.ref).toEqual({ artifactId: "new-brief", version: 3, sha256: "sha-brief" });
+    expect(plan.steps[1]!.ref).toEqual({ artifactId: "new-cons", version: 1, sha256: "sha-cons" });
+    expect(plan.steps[3]!.ref).toEqual({ artifactId: "new-design", version: 2, sha256: "sha-design" });
   });
 
   test("a stage with no document stops the plan before it and says so", () => {

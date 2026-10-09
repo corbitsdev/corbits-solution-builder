@@ -28,6 +28,7 @@ import {
   ensureProjectWorkflow,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
+  getArtifactVersion as installerGetArtifactVersion,
   install as installerInstall,
   InstallerError,
   installProjectAuthority,
@@ -486,7 +487,7 @@ export type ImportOutcome = {
   readonly projectId: string;
   readonly artifacts: number;
   readonly conversations: number;
-  /** Version 1 bundles only: versions written across every artifact. */
+  /** Versions written across every artifact. */
   readonly versions?: number;
   /** The stage the workflow reports after the replay (null when there was
    *  nothing to replay or it never started), why the replay stopped short,
@@ -1640,9 +1641,10 @@ export const api = {
    * (`project-export.ts`'s `assembleBundle`) as a NEW project — client-driven,
    * no host route. `parseBundle` gives a clear message for the wrong format,
    * version, or a missing key; `project-import.ts`'s `importPlan` re-keys
-   * every bundled artifact's `sb` metadata to the new project id. The new
-   * project's own workflow starts fresh at stage 1 — no approval is forged
-   * from the bundle's history.
+   * every bundled artifact's `sb` metadata to the new project id and writes
+   * each artifact's versions back in order (#632). The new project's own
+   * workflow then replays the bundle's position as real decisions (#652) —
+   * no approval is forged outside it.
    *
    * A version 1 bundle, exported from `main`, carries every artifact
    * version and the ledger the project's position lived in
@@ -1673,7 +1675,11 @@ export const api = {
               content,
               metadata: { sb },
             });
-            return { id: artifact.id };
+            return { id: artifact.id, version: artifact.version };
+          },
+          reviseArtifact: async (artifactId, { title, content, sb }) => {
+            const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
+            return { version: artifact.version };
           },
         });
       });
@@ -1685,8 +1691,8 @@ export const api = {
         if (node.kind === "source_material" || node.kind === "material_reading") continue;
         digests.set(node.id, await digestOf(content));
       }
-      const plan = bundleAdoptionPlan(bundle, written.projectId, written.ids, digests);
-      const { ids: _ids, ...outcome } = written;
+      const plan = bundleAdoptionPlan(bundle, written.projectId, written.written, digests);
+      const { written: _written, ...outcome } = written;
       if (plan.steps.length === 0) return { ...outcome, landing: { landed: null, stopped: null, notes: plan.notes } };
       const landing = await api
         .ensureProjectWorkflow(written.projectId)
@@ -2221,6 +2227,25 @@ export const api = {
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
     if (typeof uploadId !== "string") return { content: found.artifact.content };
     return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
+  },
+  /**
+   * Every version of an artifact the store can read, oldest first, the last
+   * being the current one -- what a project export carries (#632). A file
+   * uploaded through `/artifacts/upload` keeps one set of bytes in the blob
+   * store rather than per-version content, so it is one entry: the current
+   * version, its bytes as the same `data:` URL `artifactContent` returns.
+   */
+  artifactVersions: async (tenantId: string, nodeId: string): Promise<{ version: number; content: string }[]> => {
+    const transport = createHubTransport();
+    const found = await findArtifact(transport, tenantId, nodeId);
+    if (!found) return [];
+    const { artifact } = found;
+    const uploadId = (artifact.source as { upload?: { id?: unknown } }).upload?.id;
+    if (typeof uploadId === "string") return [{ version: artifact.version, content: await downloadUploadedArtifact(found.tenantId, nodeId) }];
+    const earlier = await Promise.all(
+      Array.from({ length: artifact.version - 1 }, (_, at) => installerGetArtifactVersion(transport, found.tenantId, nodeId, at + 1)),
+    );
+    return [...earlier.flatMap((row) => (row ? [{ version: row.version, content: row.content }] : [])), { version: artifact.version, content: artifact.content }];
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>

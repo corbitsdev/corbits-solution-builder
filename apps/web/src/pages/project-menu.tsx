@@ -50,7 +50,7 @@ export type InfoRequest = { withName: boolean; at: number };
 export async function exportProjectBundle(project: MenuProject): Promise<string> {
   const bundle = await assembleBundle(project.id, {
     projectView: api.projectView,
-    artifactContent: api.artifactContent,
+    artifactVersions: api.artifactVersions,
     stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
     workflowView: api.projectWorkflowView,
