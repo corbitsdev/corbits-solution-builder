@@ -821,10 +821,10 @@ describe("ensureProjectWorkflow", () => {
 
   // #299: a dead run whose reducer wrote a whole state is revived from
   // that state, not by sending every decision again.
-  const fullState = (decisions: readonly number[], stage: number) => ({
+  const fullState = (decisions: readonly number[], stage: number, done = false) => ({
     projectId: PROJECT_ID,
     stage,
-    done: false,
+    done,
     reviews: {},
     decisions: decisions.map((n) => ({ decisionId: `dec-${String(n)}`, kind: "approve", stage: n, accepted: true, principalId: "prn_1" })),
     authorizedPrincipals: {},
@@ -837,13 +837,33 @@ describe("ensureProjectWorkflow", () => {
     audiencePackages: {},
   });
   /** `decidedRun` whose newest iteration's `apply` output is the whole state, as the real reducer writes it. */
-  function snapshotRun(runId: string, decisions: readonly number[], stage: number) {
+  function snapshotRun(runId: string, decisions: readonly number[], stage: number, done = false) {
     const run = decidedRun(runId, decisions);
     const newest = run.runIds[run.runIds.length - 1]!;
     const events = run.events[newest]!;
-    run.events[newest] = [...events.slice(0, -1), { seq: events.length, type: "StepCompleted", body: { stepId: "apply", attempt: 1, output: { ref: `inline:${JSON.stringify(fullState(decisions, stage))}` } } }];
+    run.events[newest] = [...events.slice(0, -1), { seq: events.length, type: "StepCompleted", body: { stepId: "apply", attempt: 1, output: { ref: `inline:${JSON.stringify(fullState(decisions, stage, done))}` } } }];
     return run;
   }
+
+  // #647: a finished project takes no decision until it is sent back, so
+  // its last run is read as it stands. Before, every host start made the
+  // first open deploy a fresh run that ended at once and kept its sidecar.
+  test("a delivered project's last run is handed back to read, and nothing is deployed or triggered", async () => {
+    const run = snapshotRun("run_1", [1, 2, 3], 9, true);
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: run.runIds },
+        eventsByRun: run.events,
+      }),
+    );
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID, delivered: true });
+    expect(hub.posts.filter((post) => /\/(deployments|mail)$/.test(post.path))).toEqual([]);
+    expect(hub.signalsSent()).toEqual([]);
+    // Opened again, still the same run and still nothing deployed.
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID, delivered: true });
+    expect(hub.posts.filter((post) => /\/(deployments|mail)$/.test(post.path))).toEqual([]);
+  });
 
   test("revives a dead run from its last state: one trigger carrying the snapshot, nothing replayed, the fresh run holding every decision", async () => {
     const run = snapshotRun("run_1", [1, 2, 3], 4);

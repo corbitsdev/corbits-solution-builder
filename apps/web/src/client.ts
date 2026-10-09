@@ -1139,8 +1139,11 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
     } finally {
       release();
     }
-    const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
-    if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
+    // A delivered project's last run is not placed and need not be (#647).
+    if (!ref.delivered) {
+      const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
+    }
     cacheProjectWorkflowRef(projectId, ref);
     return ref;
   });
@@ -2736,6 +2739,7 @@ export const api = {
         (await ensureProjectWorkflowCalls.get(projectId)) ??
         (await resolveProjectWorkflowRef(transport, projectId));
       if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
+      if ("delivered" in ref && ref.delivered) throw new Error("This project is delivered and takes no further decision until it is sent back.");
       // A `signal_id_conflict` (409, a different payload under a reused
       // decisionId) is a hard error, not swallowed here -- it propagates as
       // an `ApiError` through `asWorkspaceOwner`'s normal failure path. A
