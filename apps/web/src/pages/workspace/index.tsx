@@ -1064,6 +1064,9 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
+      // Concept approval asks who needs to approve with offered choices
+      // (#722); a tapped one is sent as the answer, as typing it would be.
+      onAnswer={stage === 5 ? (answer) => void send(answer) : undefined}
       rows={
         <>
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
