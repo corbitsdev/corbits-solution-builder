@@ -96,10 +96,13 @@ async function awaitPackageReply(
   });
 }
 
-type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
+/** What a stakeholder told the Presentation creator at Concept approval (#722). */
+type Interview = readonly { readonly question: string; readonly answer: string }[];
+type Stakeholder = { name: string; role: string; interview?: Interview };
+type Policy = { audiences?: Stakeholder[]; audienceQuorum?: number };
 
 /** The stakeholder policy as `api.setStakeholders` saved it. */
-export type SavedStakeholders = { readonly audiences: readonly { readonly name: string; readonly role: string }[]; readonly audienceQuorum: number };
+export type SavedStakeholders = { readonly audiences: readonly { readonly name: string; readonly role: string; readonly interview?: Interview }[]; readonly audienceQuorum: number };
 
 /** A role's name as a person reads it. */
 /** The stakeholder named "You": the person themselves. */
@@ -243,7 +246,7 @@ function Stakeholders({
   onSaved,
 }: {
   projectId: string;
-  audiences: { name: string; role: string }[];
+  audiences: Stakeholder[];
   quorum: number;
   onChanged: () => void;
   /** Fires after a successful save, in addition to `onChanged`, with the
@@ -297,7 +300,8 @@ function Stakeholders({
       {editing ? (
         <div className="stakeholder-editor" id="stakeholder-panel">
           {rows.map((row, index) => (
-            <div key={index} className="stakeholder-row">
+            <div key={index} className="stakeholder-entry">
+            <div className="stakeholder-row">
               <Dictated
                 value={row.name}
                 onValueChange={(name) => setRows(rows.map((held, at) => (at === index ? { ...held, name } : held)))}
@@ -324,6 +328,20 @@ function Stakeholders({
               <Button variant="ghost" disabled={rows.length === 1} onClick={() => setRows(rows.filter((_, at) => at !== index))}>
                 Remove
               </Button>
+            </div>
+            {/* What they told the Presentation creator (#722), which their
+                package is written from. Read here, not edited: the interview
+                is the chat's, at Concept approval only. */}
+            {row.interview && row.interview.length > 0 ? (
+              <dl className="stakeholder-interview" aria-label={`What ${row.name || "this stakeholder"} told us`}>
+                {row.interview.map((entry) => (
+                  <div key={entry.question}>
+                    <dt>{entry.question}</dt>
+                    <dd>{entry.answer}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
             </div>
           ))}
           <div className="button-row">

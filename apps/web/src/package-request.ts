@@ -17,7 +17,10 @@ import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import type { DeckBrief } from "./deck-design-documents.ts";
 import { designHandoff } from "./design-handoff.ts";
 
-export type PackageAudience = { readonly name: string; readonly role: string };
+/** What a stakeholder told the Presentation creator at Concept approval (#722); the package is written to it. */
+export type PackageInterview = readonly { readonly question: string; readonly answer: string }[];
+
+export type PackageAudience = { readonly name: string; readonly role: string; readonly interview?: PackageInterview };
 
 /** The first line of the request for `name`'s package: what the specialist
  *  is told to write, and what `packageReplyFor` finds the request by. */
@@ -61,8 +64,15 @@ export function rosterOf(policy: unknown): PackageRoster {
   const audiences: PackageAudience[] = Array.isArray(record.audiences)
     ? record.audiences.flatMap((entry: unknown) => {
         if (typeof entry !== "object" || entry === null) return [];
-        const { name, role } = entry as Record<string, unknown>;
-        return typeof name === "string" && typeof role === "string" ? [{ name, role }] : [];
+        const { name, role, interview } = entry as Record<string, unknown>;
+        if (typeof name !== "string" || typeof role !== "string") return [];
+        const said = Array.isArray(interview)
+          ? interview.flatMap((item: unknown) => {
+              const pair = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+              return typeof pair.question === "string" && typeof pair.answer === "string" ? [{ question: pair.question, answer: pair.answer }] : [];
+            })
+          : [];
+        return [{ name, role, ...(said.length > 0 ? { interview: said } : {}) }];
       })
     : [];
   return { audiences, quorum: typeof record.audienceQuorum === "number" ? record.audienceQuorum : 0 };
@@ -77,10 +87,20 @@ export function rosterLine(audience: PackageAudience, roster: PackageRoster): st
   return `The decision does not rest with ${audience.name} alone: the stakeholders are ${everyone}; ${needed}. This package is for ${audience.name} only; the others get packages of their own, so write to ${audience.name} and never call them the sole decision-maker.`;
 }
 
+/** What the reader told us at Concept approval, for the specialist to write to (#722); null when they were not asked. */
+export function interviewSection(audience: PackageAudience): string | null {
+  const interview = audience.interview ?? [];
+  if (interview.length === 0) return null;
+  const lines = interview.map((entry) => `- ${entry.question}\n  ${entry.answer}`);
+  return `What ${audience.name} told us, asked before this package was written; write the package to it:\n${lines.join("\n")}`;
+}
+
 export function packageRequest(audience: PackageAudience, design: string | null, brief: DeckBrief | null = null, roster: PackageRoster | null = null): string {
   const parts = [`${packageAsk(audience.name)}, the ${roleLabel(audience.role)}.`];
   const who = roster ? rosterLine(audience, roster) : null;
   if (who) parts.push(who);
+  const said = interviewSection(audience);
+  if (said) parts.push(said);
   // An HTML mockup goes over as its text, not its markup (#219): mailed
   // verbatim, the model answered with HTML instead of a Markdown package.
   if (design && design.trim()) parts.push(`The approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`);

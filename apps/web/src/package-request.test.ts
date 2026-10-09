@@ -95,3 +95,26 @@ describe("rosterOf", () => {
     expect(rosterOf({ audiences: "You" })).toEqual({ audiences: [], quorum: 0 });
   });
 });
+
+// #722: what the stakeholder told us at Concept approval rides in the
+// request after the roster, so the package is written to it.
+describe("the interview in the request", () => {
+  const brent = { name: "Brent Mattson", role: "budget_approver", interview: [{ question: "What do you most need to see to say yes?", answer: "The cost ceiling." }, { question: "How do you want to be briefed?", answer: "One page." }] };
+  const roster = { audiences: [{ name: "You", role: "project_owner" }, brent], quorum: 2 };
+
+  test("lists each question and answer under what the reader told us, after the roster line", () => {
+    const body = packageRequest(brent, "## Design", null, roster);
+    expect(body).toContain("What Brent Mattson told us, asked before this package was written; write the package to it:\n- What do you most need to see to say yes?\n  The cost ceiling.\n- How do you want to be briefed?\n  One page.");
+    expect(body.indexOf("the stakeholders are")).toBeLessThan(body.indexOf("What Brent Mattson told us"));
+    expect(body.indexOf("What Brent Mattson told us")).toBeLessThan(body.indexOf("The approved GUI design"));
+  });
+
+  test("an audience without one adds nothing", () => {
+    expect(packageRequest({ name: "Mr Tech", role: "security_reviewer" }, null)).toBe("Write the package for: Mr Tech, the security reviewer.");
+    expect(packageRequest({ name: "Mr Tech", role: "security_reviewer", interview: [] }, null)).toBe("Write the package for: Mr Tech, the security reviewer.");
+  });
+
+  test("rosterOf carries an entry's interview, and only well-formed pairs", () => {
+    expect(rosterOf({ audiences: [{ ...brent, interview: [...brent.interview, { question: "x" }] }], audienceQuorum: 1 })).toEqual({ audiences: [brent], quorum: 1 });
+  });
+});

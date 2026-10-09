@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { STAKEHOLDER_ROLE_IDS } from "@solutions-builder/app/stakeholder-roles";
 import { STAKEHOLDER_ROLES } from "./client.ts";
-import { fencedBlocks, stakeholdersBlockOf } from "./stakeholders-block.ts";
+import { fencedBlocks, interviewBlockOf, stakeholdersBlockOf } from "./stakeholders-block.ts";
 
 const ROSTER = { audiences: [{ name: "You", role: "project_owner" }, { name: "Brent Mattson", role: "budget_approver" }], quorum: 2 };
 
@@ -60,5 +60,42 @@ describe("the roles the block accepts", () => {
   test("are the roles the policy accepts and the ledger names", () => {
     expect([...STAKEHOLDER_ROLE_IDS] as string[]).toEqual([...STAKEHOLDER_ROLES]);
     expect([...STAKEHOLDER_ROLE_IDS] as string[]).toEqual(AUTHORITIES.filter((role) => role !== "system"));
+  });
+});
+
+// #722: an approver's interview, read on the same terms as the roster.
+describe("interviewBlockOf", () => {
+  const INTERVIEW = { name: "Brent Mattson", interview: [{ question: " What do you most need to see to say yes? ", answer: "The cost ceiling. " }, { question: "What would make you say no?", answer: "A year to build." }] };
+  function reply(block: unknown, tag = "json stakeholder-interview"): string {
+    return ["Noted, Brent.", "", `\`\`\`${tag}`, typeof block === "string" ? block : JSON.stringify(block), "```", "", "Next, Dana."].join("\n");
+  }
+
+  test("reads a clean block, both sides trimmed", () => {
+    expect(interviewBlockOf(reply(INTERVIEW))).toEqual({
+      name: "Brent Mattson",
+      interview: [{ question: "What do you most need to see to say yes?", answer: "The cost ceiling." }, { question: "What would make you say no?", answer: "A year to build." }],
+    });
+  });
+
+  test("no fence, the roster's tag, or two blocks is null", () => {
+    expect(interviewBlockOf("Noted. " + JSON.stringify(INTERVIEW))).toBeNull();
+    expect(interviewBlockOf(reply(INTERVIEW, "json stakeholders"))).toBeNull();
+    expect(interviewBlockOf(`${reply(INTERVIEW)}\n\n${reply(INTERVIEW)}`)).toBeNull();
+  });
+
+  test("no name, no entries, more than five, a side missing, or a side over 500 characters is null", () => {
+    expect(interviewBlockOf(reply({ name: " ", interview: INTERVIEW.interview }))).toBeNull();
+    expect(interviewBlockOf(reply({ name: "Brent", interview: [] }))).toBeNull();
+    expect(interviewBlockOf(reply({ name: "Brent", interview: Array.from({ length: 6 }, () => ({ question: "q", answer: "a" })) }))).toBeNull();
+    expect(interviewBlockOf(reply({ name: "Brent", interview: [{ question: "q", answer: "" }] }))).toBeNull();
+    expect(interviewBlockOf(reply({ name: "Brent", interview: [{ question: "q" }] }))).toBeNull();
+    expect(interviewBlockOf(reply({ name: "Brent", interview: [{ question: "q", answer: "a".repeat(501) }] }))).toBeNull();
+    expect(interviewBlockOf(reply("{ not json"))).toBeNull();
+  });
+
+  test("a roster block is not read as an interview, nor the other way round", () => {
+    const roster = ["```json stakeholders", JSON.stringify({ audiences: [{ name: "You", role: "project_owner" }], quorum: 1 }), "```"].join("\n");
+    expect(interviewBlockOf(roster)).toBeNull();
+    expect(stakeholdersBlockOf(reply(INTERVIEW))).toBeNull();
   });
 });

@@ -100,3 +100,16 @@ describe("the package controls", () => {
     expect(source).toContain("onStakeholdersSaved?.();");
   });
 });
+
+// #722: what a stakeholder told the Presentation creator is shown under
+// their row, read-only, so the person can see what the package is written from.
+describe("a stakeholder's interview in the editor", () => {
+  test("is shown under the row when present, as questions and answers, with nothing to edit", () => {
+    const editor = source.slice(source.indexOf("function Stakeholders("), source.indexOf("export function AudiencePackages("));
+    expect(editor).toContain('<dl className="stakeholder-interview"');
+    expect(editor).toContain("{row.interview && row.interview.length > 0 ? (");
+    expect(editor).toContain("<dt>{entry.question}</dt>");
+    expect(editor).toContain("<dd>{entry.answer}</dd>");
+    expect(editor).not.toContain("interview: event.target.value");
+  });
+});
