@@ -24,6 +24,9 @@ app.route("/", hub.app);
 - `SIDECAR_WS_PATH` — the path a provisioned sidecar's WebSocket dials.
 - `./pg-compat` — a leaf result-shape adapter with no `@intx/*` imports,
   safe for callers that must not touch platform internals.
+- `./sidecar-unit` — how a provisioned sidecar's process group is found
+  again, told from a stranger that reused its pid, and stopped; the host's
+  shutdown reaper uses it.
 
 ## Dependencies
 
