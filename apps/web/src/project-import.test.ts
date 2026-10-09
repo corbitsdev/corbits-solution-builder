@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import JSZip from "jszip";
-import { importedProjectTitle, importPlan, importProject, jsonFromZip, readImportPayload, IMPORTED_CONVERSATION_KIND, type ImportDeps, type ImportWrite } from "./project-import.ts";
-import { parseBundle, type ProjectBundle } from "./project-export.ts";
+import { foldArtifactGraph, type ArtifactListEntry } from "@solutions-builder/app/artifact-graph";
+import { importedProjectTitle, importPlan, importProject, jsonFromZip, readImportPayload, writeOrder, IMPORTED_CONVERSATION_KIND, type ImportDeps, type ImportWrite } from "./project-import.ts";
+import { parseBundle, type ExportedArtifact, type ProjectBundle } from "./project-export.ts";
+import { artifactNodesOf } from "./project-view.ts";
 import type { ArtifactNode } from "./client.ts";
 
 function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -205,6 +207,136 @@ describe("importProject", () => {
     );
     expect(writes).toEqual(["Problem discovery draft", "Problem discovery conversation (imported)"]);
     expect(progress).toEqual([[1, 2], [2, 2]]);
+  });
+});
+
+// #632: a lineage comes back as a lineage, not as so many roots. A saved
+// draft is a new artifact at version 1, so what a person sees as the version
+// number is the node's position, derived from `sb.supersedes`.
+describe("restoring a lineage", () => {
+  const at = (n: number) => `2026-01-0${String(n)}T00:00:00.000Z`;
+  function lineage(): ExportedArtifact[] {
+    return [
+      { node: node({ id: "v3", createdAt: at(3) }), content: "third", sources: ["v2", "brief"] },
+      { node: node({ id: "v1", createdAt: at(1), supersededByNodeId: "v2" }), content: "first", sources: [] },
+      { node: node({ id: "brief", kind: "source_material", createdAt: at(1) }), content: "the pdf", sources: [] },
+      { node: node({ id: "v2", createdAt: at(2), supersededByNodeId: "v3" }), content: "second", sources: ["v1"] },
+    ];
+  }
+
+  /** A store that keeps what was written, for the graph fold to read back the way `projectView` would. */
+  function store() {
+    const entries: ArtifactListEntry[] = [];
+    let tick = 0;
+    const deps: ImportDeps = {
+      createProject: async () => ({ projectId: "proj_new" }),
+      createArtifact: async (write) => {
+        tick += 1;
+        const id = `new:${write.content}`;
+        entries.push({ id, version: 1, title: write.title, createdAt: `2026-02-01T00:00:${String(tick).padStart(2, "0")}.000Z`, metadata: { sb: write.sb } });
+        return { id, version: 1 };
+      },
+      reviseArtifact: async (artifactId, write) => {
+        const entry = entries.find((candidate) => candidate.id === artifactId)!;
+        entry.version += 1;
+        entry.metadata = { sb: write.sb };
+        return { version: entry.version };
+      },
+    };
+    return { entries, deps };
+  }
+
+  test("writes a node after the one it supersedes and the ones it was generated from, oldest first otherwise", () => {
+    expect(writeOrder(lineage()).map(({ node }) => node.id)).toEqual(["v1", "brief", "v2", "v3"]);
+    const plan = importPlan(bundle({ version: 4, artifacts: lineage() }), "proj_new");
+    expect(plan.artifacts.map(({ nodeId, supersedes, sources }) => [nodeId, supersedes, sources])).toEqual([
+      ["v1", null, []],
+      ["brief", null, []],
+      ["v2", "v1", ["v1"]],
+      ["v3", "v2", ["v2", "brief"]],
+    ]);
+  });
+
+  test("a three-node lineage imports as positions 1, 2 and 3 with only the head unsuperseded, linked to what it was written from", async () => {
+    const { entries, deps } = store();
+    await importProject(bundle({ version: 4, artifacts: lineage(), conversations: [] }), deps);
+    const graph = foldArtifactGraph(entries, "proj_new");
+    const nodes = artifactNodesOf(graph.nodes);
+    const drafts = nodes.filter((entry) => entry.kind === "problem_brief").sort((a, b) => a.position - b.position);
+    expect(drafts.map((entry) => [entry.id, entry.position, entry.supersededByNodeId])).toEqual([
+      ["new:first", 1, "new:second"],
+      ["new:second", 2, "new:third"],
+      ["new:third", 3, null],
+    ]);
+    expect(graph.edges).toEqual([
+      { childNodeId: "new:second", sourceNodeId: "new:first" },
+      { childNodeId: "new:third", sourceNodeId: "new:second" },
+      { childNodeId: "new:third", sourceNodeId: "new:the pdf" },
+    ]);
+    expect(entries.find((entry) => entry.id === "new:third")?.metadata).toEqual({
+      sb: expect.objectContaining({ supersedes: "new:second", sourceVersionIds: ["new:second@1", "new:the pdf@1"] }),
+    });
+    expect(entries.find((entry) => entry.id === "new:first")?.metadata).toEqual({ sb: expect.not.objectContaining({ supersedes: expect.anything() }) });
+  });
+
+  test("every version of a chained artifact carries the lineage, at the source's landed version", async () => {
+    const { entries, deps } = store();
+    await importProject(
+      bundle({
+        version: 4,
+        conversations: [],
+        artifacts: [
+          { node: node({ id: "a", createdAt: at(1), supersededByNodeId: "b", version: 2 }), content: "a2", versions: [{ version: 1, content: "a1" }, { version: 2, content: "a2" }], sources: [] },
+          { node: node({ id: "b", createdAt: at(2) }), content: "b", sources: ["a"] },
+        ],
+      }),
+      deps,
+    );
+    expect(entries.find((entry) => entry.id === "new:b")?.metadata).toEqual({ sb: expect.objectContaining({ supersedes: "new:a1", sourceVersionIds: ["new:a1@2"] }) });
+  });
+
+  test("a node whose predecessor or source is not in the bundle is a root", async () => {
+    const { entries, deps } = store();
+    await importProject(
+      bundle({
+        version: 4,
+        conversations: [],
+        artifacts: [{ node: node({ id: "v2", createdAt: at(2) }), content: "second", sources: ["gone"] }, { node: node({ id: "v1", createdAt: at(1), supersededByNodeId: "pruned" }), content: "first" }],
+      }),
+      deps,
+    );
+    const nodes = artifactNodesOf(foldArtifactGraph(entries, "proj_new").nodes);
+    expect(nodes.map((entry) => [entry.id, entry.position, entry.supersededByNodeId])).toEqual([
+      ["new:first", 1, null],
+      ["new:second", 2, null],
+    ]);
+    expect(entries.map((entry) => (entry.metadata as { sb: { sourceVersionIds: string[] } }).sb.sourceVersionIds)).toEqual([[], []]);
+  });
+
+  test("a cycle is broken at the oldest node, which becomes a root, and still writes every node once", async () => {
+    const { entries, deps } = store();
+    const artifacts: ExportedArtifact[] = [
+      { node: node({ id: "x", createdAt: at(1), supersededByNodeId: "y" }), content: "x", sources: ["y"] },
+      { node: node({ id: "y", createdAt: at(2), supersededByNodeId: "x" }), content: "y", sources: [] },
+    ];
+    expect(writeOrder(artifacts).map(({ node }) => node.id)).toEqual(["x", "y"]);
+    const result = await importProject(bundle({ version: 4, artifacts, conversations: [] }), deps);
+    expect(result.artifacts).toBe(2);
+    expect(entries.map((entry) => [entry.id, (entry.metadata as { sb: Record<string, unknown> }).sb["supersedes"] ?? null])).toEqual([
+      ["new:x", null],
+      ["new:y", "new:x"],
+    ]);
+  });
+
+  test("a v2 bundle, which carries no sources, still links a lineage from supersededByNodeId", () => {
+    const plan = importPlan(
+      bundle({ artifacts: [{ node: node({ id: "old", createdAt: at(1), supersededByNodeId: "new" }), content: "old" }, { node: node({ id: "new", createdAt: at(2) }), content: "new" }] }),
+      "proj_new",
+    );
+    expect(plan.artifacts.map(({ nodeId, supersedes, sources }) => [nodeId, supersedes, sources])).toEqual([
+      ["old", null, []],
+      ["new", "old", []],
+    ]);
   });
 });
 

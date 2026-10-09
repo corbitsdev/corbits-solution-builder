@@ -51,6 +51,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
   const bundle = await assembleBundle(project.id, {
     projectView: api.projectView,
     artifactVersions: api.artifactVersions,
+    artifactEdges: (projectId) => api.artifactGraph(projectId).then((graph) => graph.edges),
     stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
     workflowView: api.projectWorkflowView,

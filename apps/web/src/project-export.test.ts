@@ -48,6 +48,7 @@ describe("assembleBundle", () => {
     expect(bundle.artifacts).toHaveLength(1);
     expect(bundle.artifacts[0]?.content).toBe("the brief");
     expect(bundle.artifacts[0]?.versions).toEqual([{ version: 1, content: "the brief" }]);
+    expect(bundle.artifacts[0]?.sources).toEqual([]);
     expect(bundle.artifacts[0]?.node.id).toBe("node_1");
     expect(bundle.conversations).toEqual([
       { stage: 1, messages: [{ id: "INBOX:1", author: "agent", body: "hello", at: "2026-01-01T00:00:01.000Z" }] },
@@ -84,6 +85,30 @@ describe("assembleBundle", () => {
       { version: 3, content: "node_1 third" },
     ]);
     expect(bundle.artifacts[0]?.content).toBe("node_1 third");
+    expect(() => parseBundle(JSON.parse(JSON.stringify(bundle)))).not.toThrow();
+  });
+
+  // #632: what each node was generated from rides along, so the import can link it again.
+  test("carries each node's bundled sources from the graph's edges, never one outside the bundle", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        projectView: async () => ({
+          project: { id: "proj_1", title: "Renew the lease", policy: {} },
+          tenantId: "tenant_1",
+          nodes: [node({ id: "brief" }), node({ id: "shape", stage: 2, kind: "solution_constraints" })],
+        }),
+        artifactEdges: async () => [
+          { childNodeId: "shape", sourceNodeId: "brief" },
+          { childNodeId: "shape", sourceNodeId: "pruned" },
+          { childNodeId: "elsewhere", sourceNodeId: "brief" },
+        ],
+      }),
+    );
+    expect(bundle.artifacts.map((artifact) => [artifact.node.id, artifact.sources])).toEqual([
+      ["brief", []],
+      ["shape", ["brief"]],
+    ]);
     expect(() => parseBundle(JSON.parse(JSON.stringify(bundle)))).not.toThrow();
   });
 
@@ -145,6 +170,7 @@ describe("parseBundle", () => {
     const node = { id: "n", kind: "problem_brief", stage: 1, title: "t", version: 1, artifactId: "n", contentHash: "n@1", createdAt: "2026-01-01T00:00:00.000Z", supersededByNodeId: null, provenance: { producer: "agent" } };
     expect(() => parseBundle({ ...base, version: 4, artifacts: [{ node, content: "x", versions: [{ version: "1", content: "x" }] }] })).toThrow(/versions/);
     expect(() => parseBundle({ ...base, version: 4, artifacts: [{ node, content: "x", versions: "x" }] })).toThrow(/versions/);
+    expect(() => parseBundle({ ...base, version: 4, artifacts: [{ node, content: "x", sources: [1] }] })).toThrow(/sources/);
     expect(() => parseBundle({ ...base, version: 3, artifacts: [{ node, content: "x" }] })).not.toThrow();
   });
 
