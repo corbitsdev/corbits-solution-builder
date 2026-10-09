@@ -820,6 +820,10 @@ export type EnsureProjectWorkflowOptions = {
   /** Rebuild the project's run from its recorded decisions rather than its
    *  last state: a fresh deployment replayed onto, whatever is live (#299). */
   readonly repair?: boolean;
+  /** Revive a delivered project's ended run so it can take a send-back
+   *  (#859): a fresh run from its last state, which parks on its first
+   *  decision rather than being handed back read-only. */
+  readonly reopen?: boolean;
   /** The project's opening statement, handed to a fresh run for its `name` step. */
   readonly problemStatement?: string;
 };
@@ -1028,10 +1032,11 @@ async function ensureProjectWorkflowOnce(
   const revive = async (from: ProjectWorkflowDeployment, history: readonly ReceivedDecision[], generation: number, known: ReadonlySet<string>): Promise<EnsuredProjectWorkflow> => {
     const snapshot = options.repair ? null : await latestStateOf(workflowsOf(transport, from), from.deploymentId, from.runId);
     // A delivered project takes no decision until it is sent back, and a
-    // fresh run started from a done state ends at once, leaving only its
-    // sidecar behind (#647). Its last run is read as it stands; the
-    // send-back after delivery that will revive it is #859.
-    if (snapshot?.done) return { ...from, delivered: true };
+    // fresh run started from a done state only parks, holding a sidecar for
+    // nothing (#647). Its last run is read as it stands, unless the caller
+    // is about to send it back (#859): then the fresh run below is wanted,
+    // parked on that decision.
+    if (snapshot?.done && !options.reopen) return { ...from, delivered: true };
     if (snapshot) {
       progress({ phase: "deploying" });
       const target = await deployFreshRun(context(generation, snapshot), known);

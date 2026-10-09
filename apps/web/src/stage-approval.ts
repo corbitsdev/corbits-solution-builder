@@ -218,12 +218,15 @@ async function pollUntil(
   deps: StageApprovalDeps,
   fromStage: number,
   ourDecisionIds: ReadonlySet<string>,
+  // Whether the project was delivered when the decision went: a send-back
+  // after delivery (#859) lands when `done` clears, not when it is set.
+  fromDone = false,
 ): Promise<StageApprovalResult> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   for (;;) {
     const view = await deps.view(projectId);
     if (view) {
-      if (view.done || view.stage !== fromStage) return { ok: true, stage: view.stage };
+      if (view.done !== fromDone || view.stage !== fromStage) return { ok: true, stage: view.stage };
       const refusal = findOurRefusal(view.decisions, ourDecisionIds);
       if (refusal) return { ok: false, reason: refusal.reason ?? "refused" };
     }
@@ -497,7 +500,7 @@ export async function sendBack(deps: StageApprovalDeps, input: SendBackInput): P
     at: deps.now(),
   });
   if (!sent.ok) return sent;
-  return pollUntil(input.projectId, deps, input.stage, ourDecisionIds);
+  return pollUntil(input.projectId, deps, input.stage, ourDecisionIds, view.done);
 }
 
 export type RecordAudienceVoteInput = {
