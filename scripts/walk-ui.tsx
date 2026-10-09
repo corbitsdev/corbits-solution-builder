@@ -68,7 +68,7 @@ function Shell({
               blockers: null,
             },
           ]}
-          inbox={{ items: [], unreadCount: 0 }}
+          activity={{ rows: [], failures: [], unreadCount: 0 }}
           bellOpen={false}
           onBellOpenChange={() => {}}
           onNavigate={() => {}}

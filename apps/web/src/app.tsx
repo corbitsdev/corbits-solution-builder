@@ -62,7 +62,8 @@ import {
   useTheme,
   type WorkflowStep,
 } from "@corbits/react-ui";
-import { subscribeInbox, type InboxState } from "./inbox.ts";
+import { subscribeInbox } from "./inbox.ts";
+import { EMPTY_ACTIVITY, readActivity, type ActivityState } from "./activity.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
@@ -239,6 +240,11 @@ function stageSteps(stage: number): WorkflowStep[] {
   });
 }
 
+/** "Problem discovery specialist replied · Recipe Sharing" (#834). */
+export function activityRowTitle(row: { readonly stage: number; readonly projectTitle: string }): string {
+  return `${stageName(row.stage)} specialist replied · ${row.projectTitle}`;
+}
+
 /**
  * The bar across the top.
  *
@@ -249,18 +255,21 @@ function stageSteps(stage: number): WorkflowStep[] {
  * Three zones: where you are (back + mark + name), where the project is in
  * its nine stages (only in a project — elsewhere the centre stays empty so
  * the bar never shifts), and what needs you. The bell is the decision fold:
- * waits render under "Needs you" and open their project on click, mailbox
- * items under "Activity". There is no decisions destination any more.
+ * waits render under "Needs you" and open their project on click, unread
+ * specialist replies under "Activity", one row per project and stage,
+ * opening that stage on click (#834). There is no decisions destination any
+ * more.
  */
 export function AppBar({
   view,
   detail,
   decisions,
-  inbox,
+  activity,
   bellOpen,
   onBellOpenChange,
   onNavigate,
   onOpenProject,
+  onOpenStage,
   exporting,
   onExport,
   onStageSegment,
@@ -276,11 +285,13 @@ export function AppBar({
   view: View;
   detail: ProjectDetail | null;
   decisions: Wait[];
-  inbox: InboxState;
+  activity: ActivityState;
   bellOpen: boolean;
   onBellOpenChange: (open: boolean) => void;
   onNavigate: (view: View) => void;
   onOpenProject: (projectId: string) => void;
+  /** An Activity row was clicked: open the project with that stage on screen. */
+  onOpenStage?: (projectId: string, stage: number) => void;
   /** Project-view chrome; unused — both panes stay open. Kept so walk-ui still typechecks. */
   draftOpen?: boolean;
   onToggleDraft?: () => void;
@@ -403,7 +414,7 @@ export function AppBar({
           </button>
         ) : null}
         <NotificationsBell
-          count={decisions.length + inbox.unreadCount}
+          count={decisions.length + activity.unreadCount}
           marker="dot"
           open={bellOpen}
           onOpenChange={onBellOpenChange}
@@ -430,21 +441,39 @@ export function AppBar({
               ))}
             </>
           ) : null}
-          {inbox.items.length > 0 ? (
+          {activity.rows.length > 0 || activity.failures.length > 0 ? (
             <>
               <p className="notif-group">Activity</p>
-              {inbox.items.map((item) => (
-                <div key={item.uid} className="notif">
+              {activity.rows.map((row) => (
+                <button
+                  key={`${row.projectId}:${String(row.stage)}`}
+                  type="button"
+                  className="notif"
+                  onClick={() => {
+                    onBellOpenChange(false);
+                    if (onOpenStage) onOpenStage(row.projectId, row.stage);
+                    else onOpenProject(row.projectId);
+                  }}
+                >
                   <span className="statusdot idle" aria-hidden="true" />
                   <span className="notif-body">
-                    <b>{item.subject}</b>
-                    <span>{item.from}</span>
+                    <b>{activityRowTitle(row)}</b>
+                    <span>{row.count === 1 ? "1 unread reply" : `${String(row.count)} unread replies`}</span>
+                  </span>
+                </button>
+              ))}
+              {activity.failures.map((failure) => (
+                <div key={failure.projectId} className="notif">
+                  <span className="statusdot action" aria-hidden="true" />
+                  <span className="notif-body">
+                    <b>{failure.projectTitle}</b>
+                    <span>Replies could not be read: {failure.message}</span>
                   </span>
                 </div>
               ))}
             </>
           ) : null}
-          {decisions.length === 0 && inbox.items.length === 0 ? (
+          {decisions.length === 0 && activity.rows.length === 0 && activity.failures.length === 0 ? (
             <p className="notif-empty">Nothing waiting on you.</p>
           ) : (
             <div className="notif-foot">That's everything</div>
@@ -715,11 +744,32 @@ export function App() {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // The bell owns its own unread state; a mailbox event also refreshes the
-  // decision queue immediately rather than waiting on the 5s poll above —
-  // an inbox item is often exactly the nudge that a decision landed.
-  const [inbox, setInbox] = useState<InboxState>({ items: [], unreadCount: 0 });
-  useEffect(() => subscribeInbox(setInbox, () => void refresh()), [refresh]);
+  // A mailbox event refreshes the decision queue immediately rather than
+  // waiting on the poll above — an inbox item is often exactly the nudge
+  // that a decision landed.
+  useEffect(() => subscribeInbox(() => {}, () => void refresh()), [refresh]);
+
+  // The bell's Activity (#834): every active project's mailbox, on the same
+  // cadence as the decision fold (it costs the same per-project reads), and
+  // again whenever the bell opens. There is one mailbox stream per tenant
+  // and the browser has few connections to spare, so a poll, not a stream
+  // per project; the workspace page marks replies read the moment they are
+  // shown, which is what clears a row.
+  const activity = useQuery({
+    queryKey: keys.activity,
+    queryFn: () => readActivity(),
+    enabled: tenantId !== null,
+    refetchInterval: DECISIONS_POLL_MS,
+  });
+  const activityState = activity.data ?? EMPTY_ACTIVITY;
+  const refetchActivity = activity.refetch;
+  const openBell = useCallback(
+    (open: boolean) => {
+      setBellOpen(open);
+      if (open) void refetchActivity();
+    },
+    [refetchActivity],
+  );
 
   // The Decision Queue renders the exact versions a gate would freeze, and it
   // reads them from the open project. Without this the primary action on the
@@ -929,12 +979,16 @@ export function App() {
         view={view}
         detail={detail}
         decisions={decisions}
-        inbox={inbox}
+        activity={activityState}
         bellOpen={bellOpen}
-        onBellOpenChange={setBellOpen}
+        onBellOpenChange={openBell}
         onNavigate={navigate}
         onSettingsClose={closeSettings}
         onOpenProject={openProject}
+        onOpenStage={(projectId, stage) => {
+          openProject(projectId);
+          setFocusArtifact({ stage, at: Date.now() });
+        }}
         exporting={exporting}
         onExport={() => void exportProject()}
         onProjectChanged={() => void reloadDetail()}
