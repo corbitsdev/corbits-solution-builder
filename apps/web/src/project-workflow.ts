@@ -188,7 +188,8 @@ export function projectWorkflowViewOf(state: ProjectState, generatedTitle: strin
     allowed: {
       openReview: !state.done,
       approve: !state.done && openReview !== null,
-      sendBack: !state.done,
+      // A delivered project can go back (#859); the send-back is what revives it.
+      sendBack: true,
       approveReason: approveReason(state),
     },
     freeze: state.freeze,

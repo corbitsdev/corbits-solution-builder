@@ -326,6 +326,16 @@ describe("sendBack", () => {
     expect(decisions).toHaveLength(1);
     expect(decisions[0]).toMatchObject({ kind: "send_back", targetStage: 2, reason: "needs rework" });
   });
+
+  // #859: sent back from a delivered project, the decision has landed once
+  // `done` clears, not while the old, finished view is still what reads.
+  test("from a delivered project, waits until the project is no longer done", async () => {
+    const delivered = view({ stage: 9, done: true, allowed: { openReview: false, approve: false, sendBack: true, approveReason: "already_done" } });
+    const { deps, decisions } = depsFor([delivered, delivered, delivered, view({ stage: 8 })]);
+    const result = await sendBack(deps, { projectId: "p1", stage: 9, targetStage: 8, reason: "the login flow is gone" });
+    expect(result).toEqual({ ok: true, stage: 8 });
+    expect(decisions).toEqual([expect.objectContaining({ kind: "send_back", stage: 9, targetStage: 8 })]);
+  });
 });
 
 describe("stakeholder packages on stage 5 (#50)", () => {

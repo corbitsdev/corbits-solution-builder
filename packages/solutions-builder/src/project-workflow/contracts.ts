@@ -743,7 +743,9 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   if (payload.projectId !== state.projectId) {
     return refused(state, payload, principalId, "wrong_project");
   }
-  if (state.done) {
+  // A delivered project can go back (#859): a send-back is the one decision
+  // it still takes, and it clears `done` below. Everything else is finished.
+  if (state.done && payload.kind !== "send_back") {
     return refused(state, payload, principalId, "already_done");
   }
   if (payload.stage !== state.stage) {
@@ -930,6 +932,9 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   return {
     ...state,
     stage: targetStage,
+    // A send-back after delivery reopens the project; the last stage's
+    // approval went stale with the rest above, so it is approved again.
+    done: false,
     reviews,
     decisions: [...state.decisions, record],
     freeze,

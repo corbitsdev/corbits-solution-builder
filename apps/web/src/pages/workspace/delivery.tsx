@@ -27,7 +27,13 @@ import {
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
 import { failureReason } from "./failure-message.ts";
-import { Banner, Button, FailedRead, documentName, shortHash } from "../../components.jsx";
+import { Banner, Button, FailedRead, documentName, shortHash, stageName } from "../../components.jsx";
+import { SendBackConfirm } from "./workspace-chrome.jsx";
+
+/** Where a delivered project can be sent back to (#859): Deliver itself for a fresh delivery, or any stage before it. */
+const SEND_BACK_TARGETS = Array.from({ length: 9 }, (_, index) => 9 - index);
+/** Build and test: where a rejected delivery goes, and the likeliest place a delivered one goes back to. */
+const DEFAULT_SEND_BACK_TARGET = 8;
 import { Markdown } from "../../markdown.jsx";
 import { downloadBuild } from "../graph.jsx";
 
@@ -123,6 +129,8 @@ function DeliveryDecision({
   howToRun,
   onAccept,
   onRejectSendBack,
+  onSendBack,
+  sendingBack,
 }: {
   tenantId: string;
   projectId: string;
@@ -142,8 +150,14 @@ function DeliveryDecision({
    *  (CL-8687), so the build specialist's next reply lands where the person
    *  can review and re-approve it rather than leaving stage 9 stuck. */
   onRejectSendBack: () => void;
+  /** A delivered project going back (#859): the workflow's send-back to `target`, with the reason its specialist works from. */
+  onSendBack: (target: number, reason: string) => void;
+  sendingBack: boolean;
 }) {
   const [pending, setPending] = useState<PendingApproval | null>(null);
+  // The stage a delivered project is being sent back to; null while the
+  // control is closed.
+  const [reopenTarget, setReopenTarget] = useState<number | null>(null);
   const [delivered, setDelivered] = useState<PendingApproval | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
@@ -362,6 +376,25 @@ function DeliveryDecision({
         <>
           <h2>Sign-off</h2>
           <p>Delivered. The manifest names exact versions and hashes.</p>
+          {reopenTarget === null ? (
+            <div className="button-row">
+              <Button onClick={() => setReopenTarget(DEFAULT_SEND_BACK_TARGET)}>Send back…</Button>
+            </div>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="delivery-send-back-target">Send back to</label>
+                <select id="delivery-send-back-target" value={reopenTarget} onChange={(event) => setReopenTarget(Number(event.target.value))}>
+                  {SEND_BACK_TARGETS.map((target) => (
+                    <option key={target} value={target}>
+                      Stage {target} · {stageName(target)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <SendBackConfirm target={reopenTarget} busy={sendingBack} onCancel={() => setReopenTarget(null)} onConfirm={(reason) => onSendBack(reopenTarget, reason)} />
+            </>
+          )}
         </>
       ) : null}
       {pending ? (
@@ -397,6 +430,8 @@ export function DeliveryPanel({
   latestReply,
   onAccept,
   onRejectSendBack,
+  onSendBack,
+  sendingBack,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -409,6 +444,9 @@ export function DeliveryPanel({
   /** Called once a delivery rejection has been recorded on the hub, so the
    *  caller can route the project workflow back to stage 8. */
   onRejectSendBack: () => void;
+  /** A delivered project going back (#859). */
+  onSendBack: (target: number, reason: string) => void;
+  sendingBack: boolean;
 }) {
   return (
     <DeliveryDecision
@@ -419,6 +457,8 @@ export function DeliveryPanel({
       howToRun={extractHowToRun(latestReply?.body ?? null)}
       onAccept={onAccept}
       onRejectSendBack={onRejectSendBack}
+      onSendBack={onSendBack}
+      sendingBack={sendingBack}
     />
   );
 }

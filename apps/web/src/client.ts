@@ -1098,7 +1098,7 @@ function activeModelCacheClear(): void {
  * One ensure of `projectId`'s workflow, memoised by the callers above:
  * `extra` carries a repair (#299) or nothing.
  */
-function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean }): Promise<EnsuredProjectWorkflow> {
+function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean; reopen?: boolean }): Promise<EnsuredProjectWorkflow> {
   return asWorkspaceOwner(async (transport, workspaceTenantId) => {
     const workspace = await resolveWorkspace(transport);
     if (!workspace) throw new Error("The workspace is not installed yet.");
@@ -2683,6 +2683,18 @@ export const api = {
     call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
     return call;
   },
+  /**
+   * Revives a delivered project's ended run so it can take a send-back
+   * (#859): a fresh run from its last state, parked on that decision. The
+   * memo is dropped first so this and every later call see the live run.
+   */
+  reopenProjectWorkflow: (projectId: string): Promise<EnsuredProjectWorkflow> => {
+    ensureProjectWorkflowCalls.delete(projectId);
+    const call = ensureProjectWorkflowWith(projectId, { reopen: true });
+    ensureProjectWorkflowCalls.set(projectId, call);
+    call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
+    return call;
+  },
   ensureProjectWorkflow: (projectId: string): Promise<EnsuredProjectWorkflow> => {
     const pending = ensureProjectWorkflowCalls.get(projectId);
     if (pending) return pending;
@@ -2739,7 +2751,13 @@ export const api = {
         (await ensureProjectWorkflowCalls.get(projectId)) ??
         (await resolveProjectWorkflowRef(transport, projectId));
       if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
-      if ("delivered" in ref && ref.delivered) throw new Error("This project is delivered and takes no further decision until it is sent back.");
+      // A delivered project's run has ended. A send-back revives it first
+      // (#859) and lands on the fresh run; nothing else is taken.
+      let target: ProjectWorkflowDeployment = ref;
+      if ("delivered" in ref && ref.delivered) {
+        if (decision["kind"] !== "send_back") throw new Error("This project is delivered and takes no decision other than a send-back.");
+        target = await api.reopenProjectWorkflow(projectId);
+      }
       // A `signal_id_conflict` (409, a different payload under a reused
       // decisionId) is a hard error, not swallowed here -- it propagates as
       // an `ApiError` through `asWorkspaceOwner`'s normal failure path. A
@@ -2748,13 +2766,13 @@ export const api = {
       //
       // A fresh run names its project before its loop first parks, and a
       // decision delivered before that park kills the run.
-      await waitForPark(transport, ref);
+      await waitForPark(transport, target);
       // Signalled in the tenant the ref names (#163): the project's own for
       // a deployment made since #29, the workspace for a legacy one still
       // live there. The workspace's route answers 404 for a project-tenant
       // deployment, which silently left every review unopened.
-      await workflowsFor(transport, ref.tenantId).signal(ref.deploymentId, {
-        runId: ref.runId,
+      await workflowsFor(transport, target.tenantId).signal(target.deploymentId, {
+        runId: target.runId,
         signalName: PROJECT_DECISION_SIGNAL,
         signalId: decision["decisionId"] as string,
         payload: { decision },

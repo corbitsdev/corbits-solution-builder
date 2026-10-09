@@ -58,7 +58,12 @@ three kinds:
 - `send_back { decisionId, projectId, stage, targetStage?, reason, at }` --
   `targetStage <= stage`, `reason` required; every review at stage >= target
   becomes `stale`, nothing deleted; omitted `targetStage` at the last stage
-  defaults to the previous stage (delivery rejection).
+  defaults to the previous stage (delivery rejection). A delivered project
+  (`done`) takes a send-back and nothing else (#859): `done` is cleared, the
+  last stage's approval goes stale with every review from the target on, and
+  the freeze, requirement-id and stakeholder rules apply by target exactly as
+  for any send-back, so a send-back to Build and test keeps the Cost approval
+  freeze and one to Cost approval or earlier clears it.
 
 Every refusal appends `{ accepted:false, reason }`; duplicate `decisionId` is
 refused `duplicate`. `stageRules` (`contracts.ts`) is the seam for

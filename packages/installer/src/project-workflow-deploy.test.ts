@@ -865,6 +865,37 @@ describe("ensureProjectWorkflow", () => {
     expect(hub.posts.filter((post) => /\/(deployments|mail)$/.test(post.path))).toEqual([]);
   });
 
+  // #859: a send-back after delivery needs a run to land on. Asked to
+  // reopen, the ensure revives the delivered run from its last state, done
+  // and all; the fresh run parks on its first decision, the send-back.
+  test("a reopen revives a delivered project's run from its last state, parked for the send-back", async () => {
+    const run = snapshotRun("run_1", [1, 2, 3], 9, true);
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: run.runIds },
+        eventsByRun: run.events,
+      }),
+    );
+    const reopened = await ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, [], {}, {
+      replacementWaitMs: 0,
+      replayPollMs: 1,
+      reopen: true,
+    });
+    expect(reopened).toEqual({
+      deploymentId: "dep_new",
+      runId: "run_new",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 3, refused: [], via: "snapshot" },
+    });
+    const mail = hub.posts.find((post) => /\/mail$/.test(post.path))!;
+    const payload = JSON.parse((mail.body as { content: string }).content) as { snapshot?: { stage: number; done: boolean } };
+    expect(payload.snapshot).toMatchObject({ stage: 9, done: true });
+    expect(hub.signalsSent()).toEqual([]);
+    // From then on the fresh run is the project's run, with nothing to reopen.
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+  });
+
   test("revives a dead run from its last state: one trigger carrying the snapshot, nothing replayed, the fresh run holding every decision", async () => {
     const run = snapshotRun("run_1", [1, 2, 3], 4);
     const hub = fakeHub(
