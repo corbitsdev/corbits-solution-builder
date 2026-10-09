@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage } from "./stage-mail.ts";
 import { workspaceGuidance } from "./pages/workspace/guidance.ts";
-import { applyWithdrawn, pairReplies, pendingTurn } from "./withdrawn-turns.ts";
+import { applyWithdrawn, pairReplies, parseWithdrawnTurns, pendingTurn, withdrawnTurnsContent, type WithdrawnMark } from "./withdrawn-turns.ts";
 
 const at = (offset: number) => new Date(Date.UTC(2026, 8, 19, 12, offset)).toISOString();
 const person = (id: string, offset: number): ChatMessage => ({
@@ -162,5 +162,29 @@ describe("pendingTurn", () => {
   test("is null for a turn already withdrawn", () => {
     const messages = [person("m1", 0)];
     expect(pendingTurn(messages, new Set(["m1"]))).toBeNull();
+  });
+});
+
+// #570: a marker that cannot be read as one is an error, never no marks,
+// or a stopped turn's reply comes back.
+describe("parseWithdrawnTurns", () => {
+  const mark: WithdrawnMark = { messageId: "m1", stage: 2, at: at(0) };
+
+  test("empty is no marks", () => {
+    expect(parseWithdrawnTurns(null)).toEqual([]);
+    expect(parseWithdrawnTurns(undefined)).toEqual([]);
+    expect(parseWithdrawnTurns("  ")).toEqual([]);
+  });
+
+  test("reads the marker's own shape back", () => {
+    expect(parseWithdrawnTurns(withdrawnTurnsContent([mark]))).toEqual([mark]);
+    expect(parseWithdrawnTurns(withdrawnTurnsContent([]))).toEqual([]);
+  });
+
+  test("anything that is not a marker throws, never reads as no marks", () => {
+    expect(() => parseWithdrawnTurns("{")).toThrow("The withdrawn-turn marker is not valid JSON.");
+    expect(() => parseWithdrawnTurns('{"withdrawn":"m1"}')).toThrow("does not hold a list of withdrawn turns");
+    expect(() => parseWithdrawnTurns("42")).toThrow("does not hold a list of withdrawn turns");
+    expect(() => parseWithdrawnTurns("null")).toThrow("does not hold a list of withdrawn turns");
   });
 });

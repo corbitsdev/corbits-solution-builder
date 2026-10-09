@@ -20,7 +20,8 @@ import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
-import { Button, documentName, CopyButton } from "../../components.jsx";
+import { Button, documentName, CopyButton, FailedRead } from "../../components.jsx";
+import { failureReason } from "./failure-message.ts";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { ComposedMail, MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
@@ -189,8 +190,13 @@ export function StageDocument({
   const previous = versions.find((entry) => entry.position === node.position - 1) ?? null;
   const [showChanges, setShowChanges] = useState(true);
   const [previousContent, setPreviousContent] = useState<string | null>(null);
+  // Said beside the document when it fails (#570): dropped, the toggle
+  // stayed on over a plain document and the reader took it for no changes.
+  const [previousError, setPreviousError] = useState<string | null>(null);
+  const [previousAttempt, setPreviousAttempt] = useState(0);
   useEffect(() => {
     setPreviousContent(null);
+    setPreviousError(null);
     if (!previous) return;
     let cancelled = false;
     void api
@@ -198,11 +204,13 @@ export function StageDocument({
       .then((result) => {
         if (!cancelled) setPreviousContent(result.content);
       })
-      .catch(() => {});
+      .catch((cause: unknown) => {
+        if (!cancelled) setPreviousError(failureReason(cause));
+      });
     return () => {
       cancelled = true;
     };
-  }, [previous?.id, tenantId]);
+  }, [previous?.id, tenantId, previousAttempt]);
   // Closed by default. While the specialist is still asking, the document is
   // the thing being written rather than the thing being read, and a wall of
   // draft beside a question is what made this feel like homework.
@@ -678,6 +686,13 @@ export function StageDocument({
                 {tools}
               </div>
             </div>
+            {previous && !binary && showChanges && previousError ? (
+              <FailedRead
+                what={`Changes since v${previous.position} cannot be shown, as that version could not be read`}
+                detail={previousError}
+                onRetry={() => setPreviousAttempt((count) => count + 1)}
+              />
+            ) : null}
             {live !== null ? (
               <div className="is-live">
                 <Markdown source={live} />

@@ -12,3 +12,14 @@ export function describeFailure(cause: unknown): string {
   if (detail.length > 0) return `Something could not be completed: ${detail} Nothing was lost — try again.`;
   return "Something could not be completed, and no detail was recorded. Nothing was lost — try again.";
 }
+
+/**
+ * The bare reason, for a line that already says what failed and offers the
+ * way out: the hub's own message, an error's message, or the value as text.
+ */
+export function failureReason(cause: unknown): string {
+  if (cause instanceof ApiFailure) return cause.detail.message;
+  if (cause instanceof Error) return cause.message.trim() || cause.name;
+  const text = String(cause).trim();
+  return text.length > 0 ? text : "no detail was recorded";
+}

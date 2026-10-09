@@ -15,15 +15,23 @@ export type WithdrawnMark = {
   readonly at: string;
 };
 
-/** The marker artifact's content: `JSON.parse`d and reread on every load. */
+/**
+ * The marker artifact's content, reread on every load. Empty is no marks;
+ * anything else that is not the marker's own shape throws, never reads as
+ * no marks (#570): a mark read as absent lets the stopped turn's reply back
+ * in, and a Stop recorded over it would drop every earlier one.
+ */
 export function parseWithdrawnTurns(content: string | null | undefined): WithdrawnMark[] {
-  if (!content) return [];
+  if (!content || content.trim().length === 0) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(content) as { withdrawn?: unknown };
-    return Array.isArray(parsed.withdrawn) ? (parsed.withdrawn as WithdrawnMark[]) : [];
+    parsed = JSON.parse(content);
   } catch {
-    return [];
+    throw new Error("The withdrawn-turn marker is not valid JSON.");
   }
+  const withdrawn = (parsed as { withdrawn?: unknown } | null)?.withdrawn;
+  if (!Array.isArray(withdrawn)) throw new Error("The withdrawn-turn marker does not hold a list of withdrawn turns.");
+  return withdrawn as WithdrawnMark[];
 }
 
 export function withdrawnTurnsContent(marks: readonly WithdrawnMark[]): string {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiFailure } from "../../client.js";
-import { describeFailure } from "./failure-message.ts";
+import { describeFailure, failureReason } from "./failure-message.ts";
 
 describe("describeFailure", () => {
   test("returns the hub's message verbatim for an ApiFailure", () => {
@@ -33,5 +33,19 @@ describe("describeFailure", () => {
     expect(describeFailure(new Error("   "))).toBe(
       "Something could not be completed, and no detail was recorded. Nothing was lost — try again.",
     );
+  });
+});
+
+describe("failureReason", () => {
+  test("is the hub's message, an error's message, or the value as text", () => {
+    const cause = new ApiFailure({ code: "not_found", message: "No such artifact.", correlationId: "corr-2", retryable: false });
+    expect(failureReason(cause)).toBe("No such artifact.");
+    expect(failureReason(new Error("network dropped"))).toBe("network dropped");
+    expect(failureReason("refused")).toBe("refused");
+  });
+
+  test("never comes back empty", () => {
+    expect(failureReason(new Error("   "))).toBe("Error");
+    expect(failureReason("")).toBe("no detail was recorded");
   });
 });
