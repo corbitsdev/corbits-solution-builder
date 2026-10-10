@@ -67,7 +67,6 @@ export function useStageAgent(
   const [agent, setAgent] = useState<{ stage: number; address: string } | null>(
     () => agentSnapshots.get(`${projectId}:${stage}`) ?? null,
   );
-  const [addresses, setAddresses] = useState<{ stage: number; list: readonly string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [remediation, setRemediation] = useState<Remediation | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
@@ -152,32 +151,32 @@ export function useStageAgent(
     }
   }, [agent, livePick, projectId, stage]);
 
-  // The full address history, refreshed on the same cadence as the live-pick
-  // recheck above — a fresh redeploy (that recheck landing a new
+  // The full address history, a query (#702) on the same cadence as the
+  // live-pick recheck above. A fresh redeploy (that recheck landing a new
   // `agent.address`) is exactly when this list must widen to include it, or
-  // the merged thread read would miss the new deployment's own mail.
+  // the merged thread read would miss the new deployment's own mail: the
+  // effect below marks it stale the moment the address moves, so it is
+  // re-read at once rather than on the next tick.
+  const history = useQuery({
+    queryKey: keys.stageAgentAddresses.of(projectId, stage),
+    queryFn: () => api.stageAgentAddresses(projectId, stage),
+    enabled: known,
+    refetchInterval: LIVE_PICK_RECHECK_MS,
+  });
+  const knownAddress = known ? agent.address : null;
   useEffect(() => {
-    if (!agent || agent.stage !== stage) return;
-    let cancelled = false;
-    const load = () => {
-      void api
-        .stageAgentAddresses(projectId, stage)
-        .then((list) => {
-          if (!cancelled) setAddresses({ stage, list: list.length > 0 ? list : [agent.address] });
-        })
-        .catch(() => {});
-    };
-    load();
-    const timer = setInterval(load, 3_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [agent, projectId, stage]);
+    if (knownAddress === null) return;
+    // Joins a read already in flight (the one the query starts when the
+    // first address lands) rather than cancelling it for another.
+    void queryClient.invalidateQueries({ queryKey: keys.stageAgentAddresses.of(projectId, stage), exact: true }, { cancelRefetch: false });
+  }, [knownAddress, projectId, stage]);
+  const list = history.data;
 
   return {
     address: agent?.stage === stage ? agent.address : null,
-    addresses: addresses?.stage === stage ? addresses.list : agent?.stage === stage ? [agent.address] : [],
+    // The query is keyed by stage, so its data is never another stage's;
+    // until it lands, or when the hub lists nothing, the live address alone.
+    addresses: agent?.stage === stage ? (list && list.length > 0 ? list : [agent.address]) : [],
     error,
     remediation,
     retry: () => setAttempt((value) => value + 1),
