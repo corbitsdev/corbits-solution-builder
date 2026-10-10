@@ -16,7 +16,7 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 import { portFile } from "@corbits/embedded-host";
 import { readSecretResult, secretReference } from "@corbits/keychain";
 import { pushSourceTree, type ClosureSource, type WorkflowGitPush } from "@solutions-builder/installer";
@@ -162,8 +162,10 @@ export function ownerTransport(host: Pick<Host, "origin" | "token">): OwnerSessi
         parsed = undefined;
       }
       if (!response.ok) {
+        // The hub client's own error, as the browser transport throws it: the
+        // installer tells a 404 from a failure by `ApiError.status`.
         const detail = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error;
-        throw new Error(`${method} ${path} -> HTTP ${String(response.status)} ${detail?.code ?? ""}: ${detail?.message ?? text.slice(0, 300)}`);
+        throw new ApiError(response.status, detail?.code ?? "unknown", `${method} ${path} -> HTTP ${String(response.status)}: ${detail?.message ?? text.slice(0, 300)}`);
       }
       return parsed as T;
     },
