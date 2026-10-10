@@ -32,16 +32,11 @@
  * Honours SOLUTIONS_BUILDER_DATA_DIR. Run it against a copy first.
  */
 import { createHash } from "node:crypto";
-import fs from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import type { Transport } from "@intx/hub-client";
 import { dataDirectory, databaseDirectory, openDatabase, type HostDatabase } from "@corbits/embedded-host";
 import {
   ensureProjectWorkflow,
-  pushSourceTree,
   resolveWorkspace,
   vendoredMemberFiles,
   workflowsFor,
@@ -60,14 +55,13 @@ import {
   type LegacyEdge,
   type LegacyNode,
 } from "@solutions-builder/app/legacy-adoption";
-import { IDENTITY, initSolutionsBuilderHost } from "../apps/hub/src/identity.js";
+import { initSolutionsBuilderHost } from "../apps/hub/src/identity.js";
 import { replayAdoption } from "../apps/web/src/adoption-replay.ts";
 import type { StageApprovalDeps } from "../apps/web/src/stage-approval.ts";
 import { loadProjectWorkflowView } from "../apps/web/src/project-workflow.ts";
-import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
+import { closureAndPush, ownerTransport, startHost } from "./lib/owner-host.ts";
 import { buildProjectWorkflowEntryFiles } from "./project-workflow-pack.ts";
 
-const root = join(import.meta.dir, "..");
 const dryRun = process.argv.includes("--dry-run");
 const onlyProject = ((): string | null => {
   const at = process.argv.indexOf("--project");
@@ -179,124 +173,6 @@ async function prepare(host: HostDatabase): Promise<Prepared[]> {
 
 // --- Phase 2: replay through the running host as the owner -------------------
 
-type Host = { child: Bun.Subprocess; origin: string; token: string };
-
-async function startHost(dataDir: string): Promise<Host> {
-  const child = Bun.spawn(["bun", join(root, "apps", "hub", "src", "server.ts"), "--port", "0"], {
-    cwd: root,
-    env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const reader = child.stdout.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const deadline = Date.now() + 180_000;
-  while (Date.now() < deadline) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const match = /launch URL: http:\/\/127\.0\.0\.1:(\d+)\/\?token=([a-f0-9-]+)/.exec(buffer);
-    if (match) {
-      void reader.read().catch(() => undefined);
-      return { child, origin: `http://127.0.0.1:${match[1]!}`, token: match[2]! };
-    }
-  }
-  reader.releaseLock();
-  const stderr = await new Response(child.stderr).text().catch(() => "");
-  child.kill();
-  throw new Error(`the host never reached its handshake: ${(stderr || buffer).slice(-600)}`);
-}
-
-async function stopHost(host: Host): Promise<void> {
-  host.child.kill("SIGTERM");
-  const exited = await Promise.race([host.child.exited.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000))]);
-  if (!exited) host.child.kill("SIGKILL");
-}
-
-/**
- * A transport into the running host as the workspace owner: the host's
- * outer door takes the launch token as a bearer, and the owner's own hub
- * session is what `POST /api/owner/session` sets, captured into the
- * jar the way a browser tab would keep it.
- */
-function ownerTransport(host: Host): { transport: Transport; cookie: () => string } {
-  // The host's own session cookie is the launch token, verbatim: what a
-  // browser tab gets from the handshake URL and then carries. The git push
-  // carries the minted git token in its Authorization header, so that
-  // cookie is the only way it can satisfy the host's outer door.
-  const jar = new Map<string, string>([[IDENTITY.sessionCookie, host.token]]);
-  const cookie = () => [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
-  const capture = (response: Response) => {
-    for (const raw of (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? []) {
-      const pair = raw.split(";")[0] ?? "";
-      const at = pair.indexOf("=");
-      if (at > 0) jar.set(pair.slice(0, at), pair.slice(at + 1));
-    }
-  };
-  const transport: Transport = {
-    async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
-      const headers: Record<string, string> = { authorization: `Bearer ${host.token}`, origin: host.origin };
-      if (jar.size > 0) headers.cookie = cookie();
-      const init: RequestInit = { method, headers };
-      if (body !== undefined) {
-        headers["content-type"] = "application/json";
-        init.body = JSON.stringify(body);
-      }
-      const response = await fetch(`${host.origin}${path}`, init);
-      capture(response);
-      if (response.status === 204) return undefined as T;
-      const text = await response.text();
-      let parsed: unknown;
-      try {
-        parsed = text.length === 0 ? undefined : JSON.parse(text);
-      } catch {
-        parsed = undefined;
-      }
-      if (!response.ok) {
-        const detail = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error;
-        throw new Error(`${method} ${path} -> HTTP ${String(response.status)} ${detail?.code ?? ""}: ${detail?.message ?? text.slice(0, 300)}`);
-      }
-      return parsed as T;
-    },
-    subscribe(): () => void {
-      throw new Error("subscribe() is not used here");
-    },
-  };
-  return { transport, cookie };
-}
-
-async function closureAndPush(host: Host, cookie: () => string): Promise<{ closure: ClosureSource; gitPush: WorkflowGitPush }> {
-  const entries = await buildPackedEntries();
-  const manifest = buildManifest("scripts/adopt-legacy-projects.ts", entries);
-  const byFilename = new Map(entries.map((entry) => [entry.filename, entry.bytes]));
-  const closure: ClosureSource = {
-    manifest,
-    fetchTarball: async (filename) => {
-      const bytes = byFilename.get(filename);
-      if (bytes === undefined) throw new Error(`no packed entry for ${filename}`);
-      return bytes;
-    },
-  };
-  const gitPush: WorkflowGitPush = async ({ scope, assetKind, assetName, token, tree, message }) => {
-    const dir = await mkdtemp(join(tmpdir(), "adopt-push-"));
-    try {
-      const url = `${host.origin}/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
-      return await pushSourceTree({
-        url,
-        token,
-        tree,
-        message,
-        fsBackend: { fs, dir },
-        fetchImpl: (input, init) => fetch(input, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), cookie: cookie() } }),
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  };
-  return { closure, gitPush };
-}
-
 type Outcome = { project: ProjectRow; plan: AdoptionPlan; landed: number | null; stopped: string | null };
 
 async function replay(transport: Transport, workspace: { tenantId: string; principalId: string }, sidecar: SidecarCapability, closure: ClosureSource, gitPush: WorkflowGitPush, entry: Prepared): Promise<Outcome> {
@@ -361,7 +237,7 @@ try {
   if (!workspace) throw new Error("the workspace owner does not resolve through the host");
   const status = await transport.fetch<{ canPlaceSidecars?: boolean }>("GET", "/api/status");
   const sidecar: SidecarCapability = { canPlaceSidecars: status.canPlaceSidecars === true };
-  const { closure, gitPush } = await closureAndPush(running, cookie);
+  const { closure, gitPush } = await closureAndPush(running, cookie, "scripts/adopt-legacy-projects.ts");
   for (const entry of prepared) {
     if (entry.plan.steps.length === 0) {
       outcomes.push({ project: entry.project, plan: entry.plan, landed: null, stopped: null });
@@ -371,7 +247,7 @@ try {
     outcomes.push(await replay(transport, workspace, sidecar, closure, gitPush, entry).catch((cause: unknown) => ({ project: entry.project, plan: entry.plan, landed: null, stopped: cause instanceof Error ? cause.message : String(cause) })));
   }
 } finally {
-  await stopHost(running);
+  await running.stop();
 }
 
 console.log("\nAdoption report:");

@@ -176,6 +176,7 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `check:static` | `typecheck` plus the unit tests |
 | `check:build` | `ui:build`, so a change that breaks the interface build fails the gate |
 | `walk` | Render every screen with fixtures for review |
+| `projects` | List, export and import projects from the command line (`bun run projects -- list`, `export --all --out <dir>`, `import <file>...`); the same bundle the window's Export… writes, for moving projects between installations over ssh |
 | `vendor:build` | Emit `dist/` for the vendored packages, which the sidecar needs since it runs without `intx-src`; runs on `bun install` |
 | `postinstall` | `vendor:build`, so a fresh `bun install` leaves `dist/` in place without a separate step |
 
