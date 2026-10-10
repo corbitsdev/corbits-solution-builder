@@ -13,10 +13,13 @@
  * Everything here is pure or a thin poll; nothing infers progress from the
  * worker's output. The verdict on a build stays a person's.
  */
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { zonedTime } from "./delivery-opening.ts";
+import { failureReason } from "./failure-message.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -178,10 +181,18 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
   ].join("\n");
 }
 
+/** How often the host's attempts are re-read while one is running, and otherwise. */
+const ATTEMPTS_RUNNING_POLL_MS = 2_000;
+const ATTEMPTS_IDLE_POLL_MS = 10_000;
+
+const NO_ATTEMPTS: BuildAttempt[] = [];
+
 /**
  * The host's attempts for a project, polled while one is running and
  * refreshed on demand. Shared by the panel and the stage's decisions so
- * both read the same list.
+ * both read the same list. A query (#702): its interval follows what the
+ * last read said, and a read that fails keeps the last list with the
+ * failure beside it, as before.
  */
 export function useBuildAttempts(projectId: string, enabled: boolean): {
   attempts: BuildAttempt[];
@@ -189,38 +200,33 @@ export function useBuildAttempts(projectId: string, enabled: boolean): {
   error: string | null;
   refresh: () => Promise<void>;
 } {
-  const [attempts, setAttempts] = useState<BuildAttempt[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const query = useQuery({
+    queryKey: keys.buildAttempts.of(projectId),
+    queryFn: () => api.buildAttempts(projectId),
+    enabled,
+    refetchInterval: (current) => {
+      const attempts = current.state.data?.attempts ?? NO_ATTEMPTS;
+      const running = attempts.some((entry) => entry.state === "running" || entry.state === "detached");
+      return running ? ATTEMPTS_RUNNING_POLL_MS : ATTEMPTS_IDLE_POLL_MS;
+    },
+  });
+  const refetch = query.refetch;
+  // After a write (start, cancel, record): a fresh read now, not one that
+  // joins a tick already in flight from before the write.
   const refresh = useCallback(async () => {
     if (!enabled) return;
-    try {
-      const result = await api.buildAttempts(projectId);
-      setAttempts(result.attempts);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoaded(true);
-    }
-  }, [projectId, enabled]);
+    await refetch();
+  }, [enabled, refetch]);
 
-  useEffect(() => {
-    setAttempts([]);
-    setLoaded(false);
-    if (!enabled) return;
-    void refresh();
-  }, [enabled, refresh]);
-
-  const running = attempts.some((entry) => entry.state === "running" || entry.state === "detached");
-  useEffect(() => {
-    if (!enabled) return;
-    const timer = setInterval(() => void refresh(), running ? 2_000 : 10_000);
-    return () => clearInterval(timer);
-  }, [enabled, running, refresh]);
-
-  return { attempts, loaded, error, refresh };
+  // Off this stage there is nothing to show, whatever the cache holds.
+  if (!enabled) return { attempts: NO_ATTEMPTS, loaded: false, error: null, refresh };
+  return {
+    attempts: query.data?.attempts ?? NO_ATTEMPTS,
+    /** Read from the host at least once, whether it answered or refused. */
+    loaded: query.isFetched,
+    error: query.error ? failureReason(query.error) : null,
+    refresh,
+  };
 }
 
 /** The first line of a progress brief, by which later polls recognise the ones already sent. */
