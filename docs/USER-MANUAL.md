@@ -745,6 +745,24 @@ project stands at the same stage, and each stage's conversation becomes a
 read-only document called "<Stage> conversation (imported)". The receiving
 app connects its own provider.
 
+#### From the command line
+
+An installation with no window open, one reached over ssh say, exports and
+imports from a checkout of the source with `bun run projects`:
+
+```sh
+bun run projects -- list
+bun run projects -- export --all --out ./dump
+bun run projects -- import ./dump/*.solutions-builder.json
+```
+
+It writes and reads the same file as **Export…** and **Import a project**, so
+a file from either side imports on either side. It reaches the host running
+on this machine by itself, or starts one on the data folder for the run when
+none is. The import creates a new project the same way the window does, and
+installs the workspace first if the window never has. Providers and
+credentials never travel.
+
 ### Backing up
 
 Everything lives in one data folder, listed under **This computer** in
