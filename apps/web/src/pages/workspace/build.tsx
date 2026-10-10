@@ -18,6 +18,7 @@
  * with the record. The supervisor's reply is the build status document;
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
@@ -34,6 +35,8 @@ import { StageConversation } from "./thread.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { elapsedLabel, spendLine } from "./build-spend.ts";
 import { subscribeMailbox } from "../../mailbox-events.ts";
+import { queryClient } from "../../queries/client.ts";
+import { keys } from "../../queries/keys.ts";
 
 /** How long a thread waits for a missed nudge before re-reading on its own (#777). */
 const THREAD_BACKSTOP_MS = 20_000;
@@ -43,6 +46,7 @@ import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, comp
 import { briefSubject, isAppBrief } from "./composed-mail.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
+const NO_MESSAGES: ChatMessage[] = [];
 
 /** The frozen version of a kind, when the freeze names one; else the live node. */
 function frozenNode(nodes: readonly ArtifactNode[], freeze: Freeze | null, kind: string): ArtifactNode | undefined {
@@ -218,7 +222,6 @@ export function BuildPanel({
   attachNote?: string | null;
 }) {
   const [address, setAddress] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
@@ -267,28 +270,33 @@ export function BuildPanel({
     return () => window.removeEventListener("focus", onFocus);
   }, [checkWorker]);
 
-  const load = useCallback(async () => {
-    if (!address) return;
-    try {
-      setMessages(await api.readStageThread(tenantId, [address]));
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  }, [address, tenantId]);
-
-  // Re-read on the mailbox nudge, with a backstop every twenty seconds
-  // (#777): a poll every three seconds had the hub load the whole
-  // mailbox each time, and every other request waited behind it.
+  // The supervisor's thread, a query (#702): marked stale by the mailbox
+  // nudge, with a backstop every twenty seconds (#777): a poll every three
+  // seconds had the hub load the whole mailbox each time, and every other
+  // request waited behind it.
+  const thread = useQuery({
+    queryKey: keys.thread.of(tenantId, [address ?? ""]),
+    queryFn: () => api.readStageThread(tenantId, [address!]),
+    enabled: address !== null,
+    refetchInterval: THREAD_BACKSTOP_MS,
+  });
+  const messages = thread.data ?? NO_MESSAGES;
+  // A read that fails is said in the pane's banner, as before.
+  const threadFailure = thread.error;
+  useEffect(() => {
+    if (threadFailure) setError(threadFailure instanceof ApiFailure ? threadFailure.detail.message : String(threadFailure));
+  }, [threadFailure]);
   useEffect(() => {
     if (!address) return;
-    void load();
-    const subscription = subscribeMailbox(tenantId, () => void load());
-    const timer = setInterval(() => void load(), THREAD_BACKSTOP_MS);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-  }, [address, load, tenantId]);
+    const subscription = subscribeMailbox(tenantId, () => void queryClient.invalidateQueries({ queryKey: keys.thread.of(tenantId, [address]) }));
+    return () => subscription.unsubscribe();
+  }, [address, tenantId]);
+  // After a send or a record: a fresh read now.
+  const refetchThread = thread.refetch;
+  const load = useCallback(async () => {
+    if (!address) return;
+    await refetchThread();
+  }, [address, refetchThread]);
 
   // The project detail (and so `detail.nodes`) follows this stage's thread:
   // a supervisor reply is the only cue that the status document changed.
