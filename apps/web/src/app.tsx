@@ -5,6 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
+import { queryClient } from "./queries/client.ts";
 import { keys } from "./queries/keys.ts";
 import { hostLatency } from "./hub.ts";
 import { useQuery } from "@tanstack/react-query";
@@ -47,7 +48,7 @@ function useSlowHost(): number | null {
 
 /** How often the decision queue is re-read when nothing nudges it (#764). */
 const DECISIONS_POLL_MS = 30_000;
-import { keepUntilInstalled, shouldShowOnboarding } from "./onboarding-gate.ts";
+import { shouldShowOnboarding } from "./onboarding-gate.ts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu, downloadDocuments } from "./pages/project-menu.jsx";
@@ -111,11 +112,19 @@ function initialView(): View {
  * because which one is right is exactly what is unknown. One line, and after a
  * while an admission that it is taking longer than it should.
  */
-/** The hub's "install first" conflict is not a failure of the request: there is nothing yet. */
-/** A read the hub refused as not-installed keeps what the app holds (#754). */
-function keepIfUninstalled(cause: unknown): null {
-  return keepUntilInstalled(cause, (reason) => reason instanceof ApiFailure && reason.detail.install === true);
+/** The hub's "install first" conflict is not a failure of the request: there is nothing yet (#754). */
+function refusedUntilInstalled(cause: unknown): boolean {
+  return cause instanceof ApiFailure && cause.detail.install === true;
 }
+
+/** What the decision fold rests on; `refresh` re-reads all of it at once. */
+const FOLD_READS = [keys.status, keys.providers, keys.decisions, keys.projects, keys.workspaceTenantId] as const;
+
+const NO_WAITS: Wait[] = [];
+const NO_PROJECTS: ProjectSummary[] = [];
+const NO_PROVIDERS: Provider[] = [];
+const NO_API_KEY_PROVIDERS: { providerId: string; label: string; needsBaseUrl: boolean }[] = [];
+const NO_OAUTH_CANDIDATES: { providerId: string; label: string; redirectUri: string }[] = [];
 
 function Booting({ offline }: { offline: boolean }) {
   const [slow, setSlow] = useState(false);
@@ -557,16 +566,26 @@ export function App() {
   // current stage's own: reported up so the stepper can mark it.
   const [viewedStage, setViewedStage] = useState<number | null>(null);
 
-  const [status, setStatus] = useState<HostStatus | null>(null);
-  const [decisions, setDecisions] = useState<Wait[]>([]);
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [apiKeyProviders, setApiKeyProviders] = useState<
-    { providerId: string; label: string; needsBaseUrl: boolean }[]
-  >([]);
-  const [oauthCandidates, setOauthCandidates] = useState<
-    { providerId: string; label: string; redirectUri: string }[]
-  >([]);
+  // What the home decision fold rests on, each a query (#702) on the fold's
+  // cadence: every half minute (#764), since the fold reads every active
+  // project's workflow run, the host's costliest read; a mailbox event still
+  // refreshes it at once (below). Status and providers answer before the
+  // workspace exists; decisions and projects do not: until the client has
+  // installed the app the hub refuses them with a conflict marked
+  // `install`, and a refused read says nothing about what there is (#754),
+  // so each query keeps what it last read. An unchanged answer keeps its
+  // reference, so what is derived from it is not recomputed every tick.
+  const statusRead = useQuery({ queryKey: keys.status, queryFn: () => api.status(), refetchInterval: DECISIONS_POLL_MS });
+  const providersRead = useQuery({ queryKey: keys.providers, queryFn: () => api.providers(), refetchInterval: DECISIONS_POLL_MS });
+  const decisionsRead = useQuery({ queryKey: keys.decisions, queryFn: () => api.decisions(), refetchInterval: DECISIONS_POLL_MS });
+  const projectsRead = useQuery({ queryKey: keys.projects, queryFn: () => api.projects(), refetchInterval: DECISIONS_POLL_MS });
+  const tenantRead = useQuery({ queryKey: keys.workspaceTenantId, queryFn: () => api.workspaceTenantId(), refetchInterval: DECISIONS_POLL_MS });
+  const status: HostStatus | null = statusRead.data ?? null;
+  const decisions = decisionsRead.data?.decisions ?? NO_WAITS;
+  const projects = projectsRead.data?.projects ?? NO_PROJECTS;
+  const providers = providersRead.data?.providers ?? NO_PROVIDERS;
+  const apiKeyProviders = providersRead.data?.apiKeyProviders ?? NO_API_KEY_PROVIDERS;
+  const oauthCandidates = providersRead.data?.oauthCandidates ?? NO_OAUTH_CANDIDATES;
   const [chosen, setSelected] = useState<string | null>(projectInUrl);
   const selected = urlProject ?? chosen;
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
@@ -576,11 +595,27 @@ export function App() {
   // reopen from the list hit the same silent failure with no way out.
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailAttempt, setDetailAttempt] = useState(0);
-  // Resolved once and threaded down as a prop: every artifact read goes
-  // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
-  const [tenantId, setTenantId] = useState<string | null>(null);
+  // Read with the fold and threaded down as a prop: every artifact read goes
+  // through `@corbits/artifacts` over `/hub`, which is tenant-scoped. A
+  // resolve that fails is no tenant, as before.
+  const tenantId = tenantRead.error ? null : (tenantRead.data ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [offline, setOffline] = useState(false);
+  // A fold read that failed. A 401/403 means the session cookie no longer
+  // holds (e.g. the host restarted): that is "not signed in", not "not
+  // answering". Only a dropped connection or a real server error is
+  // offline: the host going away is a visible state, not a blank screen. A
+  // decision or project read refused until the install is neither. Each
+  // query clears its error on the next read that lands, and offline with it.
+  const readFailure =
+    statusRead.error ??
+    providersRead.error ??
+    (decisionsRead.error && !refusedUntilInstalled(decisionsRead.error) ? decisionsRead.error : null) ??
+    (projectsRead.error && !refusedUntilInstalled(projectsRead.error) ? projectsRead.error : null);
+  const signedOutByHost = readFailure instanceof ApiFailure && (readFailure.httpStatus === 401 || readFailure.httpStatus === 403);
+  const offline = readFailure !== null && !signedOutByHost;
+  useEffect(() => {
+    if (signedOutByHost) setAuth("signed-out");
+  }, [signedOutByHost]);
   const [skippedSetup, setSkippedSetup] = useState(false);
   // Signup/login first: the workspace tenant is created as that session.
   const [auth, setAuth] = useState<HubAuthState>("unknown");
@@ -624,43 +659,12 @@ export function App() {
   // existing, it gets only what is safe to repeat (`api.upgradeWorkspace`).
   const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
 
+  // Re-reads everything the fold rests on and waits for it to land: the
+  // install's first read, a mailbox nudge and every write that may have
+  // changed the list go through here. A tick already in flight is let go
+  // for a fresh read, since a write may have landed since it began.
   const refresh = useCallback(async () => {
-    try {
-      // Status and providers answer before the workspace exists. Decisions and
-      // projects do not: until the client has installed the app the hub
-      // refuses them with a conflict marked `install`, and the install runs
-      // only once `status` is set. Fetching all four together meant a first
-      // run never set `status` and the boot screen never went away. Until the
-      // install, an uninstalled workspace is an empty one.
-      const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
-      const [decisionsResult, projectsResult, tenantIdResult] = await Promise.all([
-        api.decisions().catch(keepIfUninstalled),
-        api.projects().catch(keepIfUninstalled),
-        api.workspaceTenantId().catch(() => null),
-      ]);
-      setStatus(statusResult);
-      // A refused read says nothing about what there is (#754): a restarted
-      // host still checking the workspace answers one poll that way, and an
-      // empty list in its place sent an open project to onboarding.
-      if (decisionsResult) setDecisions(decisionsResult.decisions);
-      if (projectsResult) setProjects(projectsResult.projects);
-      setProviders(providersResult.providers);
-      setApiKeyProviders(providersResult.apiKeyProviders);
-      setOauthCandidates(providersResult.oauthCandidates);
-      setTenantId(tenantIdResult);
-      setOffline(false);
-    } catch (cause) {
-      // A 401/403 means the session cookie no longer holds (e.g. the host
-      // restarted): that is "not signed in", not "not answering". Only a
-      // dropped connection or a real server error is offline.
-      if (cause instanceof ApiFailure && (cause.httpStatus === 401 || cause.httpStatus === 403)) {
-        setAuth("signed-out");
-        setOffline(false);
-        return;
-      }
-      // The host going away is a visible state, not a blank screen.
-      setOffline(true);
-    }
+    await Promise.all(FOLD_READS.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })));
   }, []);
 
   // Runs once the host has answered and a hub session exists. Deliberately
@@ -734,15 +738,6 @@ export function App() {
     mintAttempted.current = true;
     void mintOwner();
   }, [status?.hub.mode, auth, mintOwner, signedOutByChoice]);
-
-  useEffect(() => {
-    void refresh();
-    // Every half minute (#764): the fold reads every active project's
-    // workflow run, which is the host's costliest read; a mailbox event still
-    // refreshes the bell at once.
-    const timer = setInterval(() => void refresh(), DECISIONS_POLL_MS);
-    return () => clearInterval(timer);
-  }, [refresh]);
 
   // A decision notice is filed to the workspace mailbox (`decision-notify.ts`),
   // so the workspace tenant's own stream is the nudge that refreshes the
