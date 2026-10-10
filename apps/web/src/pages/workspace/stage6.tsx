@@ -12,7 +12,7 @@ import { PRD_FOR_PEOPLE_KIND, PRD_FOR_PEOPLE_TITLE, composePeopleBrief } from ".
 import { screenNamesOf } from "../../mockup-shots.ts";
 import { useDesignPictures } from "./use-prd-for-people.ts";
 import { IDLE_COMPANION, type CompanionState } from "./companion-state.ts";
-import { subscribeMailbox } from "../../mailbox-events.ts";
+import { useAwaitedReplies, type ReplyWait } from "./use-awaited-replies.ts";
 import { useBusyWhile } from "../../use-busy.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
@@ -25,6 +25,9 @@ import { HowItRuns } from "./how-it-runs.tsx";
 type Stage6RoleState = CompanionState;
 
 const STAGE6_IDLE_ROLE: Stage6RoleState = IDLE_COMPANION;
+
+/** How long a waiting role's thread waits for a missed nudge before re-reading on its own (#777). */
+const STAGE6_REPLY_BACKSTOP_MS = 20_000;
 
 const STAGE6_PANEL_ROLES: readonly { key: string; label: string }[] = [
   { key: "application", label: "Application" },
@@ -280,65 +283,29 @@ export function Stage6Panel({
     runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
   };
 
-  // Reads each waiting role's thread back -- a mailbox nudge wakes this
-  // immediately, same as the stage's own chat thread; a bounded interval
-  // backstops a missed nudge. Never resends a request: this only reads.
-  const waitingAddresses = [
-    ...(requirements.status === "waiting" && requirements.address ? [["requirements", requirements] as const] : []),
-    ...Object.entries(reviews).filter(([, state]) => state.status === "waiting" && state.address),
+  // Reads each waiting role's thread back through a query per thread
+  // (#702): a mailbox nudge wakes it immediately, same as the stage's own
+  // chat thread, and a bounded interval backstops a missed nudge (#777).
+  // Never resends a request: this only reads. A reply lands the role as
+  // done; a thread that could not be read lands it as failed, with why.
+  const waits: ReplyWait[] = [
+    ...(requirements.status === "waiting" && requirements.address ? [{ key: "requirements", address: requirements.address, requestedAt: requirements.requestedAt }] : []),
+    ...Object.entries(reviews).flatMap(([roleKey, state]) =>
+      state.status === "waiting" && state.address ? [{ key: `review:${roleKey}`, address: state.address, requestedAt: state.requestedAt }] : [],
+    ),
   ];
-  const anyWaiting = waitingAddresses.length > 0;
+  const outcomes = useAwaitedReplies(tenantId, waits, STAGE6_REPLY_BACKSTOP_MS);
   useEffect(() => {
-    if (!anyWaiting) return;
-    const checkOne = async (
-      address: string,
-      requestedAt: number,
-      apply: (reply: string) => void,
-      onFail: (message: string) => void,
-    ) => {
-      const thread = await api.readStageThread(tenantId, [address]).catch((cause: unknown) => {
-        onFail(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-        return null;
-      });
-      if (!thread) return;
-      const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
-      if (reply) apply(reply.body);
-    };
-    const checkAll = () => {
-      if (requirements.status === "waiting" && requirements.address) {
-        void checkOne(
-          requirements.address,
-          requirements.requestedAt,
-          (reply) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
-          (message) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "error", error: message } : prev)),
-        );
+    for (const [key, outcome] of Object.entries(outcomes)) {
+      const landed = (prev: Stage6RoleState): Stage6RoleState =>
+        prev.status !== "waiting" ? prev : "reply" in outcome ? { ...prev, status: "done", reply: outcome.reply } : { ...prev, status: "error", error: outcome.error };
+      if (key === "requirements") setRequirements(landed);
+      else {
+        const roleKey = key.slice("review:".length);
+        setReviews((prev) => (prev[roleKey] ? { ...prev, [roleKey]: landed(prev[roleKey]!) } : prev));
       }
-      for (const [roleKey, state] of Object.entries(reviews)) {
-        if (state.status !== "waiting" || !state.address) continue;
-        void checkOne(
-          state.address,
-          state.requestedAt,
-          (reply) =>
-            setReviews((prev) =>
-              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "done", reply } } : prev,
-            ),
-          (message) =>
-            setReviews((prev) =>
-              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "error", error: message } } : prev,
-            ),
-        );
-      }
-    };
-    checkAll();
-    const subscription = subscribeMailbox(tenantId, checkAll);
-    // The nudge is the signal; the timer only backstops a missed one (#777).
-    const timer = setInterval(checkAll, 20_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyWaiting, tenantId]);
+    }
+  }, [outcomes]);
 
   // What the stage has written so far, as documents a message may name (#345).
   const documents: StageDocument[] = [
