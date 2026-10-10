@@ -18,7 +18,7 @@
  * with the record. The supervisor's reply is the build status document;
  * the review opens on the archive (`use-stage-decisions.ts`).
  */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-instructions";
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
@@ -40,6 +40,8 @@ import { keys } from "../../queries/keys.ts";
 
 /** How long a thread waits for a missed nudge before re-reading on its own (#777). */
 const THREAD_BACKSTOP_MS = 20_000;
+/** How often a running attempt's log is re-read. */
+const LOG_POLL_MS = 2_000;
 import { BuildFile, downloadBuild } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
@@ -227,8 +229,6 @@ export function BuildPanel({
   const [composer, setComposer] = useState("");
   const [worker, setWorker] = useState<BuildWorkerStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  const [log, setLog] = useState("");
-  const [report, setReport] = useState<BuildWorkspaceReport | null>(null);
   const [planText, setPlanText] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [port, setPort] = useState("");
@@ -312,36 +312,36 @@ export function BuildPanel({
   const cancellable = running ?? attempts.find((entry) => entry.state === "detached") ?? null;
   const current = useMemo(() => attempts.find((entry) => entry.attempt === selected) ?? latest, [attempts, selected, latest]);
 
-  // The log of the attempt in view: polled while it runs, read once when it
-  // has ended. Both pipes and the worker's turn reports, in arrival order.
+  // The log of the attempt in view, a query (#702): polled while it runs,
+  // read once more when it has ended. Both pipes and the worker's turn
+  // reports, in arrival order. The last log stays on screen while the next
+  // attempt's first read is in flight, as it did.
+  const currentAttempt = current?.attempt ?? null;
+  const currentState = current?.state ?? null;
+  const attempt = useQuery({
+    queryKey: keys.buildAttempt.of(detail.project.id, currentAttempt ?? 0),
+    queryFn: () => api.buildAttempt(detail.project.id, currentAttempt!),
+    enabled: currentAttempt !== null,
+    refetchInterval: currentState === "running" ? LOG_POLL_MS : false,
+    placeholderData: keepPreviousData,
+  });
+  // The attempt ending is what the poll was for: one more read lands the
+  // log's last lines and the report written at the end, which the last
+  // tick may have missed. The first read of an attempt joins the one the
+  // query starts on its own.
   useEffect(() => {
-    if (!current) {
-      setLog("");
-      setReport(null);
-      return;
-    }
-    let cancelled = false;
-    const read = async () => {
-      try {
-        const result = await api.buildAttempt(detail.project.id, current.attempt);
-        if (cancelled) return;
-        setLog(result.log);
-        // A host from before #697 sends no report; progress then rests on the turn lines.
-        setReport(result.workspaceReport ?? null);
-      } catch {
-        // The next poll says.
-      }
-    };
-    void read();
-    if (current.state !== "running") return () => {
-      cancelled = true;
-    };
-    const timer = setInterval(() => void read(), 2_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [detail.project.id, current?.attempt, current?.state]);
+    if (currentAttempt === null) return;
+    void queryClient.invalidateQueries({ queryKey: keys.buildAttempt.of(detail.project.id, currentAttempt), exact: true }, { cancelRefetch: false });
+  }, [detail.project.id, currentAttempt, currentState]);
+  const log = current ? (attempt.data?.log ?? "") : "";
+  // A host from before #697 sends no report; progress then rests on the turn lines.
+  const report: BuildWorkspaceReport | null = current ? (attempt.data?.workspaceReport ?? null) : null;
+  // Said in the pane's banner, with the thread's failure: a log that stops
+  // growing should not look like a worker that has gone quiet.
+  const attemptFailure = attempt.error;
+  useEffect(() => {
+    if (attemptFailure) setError(`The attempt's log could not be read: ${attemptFailure instanceof ApiFailure ? attemptFailure.detail.message : String(attemptFailure)}`);
+  }, [attemptFailure]);
 
   // While the worker runs, the supervisor is briefed on its progress at
   // intervals (#695) and writes an interim status; the thread poll shows
