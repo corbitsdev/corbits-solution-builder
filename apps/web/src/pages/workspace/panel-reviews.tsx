@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
-import { subscribeMailbox } from "../../mailbox-events.ts";
+import { useAwaitedReplies } from "./use-awaited-replies.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton, stageName } from "../../components.jsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
@@ -34,6 +34,9 @@ export type PanelReviewState = {
 };
 
 const IDLE: PanelReviewState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0, recorded: false };
+
+/** How long a waiting review's thread waits for a missed nudge before re-reading on its own. */
+const REPLY_BACKSTOP_MS = 8_000;
 
 /** The recorded reviews of a stage, newest unsuperseded version per reviewer. */
 export function reviewNodesOf(nodes: readonly ArtifactNode[], stage: 6 | 8): ReadonlyMap<string, ArtifactNode> {
@@ -123,39 +126,22 @@ export function usePanelReviews({
     }
   }, [reviews, projectId, stage, onDocumentsChanged, update]);
 
-  // Waiting reviews read their thread back: a mailbox nudge wakes this at
-  // once and an interval backstops a missed one; nothing is resent.
-  const waiting = PANEL_ROLES.filter((role) => reviews[role.key]?.status === "waiting" && reviews[role.key]?.address);
-  const anyWaiting = waiting.length > 0;
+  // Waiting reviews read their thread back through a query per thread
+  // (#702): a mailbox nudge wakes it at once and an interval backstops a
+  // missed one; nothing is resent. A reply lands the review as done; a
+  // thread that could not be read lands it as failed, with why.
+  const waits = PANEL_ROLES.flatMap((role) => {
+    const state = reviews[role.key];
+    return state?.status === "waiting" && state.address ? [{ key: role.key, address: state.address, requestedAt: state.requestedAt }] : [];
+  });
+  const outcomes = useAwaitedReplies(tenantId, waits, REPLY_BACKSTOP_MS);
   useEffect(() => {
-    if (!anyWaiting) return;
-    const check = () => {
-      for (const role of PANEL_ROLES) {
-        const state = reviews[role.key];
-        if (!state || state.status !== "waiting" || !state.address) continue;
-        const { address, requestedAt } = state;
-        void api
-          .readStageThread(tenantId, [address])
-          .then((thread) => {
-            const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
-            if (reply) update(role.key, (prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply: reply.body } : prev));
-          })
-          .catch((cause: unknown) =>
-            update(role.key, (prev) =>
-              prev.status === "waiting" ? { ...prev, status: "error", error: cause instanceof ApiFailure ? cause.detail.message : String(cause) } : prev,
-            ),
-          );
-      }
-    };
-    check();
-    const subscription = subscribeMailbox(tenantId, check);
-    const timer = setInterval(check, 8_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyWaiting, tenantId]);
+    for (const [roleKey, outcome] of Object.entries(outcomes)) {
+      update(roleKey, (prev) =>
+        prev.status !== "waiting" ? prev : "reply" in outcome ? { ...prev, status: "done", reply: outcome.reply } : { ...prev, status: "error", error: outcome.error },
+      );
+    }
+  }, [outcomes, update]);
 
   return { reviews, requestReview, stateOf: (roleKey: string) => reviews[roleKey] ?? IDLE };
 }
