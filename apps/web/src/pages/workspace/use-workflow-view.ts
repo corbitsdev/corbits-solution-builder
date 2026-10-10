@@ -5,12 +5,15 @@
  * so the person never sees a stage briefly flash to something the workflow
  * never said.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { queryOptions, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../client.js";
 import { describeFailure } from "./failure-message.ts";
 import { describeReplay } from "./replay-notice.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
-import { singleFlight, withinBound } from "../../single-flight.ts";
+import { queryClient } from "../../queries/client.ts";
+import { keys } from "../../queries/keys.ts";
+import { withinBound } from "../../single-flight.ts";
 
 export type WorkflowViewState = {
   /** Null while unresolved; the workflow's word once it has one. */
@@ -56,6 +59,17 @@ const viewSnapshots = new Map<string, ProjectWorkflowView>();
 /** How long a person-triggered refresh may hold the busy flag before letting go (#746). */
 const REFRESH_BUSY_LIMIT_MS = 20_000;
 
+/** How long the view waits for a missed nudge before re-reading on its own. */
+const VIEW_BACKSTOP_MS = 5_000;
+
+/** The non-deploying read of the view: the poll, a nudge and the mount's instant paint all share it. */
+function workflowViewQuery(projectId: string) {
+  return queryOptions({
+    queryKey: keys.workflowView.of(projectId),
+    queryFn: () => api.projectWorkflowView(projectId),
+  });
+}
+
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
   const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -65,30 +79,35 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
-  // Single-flight (#746): a poll tick while a read is outstanding reuses
-  // it, so a slow host costs one connection, never one per tick until the
-  // browser's per-origin limit stalls every request to the host.
-  const reload = useMemo(
-    () =>
-      singleFlight(async () => {
-        let next: ProjectWorkflowView | null;
-        try {
-          next = await api.projectWorkflowView(projectId);
-        } catch (cause) {
-          // Said, not dropped (#570): the view on screen is the last one
-          // read, and the person deciding on it should know it may be behind.
-          setReloadError(describeFailure(cause));
-          return null;
-        }
-        setReloadError(null);
-        if (next && next.stage >= 1) {
-          setView(next);
-          viewSnapshots.set(projectId, next);
-        }
-        return next;
-      }),
-    [projectId],
-  );
+  // The quiet re-read is a query (#702). Its backstop poll: the workflow's
+  // own decisions do not land on the tenant mailbox stream, so they cannot
+  // rely on `subscribeMailbox`'s nudge alone; a missed nudge costs one tick,
+  // not a stage sitting stale. The query runs one read at a time (#746): a
+  // tick or a nudge while a read is outstanding joins it, so a slow host
+  // costs one connection, never one per tick until the browser's per-origin
+  // limit stalls every request to the host.
+  const query = useQuery({ ...workflowViewQuery(projectId), refetchInterval: VIEW_BACKSTOP_MS });
+  const latest = query.data;
+  useEffect(() => {
+    if (latest && latest.stage >= 1) {
+      setView(latest);
+      viewSnapshots.set(projectId, latest);
+    }
+  }, [latest, projectId]);
+  // Said, not dropped (#570): the view on screen is the last one read, and
+  // the person deciding on it should know it may be behind. The query clears
+  // its error on the next read that lands.
+  const reloadFailure = query.error;
+  useEffect(() => {
+    setReloadError(reloadFailure ? describeFailure(reloadFailure) : null);
+  }, [reloadFailure]);
+
+  const refetch = query.refetch;
+  const reload = useCallback(async () => {
+    // A nudge never cancels a read already in flight: it joins it.
+    const result = await refetch({ cancelRefetch: false });
+    return result.data ?? null;
+  }, [refetch]);
 
   const refresh = useCallback(async () => {
     setRefreshingAfterAction(true);
@@ -134,7 +153,9 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     let cancelled = false;
     (async () => {
       if (attempt === 0) {
-        const attached = await api.projectWorkflowView(projectId).catch(() => null);
+        // The same query the poll reads, so this joins the read the query
+        // started on mount rather than making a second one.
+        const attached = await queryClient.fetchQuery(workflowViewQuery(projectId)).catch(() => null);
         if (cancelled) return;
         if (attached && attached.stage >= 1) {
           setView(attached);
@@ -165,22 +186,16 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
       }
       if (!cancelled) {
         setView(next);
-        if (next) viewSnapshots.set(projectId, next);
+        if (next) {
+          viewSnapshots.set(projectId, next);
+          queryClient.setQueryData(workflowViewQuery(projectId).queryKey, next);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [projectId, attempt]);
-
-  // Backstop poll — the workflow's own decisions do not land on the tenant
-  // mailbox stream, so they cannot rely on `subscribeMailbox`'s nudge alone.
-  // 5s, the same cadence `app.tsx` polls the decision fold at: a missed
-  // nudge costs one poll tick, not a stage sitting stale.
-  useEffect(() => {
-    const timer = setInterval(() => void reload(), 5_000);
-    return () => clearInterval(timer);
-  }, [reload]);
 
   // Belt-and-braces against a missed remount: `key={detail.project.id}` on
   // the component already resets all of this per project; this clears the
