@@ -5,8 +5,11 @@
  * off it directly rather than a separate readiness flag, so there is no
  * window where the address is known but something built on it is disabled.
  */
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type Remediation } from "../../client.js";
+import { queryClient } from "../../queries/client.ts";
+import { keys } from "../../queries/keys.ts";
 import { describeFailure } from "./failure-message.ts";
 
 export type StageAgentState = {
@@ -37,6 +40,17 @@ export type StageAgentState = {
 // it, and the CL-8654 re-check effect below keeps following the live pick
 // regardless of what this held.
 const agentSnapshots = new Map<string, { stage: number; address: string }>();
+
+/** How often a known address is checked against the hub's live pick (CL-8654). */
+const LIVE_PICK_RECHECK_MS = 3_000;
+
+/** The non-deploying read of the stage's live deployment: the mount's instant paint and the recheck share it. */
+function stageAgentQuery(projectId: string, stage: number) {
+  return queryOptions({
+    queryKey: keys.stageAgent.of(projectId, stage),
+    queryFn: () => api.stageAgentStatus(projectId, stage),
+  });
+}
 
 export function useStageAgent(
   projectId: string,
@@ -86,7 +100,7 @@ export function useStageAgent(
       // a regression from #669 where a "deployed" attach returned early and
       // left the composer pointed at a dead sidecar until a manual retry).
       if (attempt === 0) {
-        const attached = await api.stageAgentStatus(projectId, requestedStage).catch(() => null);
+        const attached = await queryClient.fetchQuery(stageAgentQuery(projectId, requestedStage)).catch(() => null);
         if (cancelled) return;
         if (attached && attached.status === "deployed") {
           const next = { stage: requestedStage, address: attached.address };
@@ -101,6 +115,11 @@ export function useStageAgent(
             const next = { stage: requestedStage, address: deployment.address };
             setAgent(next);
             agentSnapshots.set(`${projectId}:${requestedStage}`, next);
+            // The live pick the recheck below compares against must be read
+            // after this deployment landed: a status read from before it
+            // (the attach's, or one still in flight) would move the address
+            // back to the deployment ensure just replaced.
+            void queryClient.resetQueries({ queryKey: stageAgentQuery(projectId, requestedStage).queryKey, exact: true });
           }
         })
         .catch((cause: unknown) => {
@@ -118,24 +137,20 @@ export function useStageAgent(
   // to open this stage can each deploy a specialist, the hub releases the
   // loser, and a session that memoised the loser's address would otherwise
   // mail into the void forever (CL-8654). When the live pick has moved to a
-  // different deployment, follow it.
+  // different deployment, follow it. A query (#702): read only once an
+  // address is known for this stage, on the recheck cadence; a read that
+  // fails is held on the query, and the next tick says.
+  const known = agent !== null && agent.stage === stage;
+  const live = useQuery({ ...stageAgentQuery(projectId, stage), enabled: known, refetchInterval: LIVE_PICK_RECHECK_MS });
+  const livePick = live.data;
   useEffect(() => {
-    if (!agent || agent.stage !== stage) return;
-    const recheck = () => {
-      void api
-        .stageAgentStatus(projectId, stage)
-        .then((current) => {
-          if (current && current.address !== agent.address) {
-            const next = { stage, address: current.address };
-            setAgent(next);
-            agentSnapshots.set(`${projectId}:${stage}`, next);
-          }
-        })
-        .catch(() => {});
-    };
-    const timer = setInterval(recheck, 3_000);
-    return () => clearInterval(timer);
-  }, [agent, projectId, stage]);
+    if (!agent || agent.stage !== stage || !livePick) return;
+    if (livePick.address !== agent.address) {
+      const next = { stage, address: livePick.address };
+      setAgent(next);
+      agentSnapshots.set(`${projectId}:${stage}`, next);
+    }
+  }, [agent, livePick, projectId, stage]);
 
   // The full address history, refreshed on the same cadence as the live-pick
   // recheck above — a fresh redeploy (that recheck landing a new
