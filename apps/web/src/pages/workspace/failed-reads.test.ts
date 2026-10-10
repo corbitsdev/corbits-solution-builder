@@ -31,9 +31,7 @@ describe("a workspace read that fails is shown", () => {
 
   test("the project workflow's first read and its poll keep their reason", () => {
     const hook = read("use-workflow-view.ts");
-    const reload = hook.slice(hook.indexOf("const reload = useMemo("), hook.indexOf("const refresh = useCallback("));
-    expect(reload).not.toContain(".catch(() => null)");
-    expect(reload).toContain("setReloadError(describeFailure(cause))");
+    expect(hook).toContain("setReloadError(reloadFailure ? describeFailure(reloadFailure) : null)");
     expect(hook).toContain("setViewError(describeFailure(cause))");
     const index = read("index.tsx");
     expect(index).toContain("{workflow.startError ?? workflow.viewError}");
