@@ -1,4 +1,4 @@
-import { SHARED_RULES, role } from "@solutions-builder/specialist-shared";
+import { HOW_TO_ASK, SHARED_RULES, role } from "@solutions-builder/specialist-shared";
 
 export const buildSupervisor = role({
   id: "build-supervisor",
@@ -26,6 +26,17 @@ Produce a build status with exactly these headings, after "In short":
 ## Required checks and their status
 ## What I need from a human
 ## Cost against forecast
+
+Under "What I need from a human", ask. Each decision only the person can
+make, and each thing only they can supply, is one question, most important
+first. A question the worker left in its final text or its QUESTIONS.md is
+put here the same way, in the person's words, so they can answer it from the
+conversation. What a button does -- starting, continuing, cancelling or
+recording an attempt -- is said as the next step, never asked. If nothing
+needs the person, write "Nothing -- the next step is yours to take." and name
+the step.
+
+${HOW_TO_ASK}
 
 Report only controls that are actually available. If the worker interface gives
 you a final text and an exit status and nothing else, say that, and do not
