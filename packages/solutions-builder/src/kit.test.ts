@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
 import { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
-import { SELECTABLE_TARGETS } from "./targets.js";
+import { SELECTABLE_TARGETS, describeTarget } from "./targets.js";
 
 describe("Experience designer prompt", () => {
   test("requires the mockup to fit the width it is read at, not a wide monitor", () => {
@@ -123,5 +123,16 @@ describe("Presentation creator interview rule", () => {
     expect(prompt).toContain(STAKEHOLDER_INTERVIEW_BLOCK_SHAPE);
     expect(prompt).toContain("say the packages can be generated now");
     expect(prompt).toContain("The interview happens here, at Concept approval, once per\napprover");
+  });
+});
+
+describe("describeTarget", () => {
+  test("a selectable target is its label in the person's words; anything else is as given", () => {
+    expect(describeTarget("desktop")).toBe("an app you install");
+    expect(describeTarget("web")).toBe("a website");
+    expect(describeTarget("api")).toBe("a service other software calls");
+    expect(describeTarget("cli")).toBe("a command you run in a terminal");
+    expect(describeTarget("kiosk")).toBe("kiosk");
+    for (const entry of SELECTABLE_TARGETS) expect(describeTarget(entry.target)).not.toBe(entry.target);
   });
 });

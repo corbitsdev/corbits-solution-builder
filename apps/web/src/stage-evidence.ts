@@ -22,6 +22,7 @@ import {
   type StackRecord,
   STACK_BLOCK_SHAPE,
 } from "@solutions-builder/app/stack";
+import { describeTarget } from "@solutions-builder/app/targets";
 
 /** The "stack" is the architect's technical decision -- runtime, storage,
  *  packaging and so on -- recorded as a fenced JSON block under `## Stack`
@@ -277,5 +278,5 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
  *  does not have to carry the rest of `Stage7Evidence` just to call it. */
 export function frozenSummaryLine(evidence: Pick<Stage7Evidence, "target" | "frozen">): string {
   const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `${stageName(ref.stage)} v${String(ref.version)}`);
-  return `Frozen for this build: target ${evidence.target}; ${refs.join(", ")}.`;
+  return `Frozen for this build: target ${describeTarget(evidence.target)}; ${refs.join(", ")}.`;
 }

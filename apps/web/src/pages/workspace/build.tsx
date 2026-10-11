@@ -24,6 +24,7 @@ import { QUESTIONS_MD, agentsInstructions } from "@solutions-builder/app/agents-
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type BuildWorkspaceReport, type ProjectDetail } from "../../client.js";
 import { openQuestions, planTasks, progressHeadline, taskProgress } from "./build-progress.ts";
 import { slug } from "../../documents-archive.ts";
+import { describeTarget } from "@solutions-builder/app/targets";
 import { DEFAULT_LANGUAGE_SETTINGS, languageLabel } from "@solutions-builder/app/language-settings";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
@@ -86,7 +87,8 @@ export async function buildPromptMaterial(
     requirementsText,
     designText,
     stackBlock: renderStackBlock(freeze) ?? "",
-    target: freeze?.target ?? "",
+    // In the person's words (#882): the stored id reads as a platform.
+    target: freeze ? describeTarget(freeze.target) : "",
     planRef: plan ? `${plan.artifactId}@${String(plan.version)}` : "",
     files: workspaceFiles({ planText, requirementsText, designText }, settings),
     language: settings,
