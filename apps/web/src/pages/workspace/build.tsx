@@ -526,6 +526,16 @@ export function BuildPanel({
             disabled={!address}
             events={stageEvents}
             who={agentFor(8).title}
+            // A tapped answer to the status's question goes to the
+            // supervisor, as typing it would (#881).
+            onAnswer={(answer) => {
+              setComposer("");
+              void run("message", async () => {
+                if (!address) return;
+                await api.sendStageMail(tenantId, address, { body: answer });
+                await load();
+              });
+            }}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
             popover={popover}
