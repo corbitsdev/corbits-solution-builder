@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import JSZip from "jszip";
 import { foldArtifactGraph, type ArtifactListEntry } from "@solutions-builder/app/artifact-graph";
-import { importedProjectTitle, importPlan, importProject, jsonFromZip, readImportPayload, writeOrder, IMPORTED_CONVERSATION_KIND, type ImportDeps, type ImportWrite } from "./project-import.ts";
+import { importedProjectTitle, importPlan, importProject, jsonFromZip, readImportPayload, transcript, writeOrder, IMPORTED_CONVERSATION_KIND, TRANSCRIPT_BYTE_BUDGET, type ImportDeps, type ImportWrite } from "./project-import.ts";
 import { parseBundle, type ExportedArtifact, type ProjectBundle } from "./project-export.ts";
 import { artifactNodesOf } from "./project-view.ts";
 import type { ArtifactNode } from "./client.ts";
@@ -398,3 +398,43 @@ describe("jsonFromZip", () => {
   });
 });
 
+
+// #879: a thread's transcript is one document, and the store takes 15 MiB of one.
+describe("transcript", () => {
+  const at = "2026-01-01T00:00:00.000Z";
+  const handoff = `[[sb-switch:3de6164d]]\nThis stage continues on Anthropic · claude-fable-5-1.\n\n---\n\nHere is the conversation so far, so you can pick it up without restarting it:\n\n${"Person: the whole stage again\n\n".repeat(50)}`;
+
+  test("condenses a hand-off a bundle written before the export did still carries whole", () => {
+    const text = transcript([
+      { id: "1", author: "me", body: "a question", at },
+      { id: "2", author: "me", body: handoff, at },
+    ]);
+    expect(text).toContain("This stage continues on Anthropic · claude-fable-5-1.\nHanded the conversation so far, and the current draft, to the new specialist.");
+    expect(text).not.toContain("the whole stage again");
+  });
+
+  test("keeps the opening and the newest turns that fit the budget, and says how many went", () => {
+    const messages = Array.from({ length: 6 }, (_, index) => ({ id: String(index), author: index % 2 === 0 ? ("me" as const) : ("agent" as const), body: `turn ${String(index)} ${"x".repeat(100)}`, at }));
+    const whole = transcript(messages);
+    const text = transcript(messages, Math.floor(new TextEncoder().encode(whole).length / 2));
+    expect(text).toContain("turn 0 ");
+    expect(text).toContain("(3 earlier turns omitted: the thread was over what one document holds.)");
+    expect(text).not.toContain("turn 1 ");
+    expect(text).not.toContain("turn 3 ");
+    expect(text).toContain("turn 4 ");
+    expect(text).toContain("turn 5 ");
+    expect(new TextEncoder().encode(text).length).toBeLessThanOrEqual(Math.floor(new TextEncoder().encode(whole).length / 2) + 120);
+  });
+
+  test("a thread within the budget is written whole", () => {
+    const messages = [
+      { id: "1", author: "me" as const, body: "What's the deadline?", at },
+      { id: "2", author: "agent" as const, body: "End of quarter.", at },
+    ];
+    expect(transcript(messages)).toBe(`**You** — ${at}\n\nWhat's the deadline?\n\n---\n\n**Specialist** — ${at}\n\nEnd of quarter.`);
+  });
+
+  test("the budget is under the store's 15 MiB limit", () => {
+    expect(TRANSCRIPT_BYTE_BUDGET).toBeLessThan(15 * 1024 * 1024);
+  });
+});

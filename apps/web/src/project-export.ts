@@ -6,6 +6,7 @@
  * back.
  */
 import type { ArtifactNode } from "./client.ts";
+import { HANDOFF_BUBBLE_TEXT, HANDOFF_RECAP_LINE, handoffMarkerOf, isHandoffMessage } from "./pages/workspace/use-model-handoff.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
@@ -103,11 +104,33 @@ function pickNode(node: ArtifactNode): ExportedNode {
   };
 }
 
+/**
+ * A model hand-off as a bundle carries it: its marker and announcement
+ * lines, then the one line the window shows in its place. The recap, draft
+ * and close the mail carried were for the specialist it went to; the turns
+ * the recap quotes are in the thread already, and a recap from before #305
+ * quoted every earlier recap too, so one thread exported at 55 MB and no
+ * import could take it (#879). Gated the way `thread.tsx` gates its
+ * stripping: only the person's own mail is ever a hand-off.
+ */
+export function condensedMessage(message: ChatMessage): ChatMessage {
+  if (!isHandoffMessage(message)) return message;
+  const lines = message.body.split("\n").filter((line) => line.trim().length > 0);
+  const lead: string[] = [];
+  if (handoffMarkerOf(message.body) !== null) {
+    lead.push(lines[0]!.trim());
+    const announcement = lines[1]?.trim();
+    if (announcement && announcement !== "---" && !announcement.includes(HANDOFF_RECAP_LINE)) lead.push(announcement);
+  }
+  return { ...message, body: [...lead, HANDOFF_BUBBLE_TEXT].join("\n") };
+}
+
 function pickMessage(message: ChatMessage): ChatMessage {
+  const { body } = condensedMessage(message);
   return {
     id: message.id,
     author: message.author,
-    body: message.body,
+    body,
     at: message.at,
     ...(message.inReplyTo !== undefined ? { inReplyTo: message.inReplyTo } : {}),
   };

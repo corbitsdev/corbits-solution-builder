@@ -108,6 +108,10 @@ export function Projects({
             : String(cause),
         { id: importing },
       );
+      // A write the host refused partway leaves the project with what was
+      // written before it (#879); shown now, it is not mistaken later for
+      // one that imported whole.
+      onChanged();
     } finally {
       setBusy(false);
       if (importInput.current) importInput.current.value = "";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assembleBundle, bundleFileName, parseBundle, type BundleDeps } from "./project-export.ts";
+import { assembleBundle, bundleFileName, condensedMessage, parseBundle, type BundleDeps } from "./project-export.ts";
 import type { ArtifactNode } from "./client.ts";
 
 function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -224,5 +224,60 @@ describe("the bundle's workflow", () => {
   test("a v2 bundle is still accepted", () => {
     const v2 = { format: "solutions-builder.project", version: 2, exportedAt: "2026-01-02T00:00:00.000Z", project: { id: "p", title: "T", policy: {} }, artifacts: [], conversations: [], notes: "workflow events are not included yet" };
     expect(() => parseBundle(v2)).not.toThrow();
+  });
+});
+
+// #879: a hand-off's recap is for the specialist it went to; one from before
+// #305 quoted every earlier recap too, and the thread outgrew any import.
+describe("condensedMessage", () => {
+  const handoff = [
+    "[[sb-switch:c92f1ce8]]",
+    "This stage continues on Anthropic · claude-fable-5-1.",
+    "---",
+    "Here is the conversation so far, so you can pick it up without restarting it:",
+    "",
+    "Person: a question",
+    "",
+    "Specialist: an answer",
+    "---",
+    "The current draft:",
+    "",
+    "<html>a whole mockup</html>",
+    "---",
+    "If the person's last message above has not been answered, answer it now.",
+  ].join("\n\n");
+
+  test("keeps a hand-off's marker and announcement, with the line the window shows, and nothing it carried", () => {
+    const condensed = condensedMessage({ id: "1", author: "me", body: handoff, at: "2026-01-01T00:00:00.000Z" });
+    expect(condensed.body).toBe("[[sb-switch:c92f1ce8]]\nThis stage continues on Anthropic · claude-fable-5-1.\nHanded the conversation so far, and the current draft, to the new specialist.");
+    expect(condensed.body).not.toContain("a whole mockup");
+  });
+
+  test("a hand-off without a marker keeps only the line the window shows", () => {
+    const body = `Here is the conversation so far, so you can pick it up without restarting it:\n\nPerson: a question`;
+    expect(condensedMessage({ id: "1", author: "me", body, at: "2026-01-01T00:00:00.000Z" }).body).toBe("Handed the conversation so far, and the current draft, to the new specialist.");
+  });
+
+  test("a specialist's message is never condensed, whatever it says", () => {
+    const message = { id: "2", author: "agent" as const, body: handoff, at: "2026-01-01T00:00:01.000Z" };
+    expect(condensedMessage(message)).toBe(message);
+  });
+
+  test("the bundle carries the condensed hand-off, the other turns whole", async () => {
+    const bundle = await assembleBundle(
+      "proj_1",
+      deps({
+        readStageThread: async () => [
+          { id: "1", author: "me", body: "a question", at: "2026-01-01T00:00:00.000Z" },
+          { id: "2", author: "me", body: handoff, at: "2026-01-01T00:00:01.000Z" },
+          { id: "3", author: "agent", body: "picked up", at: "2026-01-01T00:00:02.000Z" },
+        ],
+      }),
+    );
+    expect(bundle.conversations[0]?.messages.map((message) => message.body)).toEqual([
+      "a question",
+      "[[sb-switch:c92f1ce8]]\nThis stage continues on Anthropic · claude-fable-5-1.\nHanded the conversation so far, and the current draft, to the new specialist.",
+      "picked up",
+    ]);
   });
 });

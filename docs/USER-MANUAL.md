@@ -734,8 +734,9 @@ included.
 **Export…** in the project menu saves the whole project as one JSON file
 named `<project>.solutions-builder.json`. It carries the title and settings,
 every version of every document, each stage's conversation, every decision,
-and each stakeholder's vote. It never carries providers, API keys, tokens,
-or session data.
+and each stakeholder's vote. A model hand-off in a conversation is carried
+as its divider line only, not the recap it mailed the new specialist. It
+never carries providers, API keys, tokens, or session data.
 
 **Import a project** on the Projects page accepts that JSON file, or a zip
 containing exactly one. The import always creates a new project titled

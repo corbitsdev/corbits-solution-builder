@@ -16,7 +16,7 @@
 import JSZip from "jszip";
 import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { stageName } from "./components.jsx";
-import type { ExportedArtifact, ProjectBundle } from "./project-export.ts";
+import { condensedMessage, type ExportedArtifact, type ProjectBundle } from "./project-export.ts";
 
 export const IMPORTED_CONVERSATION_KIND = "imported_conversation";
 
@@ -50,11 +50,44 @@ export function importedProjectTitle(bundle: ProjectBundle): string {
   return `${bundle.project.title} (imported)`;
 }
 
-/** One stage's messages as the read-only text an `imported_conversation` artifact holds. */
-export function transcript(messages: ProjectBundle["conversations"][number]["messages"]): string {
-  return messages
-    .map((message) => `**${message.author === "me" ? "You" : "Specialist"}** — ${message.at}\n\n${message.body}`)
-    .join("\n\n---\n\n");
+/**
+ * The most a transcript artifact may hold. The artifact store refuses
+ * content over 15 MiB (`MAX_ARTIFACT_CONTENT_BYTES` in @corbits/artifacts),
+ * measured on the request around it, and a thread that outgrew that failed
+ * the whole import after every document was in (#879).
+ */
+export const TRANSCRIPT_BYTE_BUDGET = 14 * 1024 * 1024;
+
+const TURN_SEPARATOR = "\n\n---\n\n";
+
+function renderedTurn(message: ProjectBundle["conversations"][number]["messages"][number]): string {
+  return `**${message.author === "me" ? "You" : "Specialist"}** — ${message.at}\n\n${message.body}`;
+}
+
+/**
+ * One stage's messages as the read-only text an `imported_conversation`
+ * artifact holds. A hand-off mail is condensed as the export now condenses
+ * it, for a bundle written before it did. What is over `budget` after that
+ * is dropped oldest first, the opening kept since it is the stage's input,
+ * and the transcript says how many turns went: the history is read back
+ * into the landed stage's opening (`imported-history.ts`), where the last
+ * turns matter and a second document would never be read.
+ */
+export function transcript(messages: ProjectBundle["conversations"][number]["messages"], budget = TRANSCRIPT_BYTE_BUDGET): string {
+  const encoder = new TextEncoder();
+  const turns = messages.map(condensedMessage).map(renderedTurn);
+  const sizes = turns.map((turn) => encoder.encode(turn).length);
+  const separator = encoder.encode(TURN_SEPARATOR).length;
+  const total = (count: number) => sizes.slice(0, count).reduce((sum, size) => sum + size, 0) + Math.max(0, count - 1) * separator;
+  let omitted = 0;
+  let size = total(turns.length);
+  while (turns.length - omitted > 1 && size > budget) {
+    omitted += 1;
+    size -= sizes[omitted]! + separator;
+  }
+  if (omitted === 0) return turns.join(TURN_SEPARATOR);
+  const notice = `(${String(omitted)} earlier turn${omitted === 1 ? "" : "s"} omitted: the thread was over what one document holds.)`;
+  return [turns[0]!, notice, ...turns.slice(1 + omitted)].join(TURN_SEPARATOR);
 }
 
 /**
