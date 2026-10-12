@@ -637,10 +637,10 @@ The toolbar shows only the buttons that can act right now:
   There is no timeout. A build takes as long as it takes.
 - **Restart the build from the beginning** starts a new attempt in a fresh
   directory. Earlier attempts' directories are kept.
-- **Continue from attempt N** starts from a copy of that attempt's
-  directory, commits included, with your note in its packet. The note goes
-  in the box labeled "For the worker, on the next attempt". The
-  conversation on the left goes to the Build supervisor, not the worker.
+- **Start another attempt (N)** starts attempt N from a copy of the last
+  ended attempt's directory, commits included, with your note in its packet.
+  The note goes in the box labeled "For the worker, on the next attempt".
+  The conversation on the left goes to the Build supervisor, not the worker.
 - **Record attempt N and brief the supervisor** packages the attempt's
   directory into a `.tar.gz` archive, records it as the build evidence, and
   asks the Build supervisor to write the build status. What the status
