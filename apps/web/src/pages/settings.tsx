@@ -945,7 +945,10 @@ function NetworkAccess() {
         />
       </Row>
       {network?.lan ? (
-        <Row label="Open elsewhere" hint="Anyone with this link uses the workspace as you. Your computer's firewall may ask to allow incoming connections.">
+        <Row
+          label="Open elsewhere"
+          hint={`Anyone with this link uses the workspace as you. The device will warn the first time that the connection is not private, because this computer issued the certificate itself; continue past the warning${network.fingerprint ? `, checking the fingerprint ${network.fingerprint}` : ""}. Your computer's firewall may ask to allow incoming connections.`}
+        >
           <span className="v">
             {network.addresses.length === 0 ? (
               "This computer has no network address right now."

@@ -12,7 +12,7 @@ import {
   sidecarFacts,
   storeSecret,
   mountGoogleDrive,
-  networkAccessStatus,
+  applyNetworkAccess,
   setNetworkAccess,
   type GoogleSecretStore,
 } from "@corbits/embedded-host";
@@ -48,7 +48,9 @@ export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keych
   // Whether other devices on the local network can reach this host (#887):
   // the toggle Settings shows under This computer, and the addresses to
   // open elsewhere while it is on. A save applies at once.
-  api.get("/host/network", async (context) => context.json(await networkAccessStatus()));
+  // A read applies the setting too (#889): a computer that moved network
+  // gets a certificate for its new addresses when Settings is opened.
+  api.get("/host/network", async (context) => context.json(await applyNetworkAccess()));
 
   api.put("/host/network", async (context) => {
     const patch = parsed(NetworkPatch(await context.req.json().catch(() => ({}))));

@@ -931,6 +931,14 @@ at once, and the choice is kept across restarts. Your computer's firewall
 may ask whether to allow incoming connections the first time. Turning it
 Off closes the network address; this computer's own window is unaffected.
 
+The link is `https://`, on a certificate this computer makes for itself
+the first time and renews when its network addresses change. The device
+will warn that the connection is not private, because nobody but this
+computer vouches for that certificate: continue past the warning (on an
+iPhone, **Show Details**, then **visit this website**), and compare the
+fingerprint the row shows if you want to be sure. Making the certificate
+needs the `openssl` command, which macOS and Linux have.
+
 ## The desktop app and the host
 
 The host is the part that does the work. The window is only how you watch
