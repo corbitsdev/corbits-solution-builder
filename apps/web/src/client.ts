@@ -374,6 +374,8 @@ export type NetworkAccessStatus = {
   port: number | null;
   /** This computer's network addresses, each with the link that signs a device in there; empty while off. */
   addresses: { address: string; url: string }[];
+  /** The served certificate's SHA-256 fingerprint while on (#889), to check against the device's warning. */
+  fingerprint: string | null;
 };
 
 export type HostStatus = {
