@@ -483,6 +483,8 @@ export function BuildPanel({
   const ended = current !== null && current.state === "ended" && current.outcome !== null;
   const recorded = current !== null && attemptRecorded(detail.nodes, current.attempt);
   const lastEnded = [...attempts].reverse().find((entry) => entry.state === "ended") ?? null;
+  // The number the next attempt gets: one past the highest, as the host numbers them.
+  const nextAttempt = (latest?.attempt ?? 0) + 1;
   // The one toolbar every action lives in (#787), in a fixed order; a
   // button shows only while it can act, so the row never offers a choice
   // that is not there. Record acts on the attempt in view once it has
@@ -601,7 +603,7 @@ export function BuildPanel({
                   title={`A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below in its packet.`}
                   onClick={() => void start(lastEnded.attempt)}
                 >
-                  Continue from attempt {String(lastEnded.attempt)}
+                  Start another attempt ({String(nextAttempt)})
                 </Button>
               ) : null}
               {cancellable ? (
@@ -658,7 +660,7 @@ export function BuildPanel({
                   onChange={(event) => setContinueNote(event.target.value)}
                 />
                 <p className="inline-note">
-                  Goes to the worker in the packet of the attempt "Continue from attempt {lastEnded ? String(lastEnded.attempt) : "N"}" starts, ahead of the plan. The chat on the left goes to {agentFor(8).title.toLowerCase()}, who writes the build status; the worker never reads it.
+                  Goes to the worker in the packet of the attempt "Start another attempt ({String(nextAttempt)})" starts, ahead of the plan. The chat on the left goes to {agentFor(8).title.toLowerCase()}, who writes the build status; the worker never reads it.
                 </p>
               </div>
             ) : null}
@@ -783,7 +785,7 @@ export function BuildPanel({
                 {current.state === "ended" && current.outcome?.available && current.outcome.finalText.trim().length === 0 ? (
                   // Ended with nothing to report: what is in the directory is
                   // still there, and the way on is to continue from it, above.
-                  <p className="inline-note">The worker ended without a report. Its directory is kept; "Continue from attempt {String(current.attempt)}" starts from it.</p>
+                  <p className="inline-note">The worker ended without a report. Its directory is kept; "Start another attempt ({String(nextAttempt)})" starts from it.</p>
                 ) : null}
               </>
             ) : (
