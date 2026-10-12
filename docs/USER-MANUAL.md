@@ -922,6 +922,15 @@ Facts about the host: whether the connection is local or remote, where
 credentials are kept (macOS Keychain, or a private file on disk when no
 keychain is available), the data folder, and the app version.
 
+**On this network** is Off until you turn it on. On, other devices on the
+same network, such as your phone, can open the workspace: the **Open
+elsewhere** row shows one link per network address this computer has,
+with **Copy link**. The link signs that device in, so anyone with it uses
+the workspace as you; share it as you would a password. The change applies
+at once, and the choice is kept across restarts. Your computer's firewall
+may ask whether to allow incoming connections the first time. Turning it
+Off closes the network address; this computer's own window is unaffected.
+
 ## The desktop app and the host
 
 The host is the part that does the work. The window is only how you watch

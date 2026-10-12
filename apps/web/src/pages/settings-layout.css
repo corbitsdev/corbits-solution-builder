@@ -315,3 +315,10 @@
   margin-bottom: var(--space-3);
 }
 
+/* One network address per line, with its copy link beside it (#887). */
+.settings-page .row .v .network-address {
+  display: block;
+}
+.settings-page .row .v .network-address code {
+  word-break: break-all;
+}
