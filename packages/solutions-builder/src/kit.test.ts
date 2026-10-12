@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
 import { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
-import { SELECTABLE_TARGETS } from "./targets.js";
+import { SELECTABLE_TARGETS, describeTarget } from "./targets.js";
 import { HOW_TO_ASK, INTERVIEW } from "@solutions-builder/specialist-shared";
 
 describe("Experience designer prompt", () => {
@@ -142,5 +142,16 @@ describe("Build supervisor ask rule", () => {
   test("the interviewing stages' section is built from the same form", () => {
     expect(INTERVIEW).toContain(HOW_TO_ASK);
     expect(agentById("brainstormer")!.system).toContain(INTERVIEW);
+  });
+});
+
+describe("describeTarget", () => {
+  test("a selectable target is its label in the person's words; anything else is as given", () => {
+    expect(describeTarget("desktop")).toBe("an app you install");
+    expect(describeTarget("web")).toBe("a website");
+    expect(describeTarget("api")).toBe("a service other software calls");
+    expect(describeTarget("cli")).toBe("a command you run in a terminal");
+    expect(describeTarget("kiosk")).toBe("kiosk");
+    for (const entry of SELECTABLE_TARGETS) expect(describeTarget(entry.target)).not.toBe(entry.target);
   });
 });

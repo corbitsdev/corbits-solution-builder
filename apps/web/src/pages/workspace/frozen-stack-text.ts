@@ -20,6 +20,11 @@ function renderStackText(stack: StackRecord): string {
     `- What it needs: ${description.needs}`,
     `- Ongoing cost: ${description.cost}`,
     `- Shared, or cloud: ${description.shareOrCloud}`,
+    // The frozen choices themselves (#882), beside the target line the
+    // packet ends on: what it is built with and how it ships is what
+    // "an app you install" means for this build.
+    `- Built with: ${stack.runtime.choice}`,
+    `- Ships as: ${stack.packaging.choice}`,
   ].join("\n");
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import { openReviewFailureMessage, stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, type StageEvidenceDeps, STACK_RESEND_ASK, stage6StackRemediation, isCitationProblem, citationProblemDetail, stage6CitationRemediation } from "./stage-evidence.ts";
+import { openReviewFailureMessage, stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, type StageEvidenceDeps, STACK_RESEND_ASK, stage6StackRemediation, isCitationProblem, citationProblemDetail, stage6CitationRemediation, frozenSummaryLine } from "./stage-evidence.ts";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 const STACK = {
@@ -184,5 +184,20 @@ describe("stage6CitationRemediation", () => {
     expect(remediation.message).toContain("cites ids that do not exist (ui cites unknown requirement id(s) IR-13)");
     expect(remediation.message).toContain("- IR-1: One.");
     expect(remediation.message).toContain("citing only these ids");
+  });
+});
+
+// #882: the stored target id reads as a platform. "target desktop" beside a
+// frozen iOS stack sent the supervisor and the worker after a conflict
+// that was not there; the line says what the person chose, in their words.
+describe("frozenSummaryLine", () => {
+  test("names the target as the person chose it, and an unknown target as given", () => {
+    const frozen = [
+      { stage: 6 as const, artifactId: "a6", version: 1, sha256: "f" },
+      { stage: 1 as const, artifactId: "a1", version: 2, sha256: "e" },
+    ];
+    expect(frozenSummaryLine({ target: "desktop", frozen })).toBe("Frozen for this build: target an app you install; Problem discovery v2, Build plan v1.");
+    expect(frozenSummaryLine({ target: "web", frozen: [] })).toBe("Frozen for this build: target a website; .");
+    expect(frozenSummaryLine({ target: "kiosk", frozen: [] })).toContain("target kiosk;");
   });
 });

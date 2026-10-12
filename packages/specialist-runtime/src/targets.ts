@@ -115,3 +115,16 @@ export const SELECTABLE_TARGETS: ReadonlyArray<{
   { target: "api", modality: "api", label: "A service other software calls", verified: true },
   { target: "desktop", modality: "desktop", label: "An app you install", verified: false },
 ];
+
+/**
+ * A target as a person reads it mid-sentence (#882): a selectable target's
+ * own label, "an app you install", never its stored id. The id names a
+ * modality for the verifier; read as a platform, "desktop" contradicts a
+ * frozen stack that ships a phone app, and a worker handed "Target:
+ * desktop." beside such a stack stopped rather than choose.
+ */
+export function describeTarget(target: string): string {
+  const option = SELECTABLE_TARGETS.find((entry) => entry.target === target);
+  if (!option) return target;
+  return option.label.charAt(0).toLowerCase() + option.label.slice(1);
+}
