@@ -334,11 +334,12 @@ export async function serveHost(options: ServeOptions): Promise<void> {
     app.route("/", hub().app);
   }
 
-  /** One handler for both listeners (#887): the loopback server's, and the network's while it is on. */
-  const serveOn = (hostname: string, on: number) =>
+  /** One handler for both listeners (#887): the loopback server's, and the network's while it is on, which serves TLS (#889). */
+  const serveOn = (hostname: string, on: number, tls?: { readonly cert: string; readonly key: string }) =>
     Bun.serve({
     hostname,
     port: on,
+    ...(tls ? { tls: { cert: tls.cert, key: tls.key } } : {}),
     idleTimeout: 240,
     websocket: hubWebSocket,
     async fetch(request, server) {
@@ -465,14 +466,14 @@ export async function serveHost(options: ServeOptions): Promise<void> {
   // scripts reach, and it does not change.
   let lan: ReturnType<typeof serveOn> | null = null;
   registerLanListener({
-    async start(asked) {
+    async start(asked, certificate) {
       if (lan) return lan.port!;
       try {
-        lan = serveOn("0.0.0.0", asked);
+        lan = serveOn("0.0.0.0", asked, certificate);
       } catch (cause) {
         // The remembered port is taken: a free one, remembered in its place.
         if (asked === 0) throw cause;
-        lan = serveOn("0.0.0.0", 0);
+        lan = serveOn("0.0.0.0", 0, certificate);
       }
       console.log(`${displayName} host on the network: port ${String(lan.port)}`);
       return lan.port!;
@@ -484,7 +485,7 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       console.log(`${displayName} host off the network.`);
     },
     port: () => lan?.port ?? null,
-    launchUrl: (host, on) => `http://${host}:${String(on)}/?token=${token}`,
+    launchUrl: (host, on) => `https://${host}:${String(on)}/?token=${token}`,
   });
   await applyNetworkAccess().catch((cause: unknown) => console.error("Could not listen on the network:", cause));
 

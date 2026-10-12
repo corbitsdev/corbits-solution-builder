@@ -67,8 +67,10 @@ export { HostError, ERROR_CODES, type ErrorCode } from "./errors.js";
 /** Reachability from other devices on the local network (#887). */
 export {
   applyNetworkAccess,
+  ensureNetworkCertificate,
   lanAddresses,
   networkAccessFile,
+  networkCertificateFiles,
   networkAccessStatus,
   readNetworkAccess,
   registerLanListener,
@@ -78,6 +80,8 @@ export {
   type LanListener,
   type NetworkAccess,
   type NetworkAccessStatus,
+  type NetworkCertificate,
+  type OpensslRunner,
 } from "./network-access.js";
 /** The Google Drive connection a product host mounts beside its own routes (#233). */
 export {

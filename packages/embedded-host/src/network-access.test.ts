@@ -1,19 +1,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostIdentity, initHost } from "./identity.js";
 import {
   applyNetworkAccess,
   DEFAULT_NETWORK_ACCESS,
+  ensureNetworkCertificate,
   lanAddresses,
   networkAccessFile,
+  networkCertificateFiles,
   networkAccessStatus,
   readNetworkAccess,
   registerLanListener,
   saveNetworkAccess,
   setNetworkAccess,
   type LanListener,
+  type NetworkCertificate,
+  type OpensslRunner,
 } from "./network-access.ts";
 
 let root = "";
@@ -71,14 +75,29 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+/** Stands in for openssl: writes a cert and key where asked, prints a fingerprint. */
+let minted = 0;
+const fakeOpenssl: OpensslRunner = async (args) => {
+  if (args[0] === "req") {
+    minted += 1;
+    await writeFile(args[args.indexOf("-keyout") + 1]!, `KEY ${String(minted)}\n`);
+    await writeFile(args[args.indexOf("-out") + 1]!, `CERT ${String(minted)}\n`);
+    return "";
+  }
+  if (args[0] === "x509") return `SHA256 Fingerprint=aa:bb:${String(minted).padStart(2, "0")}\n`;
+  throw new Error(`unexpected openssl ${args.join(" ")}`);
+};
+
 /** A listener that records what it was asked, binding `bound` for a start. */
-function fakeListener(bound: (asked: number) => number): LanListener & { calls: string[] } {
+function fakeListener(bound: (asked: number) => number): LanListener & { calls: string[]; served: NetworkCertificate | null } {
   let port: number | null = null;
   const calls: string[] = [];
-  return {
+  const self = {
     calls,
-    async start(asked) {
+    served: null as NetworkCertificate | null,
+    async start(asked: number, certificate: NetworkCertificate) {
       calls.push(`start:${String(asked)}`);
+      self.served = certificate;
       port = bound(asked);
       return port;
     },
@@ -87,8 +106,9 @@ function fakeListener(bound: (asked: number) => number): LanListener & { calls: 
       port = null;
     },
     port: () => port,
-    launchUrl: (host, on) => `http://${host}:${String(on)}/?token=tok`,
+    launchUrl: (host: string, on: number) => `https://${host}:${String(on)}/?token=tok`,
   };
+  return self;
 }
 
 describe("network access settings", () => {
@@ -124,29 +144,59 @@ describe("lanAddresses", () => {
   });
 });
 
+describe("the network certificate", () => {
+  test("minted once for this computer's addresses and loopback, read back while they hold, minted again when they change", async () => {
+    const first = await ensureNetworkCertificate(["192.168.1.20", "10.0.0.5"], fakeOpenssl);
+    expect(first.addresses).toEqual(["10.0.0.5", "127.0.0.1", "192.168.1.20"]);
+    expect(first.cert).toBe("CERT 1\n");
+    expect(first.fingerprint).toBe("AA:BB:01");
+    const files = networkCertificateFiles();
+    expect(JSON.parse(await readFile(files.meta, "utf8")).addresses).toEqual(first.addresses);
+    // The same addresses in another order: the certificate on disk.
+    const again = await ensureNetworkCertificate(["10.0.0.5", "192.168.1.20"], fakeOpenssl);
+    expect(again).toEqual(first);
+    const moved = await ensureNetworkCertificate(["172.16.0.9"], fakeOpenssl);
+    expect(moved.cert).toBe("CERT 2\n");
+    expect(moved.addresses).toEqual(["127.0.0.1", "172.16.0.9"]);
+  });
+
+  test("the real openssl mints a certificate naming the addresses, when it is on this computer", async () => {
+    if (!Bun.which("openssl")) return;
+    const certificate = await ensureNetworkCertificate(["203.0.113.7"]);
+    expect(certificate.cert).toContain("BEGIN CERTIFICATE");
+    expect(certificate.key).toContain("PRIVATE KEY");
+    expect(certificate.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    const text = Bun.spawnSync(["openssl", "x509", "-in", networkCertificateFiles().cert, "-noout", "-text"]).stdout.toString();
+    expect(text).toContain("IP Address:203.0.113.7");
+    expect(text).toContain("IP Address:127.0.0.1");
+  });
+});
+
 describe("applying the setting to the listener", () => {
-  test("on brings the listener up on the remembered port, and the port it bound is remembered", async () => {
+  test("on brings the listener up on the remembered port with a certificate, and the port it bound is remembered", async () => {
     const listener = fakeListener((asked) => (asked === 40123 ? 40124 : asked));
     registerLanListener(listener);
     await saveNetworkAccess({ lan: true, lanPort: 40123 });
-    const status = await applyNetworkAccess();
+    const status = await applyNetworkAccess(fakeOpenssl);
     expect(listener.calls).toEqual(["start:40123"]);
+    expect(listener.served?.addresses).toEqual([...new Set([...lanAddresses(), "127.0.0.1"])].sort());
     expect(status.lan).toBe(true);
     expect(status.port).toBe(40124);
+    expect(status.fingerprint).toBe(listener.served?.fingerprint ?? null);
     expect((await readNetworkAccess()).lanPort).toBe(40124);
-    // Already up: nothing more is started.
-    await applyNetworkAccess();
+    // Already up, same addresses: nothing more is started.
+    await applyNetworkAccess(fakeOpenssl);
     expect(listener.calls).toEqual(["start:40123"]);
-    for (const entry of status.addresses) expect(entry.url).toBe(`http://${entry.address}:40124/?token=tok`);
+    for (const entry of status.addresses) expect(entry.url).toBe(`https://${entry.address}:40124/?token=tok`);
   });
 
   test("off brings it down, and the status says so with no addresses", async () => {
     const listener = fakeListener((asked) => asked || 5000);
     registerLanListener(listener);
-    await listener.start(40124);
-    const status = await setNetworkAccess({ lan: false });
-    expect(listener.calls).toEqual(["start:40124", "stop"]);
-    expect(status).toEqual({ lan: false, port: null, addresses: [] });
+    await applyNetworkAccess(fakeOpenssl);
+    const status = await setNetworkAccess({ lan: false }, fakeOpenssl);
+    expect(listener.calls.at(-1)).toBe("stop");
+    expect(status).toEqual({ lan: false, port: null, addresses: [], fingerprint: null });
   });
 
   test("a listener that cannot start leaves the setting off, and the failure is the answer", async () => {
@@ -158,14 +208,14 @@ describe("applying the setting to the listener", () => {
       port: () => null,
       launchUrl: () => "",
     });
-    await expect(setNetworkAccess({ lan: true })).rejects.toThrow("could not listen on the network: EACCES");
+    await expect(setNetworkAccess({ lan: true }, fakeOpenssl)).rejects.toThrow("could not listen on the network: EACCES");
     expect((await readNetworkAccess()).lan).toBe(false);
   });
 
   test("without a listener registered the setting is only remembered", async () => {
     registerLanListener(null);
-    const status = await setNetworkAccess({ lan: true });
-    expect(status).toEqual({ lan: true, port: null, addresses: [] });
+    const status = await setNetworkAccess({ lan: true }, fakeOpenssl);
+    expect(status).toEqual({ lan: true, port: null, addresses: [], fingerprint: null });
     await setNetworkAccess({ lan: false });
   });
 });
