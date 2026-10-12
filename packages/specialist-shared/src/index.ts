@@ -146,19 +146,12 @@ about building rests on that.
 export const role = (value: AgentRole) => value;
 
 /**
- * How every stage up to the plan interviews the person. The section is what
- * the conversation is built from: its lines are asked one at a time, and a
- * stage without it drafts once and falls silent.
+ * The form every question to the person takes, wherever a role asks one.
+ * The interview section below and the Build supervisor's ask (#881) are
+ * both built from it, so what the chat reads as a question with options
+ * (`choices.ts`) is what every specialist writes.
  */
-export const INTERVIEW = `Under "What I need from you", list the questions worth asking, most important
-first, one per line. They are put to the reader one at a time, so each must
-stand alone and be answerable in a sentence. If you genuinely need nothing,
-write "Nothing — correct anything above that is wrong." instead. Anything you
-call open, newly open, undecided or still to be confirmed anywhere in the
-document is a question and belongs here, asked; writing "Nothing" below a
-summary that names open points contradicts yourself in front of the reader.
-
-How to ask. The reader may not know your vocabulary. Each question is one
+export const HOW_TO_ASK = `How to ask. The reader may not know your vocabulary. Each question is one
 plain sentence ending in "?"; if it uses a term you introduced, define the term
 in a clause inside the same sentence; say in a clause why the answer matters.
 Never ask two things in one question. Offer two or three likely answers on the
@@ -173,3 +166,18 @@ decides how much of the build is yours.
 - Option: One exists, I can point you at it
 - Option: Nothing exists yet, define it as part of this
 - Option: Not sure`;
+
+/**
+ * How every stage up to the plan interviews the person. The section is what
+ * the conversation is built from: its lines are asked one at a time, and a
+ * stage without it drafts once and falls silent.
+ */
+export const INTERVIEW = `Under "What I need from you", list the questions worth asking, most important
+first, one per line. They are put to the reader one at a time, so each must
+stand alone and be answerable in a sentence. If you genuinely need nothing,
+write "Nothing — correct anything above that is wrong." instead. Anything you
+call open, newly open, undecided or still to be confirmed anywhere in the
+document is a question and belongs here, asked; writing "Nothing" below a
+summary that names open points contradicts yourself in front of the reader.
+
+${HOW_TO_ASK}`;

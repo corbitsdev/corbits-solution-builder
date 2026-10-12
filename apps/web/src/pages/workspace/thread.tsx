@@ -9,7 +9,7 @@ import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-promp
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { sendBackCueIdOf } from "./send-back-cue.ts";
@@ -312,7 +312,10 @@ export function StageConversation({
                       {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
                     </>
                   ) : message.id === answerableId && onAnswer ? (
-                    <SpecialistTurn text={text} note={null} onOpenVersion={onOpenVersion ?? NO_VERSION} onAnswer={onAnswer} busy={working} />
+                    // The whole turn, not its lead: what a headed turn asks
+                    // comes after its headings (#881), and the turn shows
+                    // only its lead and its questions either way.
+                    <SpecialistTurn text={source?.body ?? text} note={null} onOpenVersion={onOpenVersion ?? NO_VERSION} onAnswer={onAnswer} busy={working} />
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -458,10 +461,14 @@ export function SpecialistTurn({
     else onDraft(draft.text);
   };
   let questionIndex = -1;
-  // A draft's lead -- the sentence or two before its first heading -- is
-  // conversation and stays; the pointer that stands in when there is no
-  // lead is what the draft line already says.
-  const lead = draft ? conversationLead(text) : null;
+  // A headed turn -- a draft, or a status written under the kit's headings
+  // with no version to name (#881) -- shows its lead and what it asks; its
+  // headings and body stay in the document pane. The lead -- the sentence
+  // or two before the first heading -- is conversation and stays; the
+  // pointer that stands in when there is no lead is what the draft line
+  // already says.
+  const headed = draft !== null || isSubstantialDraft(text);
+  const lead = headed ? conversationLead(text) : null;
   return (
     <>
       {note ? (
@@ -478,7 +485,7 @@ export function SpecialistTurn({
       {draft ? <DraftReference draft={draft} onOpen={onOpenVersion} /> : null}
       {lead !== null && lead !== DRAFT_POINTER ? <Markdown source={lead} /> : null}
       {segments.map((segment, index) => {
-        if (segment.kind === "text") return draft ? null : <Markdown key={index} source={segment.markdown} />;
+        if (segment.kind === "text") return headed ? null : <Markdown key={index} source={segment.markdown} />;
         const at = ++questionIndex;
         const picked = chosen.get(at);
         return (

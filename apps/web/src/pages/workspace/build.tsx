@@ -45,7 +45,7 @@ const THREAD_BACKSTOP_MS = 20_000;
 const LOG_POLL_MS = 2_000;
 import { BuildFile, downloadBuild } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildArchives, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, statusFreshness, workerQuestions } from "./build-attempts.ts";
 import { briefSubject, isAppBrief } from "./composed-mail.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
@@ -460,6 +460,10 @@ export function BuildPanel({
           probeSkipped: probe.skipped,
           forecast,
           verification: packaged.verification,
+          // The attempt recorded is the one in view, so its report is this
+          // one's: what the worker left in QUESTIONS.md goes to the
+          // supervisor to put to the person (#881).
+          questions: workerQuestions(report?.questions ?? null),
           ...(repackaged ? { repackaged: true } : {}),
         }),
       });
@@ -528,6 +532,16 @@ export function BuildPanel({
             disabled={!address}
             events={stageEvents}
             who={agentFor(8).title}
+            // A tapped answer to the status's question goes to the
+            // supervisor, as typing it would (#881).
+            onAnswer={(answer) => {
+              setComposer("");
+              void run("message", async () => {
+                if (!address) return;
+                await api.sendStageMail(tenantId, address, { body: answer });
+                await load();
+              });
+            }}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
             popover={popover}

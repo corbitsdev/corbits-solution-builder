@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { archiveRootOf, manifestOf, attemptOfNode, attemptRecorded, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, progressBriefOf, statusFreshness, toolCallsSoFar } from "./build-attempts.ts";
+import { archiveRootOf, manifestOf, attemptOfNode, attemptRecorded, buildEvidenceState, composeProgressBrief, composeSupervisorBrief, forecastSection, latestTurn, probeDecision, progressBriefDue, progressBriefOf, statusFreshness, toolCallsSoFar, workerQuestions } from "./build-attempts.ts";
+import { QUESTIONS_MD } from "@solutions-builder/app/agents-instructions";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -142,6 +143,18 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("No forecast could be read from the Cost approval estimate");
   });
 
+  // #881: the decisions the worker left in QUESTIONS.md go to the
+  // supervisor, whose status puts them to the person as questions.
+  test("the worker's open decisions are carried, to be asked; none, and the section is absent", () => {
+    const questions = "## Q1 — Blocking: desktop dispatch conflicts with the approved iPhone product\n\nConfirm the iPhone target, or amend the plan.";
+    const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, verification: { complete: true, failed: [], targets: [] }, questions });
+    expect(brief).toContain("## Decisions the worker left to the person (its QUESTIONS.md)\n## Q1 — Blocking");
+    expect(brief).toContain('Put each of these to the person under "What I need from a human", as a question with its likely answers');
+    expect(brief.indexOf("Decisions the worker left")).toBeLessThan(brief.indexOf("## Cost approval forecast"));
+    const silent = composeSupervisorBrief({ attempt: 2, outcome, archive, verification: { complete: true, failed: [], targets: [] }, questions: null });
+    expect(silent).not.toContain("Decisions the worker left");
+  });
+
   test("stage 7's forecast is carried for the cost heading when it can be read", () => {
     const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, failed: [], targets: [] } });
     expect(brief).toContain("## Cost approval forecast\n- **Build:** $1,200");
@@ -181,6 +194,18 @@ const LOG = [
   "   wait_agents {\"targets\":[\"a\"],\"mode\":\"all\"}",
   "",
 ].join("\n");
+
+describe("workerQuestions", () => {
+  test("the template alone, or nothing, is nothing; what the worker added is what is carried", () => {
+    expect(workerQuestions(null)).toBeNull();
+    expect(workerQuestions("")).toBeNull();
+    expect(workerQuestions(QUESTIONS_MD)).toBeNull();
+    expect(workerQuestions(`${QUESTIONS_MD}\n`)).toBeNull();
+    expect(workerQuestions(`${QUESTIONS_MD}\n## Q1 — Which target?\n\nDesktop or iPhone.\n`)).toBe("## Q1 — Which target?\n\nDesktop or iPhone.");
+    // A worker that rewrote the file from scratch: the whole of it.
+    expect(workerQuestions("- Which target: desktop or iPhone?\n")).toBe("- Which target: desktop or iPhone?");
+  });
+});
 
 describe("latestTurn and toolCallsSoFar", () => {
   test("read the worker's own turn lines, and say null before the first", () => {
