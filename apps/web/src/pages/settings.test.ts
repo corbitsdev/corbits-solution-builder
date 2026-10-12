@@ -131,6 +131,9 @@ describe("settings page markup language", () => {
     expect(computer).toContain('label="Open elsewhere"');
     expect(computer).toContain("uses the workspace as you");
     expect(computer).toContain("Copy link");
+    // #889: the link is https on a certificate this computer issued; the row says what the device will show.
+    expect(computer).toContain("issued the certificate itself");
+    expect(computer).toContain("network.fingerprint");
     expect(page.indexOf("<NetworkAccess />")).toBeGreaterThan(page.indexOf('label="Connection"'));
     expect(page.indexOf("<NetworkAccess />")).toBeLessThan(page.indexOf('label="Credentials"'));
     expect(client).toContain('"/host/network"');
