@@ -29,6 +29,7 @@ import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubMode, remoteHubOrigin, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { sessionDoor } from "./door.js";
+import { applyNetworkAccess, registerLanListener } from "./network-access.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import {
   clientConnected,
@@ -333,9 +334,11 @@ export async function serveHost(options: ServeOptions): Promise<void> {
     app.route("/", hub().app);
   }
 
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port,
+  /** One handler for both listeners (#887): the loopback server's, and the network's while it is on. */
+  const serveOn = (hostname: string, on: number) =>
+    Bun.serve({
+    hostname,
+    port: on,
     idleTimeout: 240,
     websocket: hubWebSocket,
     async fetch(request, server) {
@@ -454,6 +457,37 @@ export async function serveHost(options: ServeOptions): Promise<void> {
     },
   });
 
+  const server = serveOn("127.0.0.1", port);
+
+  // Other devices on the local network (#887): a second listener on every
+  // interface, on its own remembered port, up while Settings says so. The
+  // loopback server above is what the window, the port file and the
+  // scripts reach, and it does not change.
+  let lan: ReturnType<typeof serveOn> | null = null;
+  registerLanListener({
+    async start(asked) {
+      if (lan) return lan.port!;
+      try {
+        lan = serveOn("0.0.0.0", asked);
+      } catch (cause) {
+        // The remembered port is taken: a free one, remembered in its place.
+        if (asked === 0) throw cause;
+        lan = serveOn("0.0.0.0", 0);
+      }
+      console.log(`${displayName} host on the network: port ${String(lan.port)}`);
+      return lan.port!;
+    },
+    async stop() {
+      if (!lan) return;
+      await lan.stop(true);
+      lan = null;
+      console.log(`${displayName} host off the network.`);
+    },
+    port: () => lan?.port ?? null,
+    launchUrl: (host, on) => `http://${host}:${String(on)}/?token=${token}`,
+  });
+  await applyNetworkAccess().catch((cause: unknown) => console.error("Could not listen on the network:", cause));
+
   startHeartbeat();
   markReady();
 
@@ -465,6 +499,8 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       // closed pglite fails, and logs as if placement had broken.
       if (hubIsMounted()) hub().stopReconcile();
       await options.onStop?.().catch((cause: unknown) => console.error("Stopping the product's own work failed:", cause));
+      registerLanListener(null);
+      await lan?.stop(true);
       await server.stop(true);
       await compaction.stop();
       await stopSpawnedSidecars(join(dataDirectory(), "hub")).catch(() => 0);

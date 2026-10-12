@@ -64,6 +64,21 @@ export {
   type HostState,
 } from "./lifecycle.js";
 export { HostError, ERROR_CODES, type ErrorCode } from "./errors.js";
+/** Reachability from other devices on the local network (#887). */
+export {
+  applyNetworkAccess,
+  lanAddresses,
+  networkAccessFile,
+  networkAccessStatus,
+  readNetworkAccess,
+  registerLanListener,
+  saveNetworkAccess,
+  setNetworkAccess,
+  DEFAULT_NETWORK_ACCESS,
+  type LanListener,
+  type NetworkAccess,
+  type NetworkAccessStatus,
+} from "./network-access.js";
 /** The Google Drive connection a product host mounts beside its own routes (#233). */
 export {
   mountGoogleDrive,
