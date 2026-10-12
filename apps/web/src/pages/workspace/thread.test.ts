@@ -31,6 +31,32 @@ const DESIGN = `<!doctype html>
 <style>:root { --surface: #f8fafc; --panel: #ffffff; --text: #111827; } body { margin: 0; background: var(--surface); color: var(--text); font-family: Arial, Helvetica, sans-serif; } button { min-height: 44px; min-width: 44px; border: 1px solid var(--line); border-radius: 10px; }</style></head>
 <body><main><h1>Design review</h1><section><h2>Projects</h2><p>Every project in one governed workspace.</p></section></main></body></html>`;
 
+// A Build supervisor's status (#881): headed like a draft, with no version
+// of its own to name, asking under "What I need from a human".
+const STATUS = [
+  "Attempt 1 ended without building anything: the worker stopped on the target question, which is yours.",
+  "",
+  "## In short",
+  "",
+  "- **No code was written**; the worker exited 0 after 9 turns.",
+  "- Every required check is **unknown**.",
+  "",
+  "## What the worker reported",
+  "",
+  "It read the packet, found the desktop target against the iPhone requirements, and stopped rather than choose; nothing is implemented, reviewed or documented.",
+  "",
+  "## What I need from a human",
+  "",
+  "Which target should the next attempt build for, given that the frozen record says desktop and every approved document says iPhone? It decides whether anything can be built.",
+  "",
+  "- Option: The iPhone app, the record is wrong",
+  "- Option: A desktop app, I will amend the requirements",
+  "",
+  "## Cost against forecast",
+  "",
+  "Nothing drawn against the envelope.",
+].join("\n");
+
 function render(messages: ChatMessage[]): string {
   return renderToStaticMarkup(
     createElement(StageConversation, {
@@ -114,10 +140,25 @@ describe("SpecialistTurn drafts", () => {
     expect(html).not.toContain("In short");
   });
 
-  test("a plain reply still shows in full", () => {
-    const html = render(null);
-    expect(html).toContain("In short");
-    expect(html).toContain("hour a day");
+  // #881: a status written under the kit's headings has no version to
+  // name, and is still not pasted into the chat: its lead and its question
+  // show, its headings and body stay in the pane.
+  test("a headed reply with no version to name shows its lead and its question, never its headings or body", () => {
+    const html = renderToStaticMarkup(createElement(SpecialistTurn, { text: STATUS, note: null, onOpenVersion: () => undefined, onAnswer: () => undefined }));
+    expect(html).toContain("stopped on the target question");
+    expect(html).not.toContain("In short");
+    expect(html).not.toContain("exited 0 after 9 turns");
+    expect(html).not.toContain("Cost against forecast");
+    expect(html).not.toContain("Drafted");
+    expect(html).toContain('class="turn-question"');
+    expect(html).toContain("Which target should the next attempt build for");
+    expect(html.match(/class="turn-option"/g)?.length).toBe(2);
+  });
+
+  test("a reply without headings still shows in full", () => {
+    const text = "Noted: the north region it is. I have folded that into the brief, and nothing else changed.";
+    const html = renderToStaticMarkup(createElement(SpecialistTurn, { text, note: null, onOpenVersion: () => undefined, onAnswer: () => undefined }));
+    expect(html).toContain("folded that into the brief");
     expect(html).not.toContain("Drafted");
   });
 });
@@ -160,6 +201,26 @@ describe("StageConversation offered choices", () => {
     expect(html).toContain('class="turn-option"');
     expect(html).toContain(">Just me<");
     expect(html).toContain("Someone else approves (I&#x27;ll name them)");
+  });
+
+  // #881: Build and test's status is headed, and the chat showed only its
+  // first paragraph, so what it asked under "What I need from a human"
+  // was never offered. The latest status now shows its lead and its
+  // question with options; its headings stay in the pane.
+  test("a headed status as the latest turn shows its lead and its question with options, not its headings", () => {
+    const status: ChatMessage = { id: "s1", author: "agent", body: STATUS, at: "2026-10-11T13:00:00Z" };
+    const html = render([status], { stage: 8, onAnswer: () => {} });
+    expect(html).toContain("stopped on the target question");
+    expect(html).toContain('class="turn-question"');
+    expect(html).toContain("Which target should the next attempt build for");
+    expect(html.match(/class="turn-option"/g)?.length).toBe(2);
+    expect(html).not.toContain("In short");
+    expect(html).not.toContain("Cost against forecast");
+    // Without a way to answer, the lead alone, as before.
+    const plain = render([status], { stage: 8 });
+    expect(plain).toContain("stopped on the target question");
+    expect(plain).not.toContain("turn-option");
+    expect(plain).not.toContain("Which target should");
   });
 
   test("without onAnswer, or once the person has spoken, the list stays a list", () => {

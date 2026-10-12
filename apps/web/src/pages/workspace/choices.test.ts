@@ -52,6 +52,22 @@ describe("segmentsIn", () => {
   });
 });
 
+// #881: the Build supervisor's "What I need from a human". Numbered tasks
+// under it are not a question, which is why its prompt carries the ask
+// form; in that form the question is found under the heading.
+describe("segmentsIn on a build status", () => {
+  const lead = ["Interim status: the worker has paused on the target conflict.", "", "## In short", "", "- **Still running**, 6 turns.", "", "## What I need from a human", ""];
+  test("numbered tasks with no question above them are prose, not options", () => {
+    const text = [...lead, "1. **Resolve the target now.** The frozen record says desktop; every approved artifact is an iPhone app.", "2. The two inputs from the opening status still stand: **seed photos** and your **Anthropic key**."].join("\n");
+    expect(segmentsIn(text).filter((segment) => segment.kind === "question")).toEqual([]);
+  });
+  test("a question in the ask form under the heading is found with its options", () => {
+    const text = [...lead, "Which target should the next attempt build for? It decides whether anything can be built.", "", "- Option: The iPhone app, the record is wrong", "- Option: A desktop app, I will amend the requirements"].join("\n");
+    const questions = segmentsIn(text).filter((segment) => segment.kind === "question");
+    expect(questions).toEqual([{ kind: "question", question: "Which target should the next attempt build for? It decides whether anything can be built.", options: ["The iPhone app, the record is wrong", "A desktop app, I will amend the requirements"] }]);
+  });
+});
+
 describe("answerText", () => {
   test("a lone question's option is sent exactly as offered", () => {
     expect(answerText("Which one?", "Hosted service", false)).toBe("Hosted service");

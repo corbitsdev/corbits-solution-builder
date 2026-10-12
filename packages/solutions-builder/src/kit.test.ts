@@ -3,6 +3,7 @@ import { agentById, agentFor } from "./kit.js";
 import { STACK_BLOCK_SHAPE } from "./stack.js";
 import { STAKEHOLDER_INTERVIEW_BLOCK_SHAPE, STAKEHOLDERS_BLOCK_SHAPE } from "./stakeholder-roles.js";
 import { SELECTABLE_TARGETS } from "./targets.js";
+import { HOW_TO_ASK, INTERVIEW } from "@solutions-builder/specialist-shared";
 
 describe("Experience designer prompt", () => {
   test("requires the mockup to fit the width it is read at, not a wide monitor", () => {
@@ -123,5 +124,23 @@ describe("Presentation creator interview rule", () => {
     expect(prompt).toContain(STAKEHOLDER_INTERVIEW_BLOCK_SHAPE);
     expect(prompt).toContain("say the packages can be generated now");
     expect(prompt).toContain("The interview happens here, at Concept approval, once per\napprover");
+  });
+});
+
+// #881: the supervisor's "What I need from a human" was a numbered list of
+// tasks, which the chat cannot offer as choices. It asks in the same form
+// as every interviewing stage, so its questions show with their options.
+describe("Build supervisor ask rule", () => {
+  test("asks under its heading in the shared form, says what buttons do as next steps, and carries the worker's questions", () => {
+    const prompt = agentById("build-supervisor")!.system;
+    expect(prompt).toContain('Under "What I need from a human", ask.');
+    expect(prompt).toContain(HOW_TO_ASK);
+    expect(prompt).toContain("A question the worker left in its final text or its QUESTIONS.md is\nput here the same way");
+    expect(prompt).toContain("is said as the next step, never asked");
+  });
+
+  test("the interviewing stages' section is built from the same form", () => {
+    expect(INTERVIEW).toContain(HOW_TO_ASK);
+    expect(agentById("brainstormer")!.system).toContain(INTERVIEW);
   });
 });

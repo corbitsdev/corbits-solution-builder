@@ -643,7 +643,9 @@ The toolbar shows only the buttons that can act right now:
   conversation on the left goes to the Build supervisor, not the worker.
 - **Record attempt N and brief the supervisor** packages the attempt's
   directory into a `.tar.gz` archive, records it as the build evidence, and
-  asks the Build supervisor to write the build status.
+  asks the Build supervisor to write the build status. What the status
+  needs from you shows in the conversation as questions with likely
+  answers; the status itself is in the pane.
 - **Download attempt N's archive (.tar.gz)** saves that archive.
 - **Approve and continue** appears once an archive is recorded and nothing
   is running.
@@ -654,8 +656,11 @@ lifecycle hook (Corbits Code) also reports each turn and the tools it
 called. The **Build progress** section shows a headline, the attempt's
 directory on disk, a meter of the plan's tasks, and whether the worker left
 a `README.md`, a `docs/USER-MANUAL.md`, a `STATUS.md`, and a `QUESTIONS.md`
-of decisions it left to you. Answer those through the note on the next
-attempt.
+of decisions it left to you. Once the attempt is recorded, the Build
+supervisor puts those decisions to you in the conversation as questions
+with likely answers, as every other stage does; a tapped or typed answer
+goes to the supervisor. What the worker itself reads on the next attempt
+is the note under the toolbar.
 
 When the worker ends, its exit status is shown but is not a verdict. Read
 what it left, and record the attempt, try again, or continue from it. The

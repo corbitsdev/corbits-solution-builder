@@ -15,6 +15,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
+import { QUESTIONS_MD } from "@solutions-builder/app/agents-instructions";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
 import { keys } from "../../queries/keys.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -83,6 +84,8 @@ export type SupervisorBriefInput = {
   };
   /** True when this record replaces an earlier one of the same attempt (#727). */
   readonly repackaged?: boolean;
+  /** What the worker left in QUESTIONS.md (`workerQuestions`); null when nothing. */
+  readonly questions?: string | null;
 };
 
 /** Where the package step's target probes ran: on the host, with the start command the person typed. */
@@ -173,12 +176,35 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     `- Deterministic checks: ${input.verification.complete ? "complete" : `incomplete — not verified: ${input.verification.failed.join(", ") || "(unnamed)"}`}.`,
     targets,
     ``,
+    ...(input.questions?.trim()
+      ? [
+          ``,
+          `## Decisions the worker left to the person (its QUESTIONS.md)`,
+          input.questions.trim(),
+          ``,
+          `Put each of these to the person under "What I need from a human", as a question with its likely answers; they answer from the conversation.`,
+        ]
+      : []),
+    ``,
     `## Cost approval forecast`,
     input.forecast?.trim()
       ? input.forecast.trim()
       : "No forecast could be read from the Cost approval estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
     `The worker's own cost is not reported by its interface; say so if you cannot read it from its final text.`,
   ].join("\n");
+}
+
+/**
+ * What the worker wrote into QUESTIONS.md (#881): the file less the template
+ * it was given, or null when it added nothing. The worker is told to record
+ * there every product decision it must not make itself; the supervisor is
+ * briefed with them so its status asks the person.
+ */
+export function workerQuestions(questions: string | null): string | null {
+  if (!questions) return null;
+  const rest = questions.startsWith(QUESTIONS_MD) ? questions.slice(QUESTIONS_MD.length) : questions;
+  const text = rest.trim();
+  return text.length > 0 && text !== QUESTIONS_MD.trim() ? text : null;
 }
 
 /** How often the host's attempts are re-read while one is running, and otherwise. */
