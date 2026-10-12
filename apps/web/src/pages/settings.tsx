@@ -29,6 +29,7 @@ import {
   type DesignerSettings,
   type GoogleDriveStatus,
   type HostStatus,
+  type NetworkAccessStatus,
   type Provider,
 } from "../client.js";
 import { Banner, StateLabel } from "../components.jsx";
@@ -890,6 +891,81 @@ function GoogleDrive() {
   );
 }
 
+/**
+ * Whether other devices on the local network can reach the host (#887):
+ * off until turned on, applied the moment it is, with the link to open on
+ * the other device shown while it is on. The link carries the session
+ * token, as the launch URL does, so the row says what that means.
+ */
+function NetworkAccess() {
+  const [network, setNetwork] = useState<NetworkAccessStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .hostNetwork()
+      .then(setNetwork)
+      .catch((cause: unknown) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
+  }, []);
+
+  const save = async (lan: boolean) => {
+    setError(null);
+    try {
+      setNetwork(await api.setHostNetwork({ lan }));
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      // The host leaves the setting off when it cannot listen; show that.
+      await api.hostNetwork().then(setNetwork).catch(() => undefined);
+    }
+  };
+
+  const copy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(url);
+    } catch {
+      setCopied(null);
+    }
+  };
+
+  return (
+    <>
+      {error ? <Banner tone="error" title={error} /> : null}
+      <Row label="On this network" hint="Off, only this computer reaches the host. On, other devices on the same network can, at the address below.">
+        <SegCtl<"on" | "off">
+          label="On this network"
+          value={network?.lan ? "on" : "off"}
+          disabled={!network}
+          onChange={(value) => void save(value === "on")}
+          options={[
+            { id: "on", label: "On" },
+            { id: "off", label: "Off" },
+          ]}
+        />
+      </Row>
+      {network?.lan ? (
+        <Row label="Open elsewhere" hint="Anyone with this link uses the workspace as you. Your computer's firewall may ask to allow incoming connections.">
+          <span className="v">
+            {network.addresses.length === 0 ? (
+              "This computer has no network address right now."
+            ) : (
+              network.addresses.map((entry) => (
+                <span key={entry.address} className="network-address">
+                  <code>{entry.url}</code>{" "}
+                  <button type="button" className="btn link" onClick={() => void copy(entry.url)}>
+                    {copied === entry.url ? "Copied" : "Copy link"}
+                  </button>
+                </span>
+              ))
+            )}
+          </span>
+        </Row>
+      ) : null}
+    </>
+  );
+}
+
 function ThisComputer({ status }: { status: HostStatus | null }) {
   return (
     <Section title="This computer" lead="The host does the work. This window is only how you watch it.">
@@ -899,6 +975,7 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
             <span className="v">{hostConnectionCopy(status)}</span>
           </Row>
         ) : null}
+        <NetworkAccess />
         {status ? (
           <Row label="Credentials">
             <span className="v">{hostCredentialsCopy(status)}</span>

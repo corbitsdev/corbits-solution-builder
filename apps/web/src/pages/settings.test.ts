@@ -120,6 +120,24 @@ describe("settings page markup language", () => {
     expect(page).not.toContain("set_start_at_login");
   });
 
+  // #887: reachability from other devices is a This computer row, saved
+  // and applied by the host, with the link to open elsewhere while it is on.
+  test("This computer offers the network toggle, and the link to open elsewhere while it is on", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const client = await Bun.file(new URL("../client.ts", import.meta.url)).text();
+    const host = await Bun.file(new URL("../../../hub/src/api-host.ts", import.meta.url)).text();
+    const computer = page.slice(page.indexOf("function NetworkAccess"), page.indexOf("function ThisComputer"));
+    expect(computer).toContain('label="On this network"');
+    expect(computer).toContain('label="Open elsewhere"');
+    expect(computer).toContain("uses the workspace as you");
+    expect(computer).toContain("Copy link");
+    expect(page.indexOf("<NetworkAccess />")).toBeGreaterThan(page.indexOf('label="Connection"'));
+    expect(page.indexOf("<NetworkAccess />")).toBeLessThan(page.indexOf('label="Credentials"'));
+    expect(client).toContain('"/host/network"');
+    expect(host).toContain('api.get("/host/network"');
+    expect(host).toContain('api.put("/host/network"');
+  });
+
   test("inference is one section-body of provider rows, with no catalog card", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
     const inference = page.slice(page.indexOf("function Inference"), page.indexOf("/* ----------------------------------------------------------------- designer"));
