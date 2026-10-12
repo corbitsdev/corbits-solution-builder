@@ -12,8 +12,12 @@ import {
   sidecarFacts,
   storeSecret,
   mountGoogleDrive,
+  networkAccessStatus,
+  setNetworkAccess,
   type GoogleSecretStore,
 } from "@corbits/embedded-host";
+import { type } from "arktype";
+import { parsed } from "./validation.js";
 
 /**
  * The Google Drive connection's client and tokens live in the OS keychain
@@ -34,10 +38,22 @@ export const keychainSecretStore: GoogleSecretStore = {
 
 export const API_VERSION = "1";
 
+const NetworkPatch = type({ "lan?": "boolean" });
+
 export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keychainSecretStore) {
   // One click from a stakeholder's slides to Google Slides: the connection
   // and the upload live here, so nothing of Google's reaches the browser.
   mountGoogleDrive(api, hostIdentity().oauthPageCopy, secrets);
+
+  // Whether other devices on the local network can reach this host (#887):
+  // the toggle Settings shows under This computer, and the addresses to
+  // open elsewhere while it is on. A save applies at once.
+  api.get("/host/network", async (context) => context.json(await networkAccessStatus()));
+
+  api.put("/host/network", async (context) => {
+    const patch = parsed(NetworkPatch(await context.req.json().catch(() => ({}))));
+    return context.json(await setNetworkAccess(patch));
+  });
 
   api.get("/status", async (context) => {
     // Connected inference is read straight from the hub catalog routes by

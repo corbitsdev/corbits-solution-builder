@@ -367,6 +367,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, payload?: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(payload ?? {}) });
 
+/** `GET /api/host/network`: whether other devices on the network can reach the host, and where (#887). */
+export type NetworkAccessStatus = {
+  lan: boolean;
+  /** The network listener's port while it is up; null when it is not. */
+  port: number | null;
+  /** This computer's network addresses, each with the link that signs a device in there; empty while off. */
+  addresses: { address: string; url: string }[];
+};
+
 export type HostStatus = {
   apiVersion: string;
   host: {
@@ -1278,6 +1287,8 @@ async function stageGuidance(transport: ReturnType<typeof createHubTransport>, w
 export const api = {
   status: () => request<HostStatus>("/status"),
   /** The build lane: the chosen worker, whether it is on this host, and how to get it when not. */
+  hostNetwork: () => request<NetworkAccessStatus>("/host/network"),
+  setHostNetwork: (patch: { lan: boolean }) => request<NetworkAccessStatus>("/host/network", { method: "PUT", body: JSON.stringify(patch) }),
   buildWorker: () => request<BuildWorkerStatus>("/build/worker"),
   setBuildWorker: (patch: { worker?: string; executable?: string }) =>
     request<BuildWorkerStatus>("/build/worker", { method: "PUT", body: JSON.stringify(patch) }),
