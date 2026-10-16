@@ -47,13 +47,22 @@ export async function readSidecarProcess(unitDir: string): Promise<SidecarProces
  * change between them.
  */
 export function processStartedAt(pid: number): string | null {
-  const ps = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
+  // The state comes first: a zombie -- exited, its parent yet to reap it --
+  // still answers `ps` with its start time and `kill(pid, 0)` with success,
+  // but no process runs at that pid (#898). Only the rest of the line is the
+  // start time, kept as `ps` prints it: a single-digit day is padded with
+  // two spaces, and `sidecar.start` files already hold it that way.
+  const ps = Bun.spawnSync(["ps", "-o", "stat=", "-o", "lstart=", "-p", String(pid)], {
     env: { ...process.env, TZ: "UTC" },
     stdout: "pipe",
     stderr: "ignore",
   });
-  const startedAt = ps.stdout.toString().trim();
-  return ps.exitCode === 0 && startedAt !== "" ? startedAt : null;
+  const line = ps.stdout.toString().trim();
+  if (ps.exitCode !== 0 || line === "") return null;
+  const state = line.slice(0, line.search(/\s|$/));
+  if (state.startsWith("Z")) return null;
+  const startedAt = line.slice(state.length).trim();
+  return startedAt === "" ? null : startedAt;
 }
 
 /** Whether any process is left in the group led by pid. */
