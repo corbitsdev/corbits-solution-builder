@@ -647,11 +647,13 @@ The toolbar shows only the buttons that can act right now:
   ended attempt's directory, commits included, with your note in its packet.
   The note goes in the box labeled "For the worker, on the next attempt".
   The conversation on the left goes to the Build supervisor, not the worker.
-- **Record attempt N and brief the supervisor** packages the attempt's
-  directory into a `.tar.gz` archive, records it as the build evidence, and
-  asks the Build supervisor to write the build status. What the status
-  needs from you shows in the conversation as questions with likely
-  answers; the status itself is in the pane.
+- **Save attempt N's build and get its status report** packages the
+  attempt's files into a `.tar.gz` archive, saves it as the project's build
+  (the build evidence), and has the Build supervisor write the build status.
+  Anything the build left for you to decide shows in the conversation as
+  questions with likely answers; the status itself is in the pane. Once a
+  build is saved the button reads **Save attempt N's build again**, which
+  packages the same files afresh without building anything.
 - **Download attempt N's archive (.tar.gz)** saves that archive.
 - **Approve and continue** appears once an archive is recorded and nothing
   is running.
@@ -672,9 +674,9 @@ When the worker ends, its exit status is shown but is not a verdict. Read
 what it left, and record the attempt, try again, or continue from it. The
 same four panel reviews are available here against the build evidence.
 
-Optional **Start command** and **Port** fields tell the record step how to
-start the built software and which port to probe. Left blank, the brief
-says the target was not probed.
+Optional **Start command** and **Port** fields tell the save step how to
+start the built software and which port to check. Left blank, the status
+report says the built app was not started.
 
 ### Deliver
 
