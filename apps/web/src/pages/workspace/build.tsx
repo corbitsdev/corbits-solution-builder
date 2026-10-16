@@ -554,7 +554,7 @@ export function BuildPanel({
       {reader ?? (
         <div className="stage-inner">
           <div className="doc">
-            <h1>Build Evidence</h1>
+            <h1>Build Progress</h1>
             <div className="docmeta">
               <span>
                 <StateLabel tone={state.tone}>{state.label}</StateLabel>
@@ -698,7 +698,7 @@ export function BuildPanel({
             ) : null}
             {current ? (
               <>
-                <h2>Build progress</h2>
+                <h2>Progress of this attempt</h2>
                 <p className="build-headline">{progressHeadline(current, progress)}</p>
                 <p className="inline-note build-directory">
                   Attempt {String(current.attempt)}'s directory on this computer: <code>{current.workspace}</code>
