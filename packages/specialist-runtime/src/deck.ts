@@ -293,8 +293,25 @@ export function lookOf(design: DeckDesign, theme?: TemplateTheme): DeckLook {
   };
 }
 
+/** PNG bytes as the `data:` payload `addImage` takes. Portable across the
+ *  runtimes `renderDeck` runs in: Node's `Buffer` where it exists (the
+ *  sidecar, Bun tests), chunked `btoa` where it does not (the browser, where
+ *  `Buffer` is undefined and `String.fromCharCode`'s spread would blow the
+ *  stack on a large picture unchunked). */
 function pngData(bytes: Uint8Array): string {
-  return `image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+  const maybeBuffer = (globalThis as { readonly Buffer?: { from(data: Uint8Array): { toString(encoding: string): string } } }).Buffer;
+  const base64 =
+    maybeBuffer !== undefined
+      ? maybeBuffer.from(bytes).toString("base64")
+      : (() => {
+          let binary = "";
+          const chunk = 0x8000;
+          for (let offset = 0; offset < bytes.length; offset += chunk) {
+            binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+          }
+          return btoa(binary);
+        })();
+  return `image/png;base64,${base64}`;
 }
 
 /** The deck as PowerPoint bytes: a title slide, one slide per outline item, and the decision request. */
@@ -383,7 +400,11 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
     itemSlide(DECISION_SLIDE_TITLE, deck.decision, null, undefined, deck.slides.length + 2);
   }
 
-  const out = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+  // `arraybuffer`, not `nodebuffer`: the latter throws "nodebuffer is not
+  // supported by this platform" wherever Node's `Buffer` is unavailable (the
+  // browser export path, the workflow-child sandbox), while `arraybuffer`
+  // works in every runtime JSZip supports.
+  const out = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer;
   return new Uint8Array(out);
 }
 
