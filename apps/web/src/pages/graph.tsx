@@ -462,8 +462,8 @@ export function BuildFile({
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive{node.sizeBytes === undefined ? "" : ` · about ${formatSize(node.sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
-        without installed dependencies.{unpacks} Its bytes are what delivery review verifies once accepted.{caveat ? ` ${caveat}` : ""}
+        {node.title} · tar.gz archive{node.sizeBytes === undefined ? "" : ` · about ${formatSize(node.sizeBytes)}`}. The attempt's files exactly as the worker left them,
+        without installed dependencies.{unpacks} This exact archive is what Deliver checks once you accept it.{caveat ? ` ${caveat}` : ""}
       </p>
       {withButton ? (
         <div className="button-row">

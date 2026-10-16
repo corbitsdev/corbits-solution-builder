@@ -129,7 +129,7 @@ export function ArtifactStrip({
         type="button"
         className="artifact-strip-scroll is-left"
         hidden={!overflow.left}
-        aria-label="Show earlier artifacts"
+        aria-label="Show earlier documents"
         onClick={() => scrollBy(-1)}
       >
         <ChevronLeft size={14} aria-hidden="true" />
@@ -137,7 +137,7 @@ export function ArtifactStrip({
       <Tabs
         className="artifact-strip-tabs"
         scrollable
-        label="Project artifacts"
+        label="Project documents"
         active={selectedKey}
         onChange={onSelect}
         tabs={tabs.map((tab) => ({
@@ -153,7 +153,7 @@ export function ArtifactStrip({
         type="button"
         className="artifact-strip-scroll is-right"
         hidden={!overflow.right}
-        aria-label="Show more artifacts"
+        aria-label="Show more documents"
         onClick={() => scrollBy(1)}
       >
         <ChevronRight size={14} aria-hidden="true" />

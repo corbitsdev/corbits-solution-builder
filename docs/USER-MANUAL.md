@@ -281,7 +281,7 @@ The ring in the bottom-right corner shows progress through the nine stages.
 Hover it to see the stage and the next step. Click it to open the **What
 happens next** panel, which says where the project stands, what is being
 waited on, and what to do next. When the next step is somewhere else, a
-button takes you there: **Go to the decision queue**, **Open artifacts**,
+button takes you there: **Go to the decision queue**, **Open documents**,
 **Open settings**, or **Take me there**.
 
 **Where does this stand?** asks the product guide agent for a fuller
@@ -795,13 +795,13 @@ Open it from a card's **…** button or from the project title in the top
 bar.
 
 - **Project info…** opens a dialog with the name, when it was created, last
-  activity, where it stands, how many artifacts and runs it holds, its
+  activity, where it stands, how many documents and build attempts it holds, its
   usage, and a count of decisions. **Export…**, **Archive**, and **Save**
   sit at the bottom.
 - **Rename** opens the same dialog with the name field focused. Enter saves.
   Esc reverts.
 - **Settings…** opens this project's own settings: whether its slide decks
-  use the workspace's design documents, and its own design documents. See
+  also use the design documents from Settings, and its own design documents. See
   [Design documents](#design-documents).
 - **Download documents…** builds the document package.
 - **Export…** saves the project file.
@@ -916,7 +916,7 @@ it:
 
 The first file that carries a theme decides how the slides look. A project
 can add its own design documents from its menu under **Settings…**, and can
-turn the workspace's off for that project. A project's own documents always
+turn the shared ones from Settings off for that project. A project's own documents always
 apply and come first.
 
 ### Google Drive

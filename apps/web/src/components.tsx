@@ -466,7 +466,7 @@ export function GuideDock({
               {step.where === "decisions"
                 ? "Go to the decision queue"
                 : step.where === "artifacts"
-                  ? "Open artifacts"
+                  ? "Open documents"
                   : step.where === "settings"
                     ? "Open settings"
                     : "Take me there"}

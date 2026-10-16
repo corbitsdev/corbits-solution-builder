@@ -45,7 +45,7 @@ export function describeBinary(mediaType: string | null): { label: string; exten
 
 /** The download's name: the artifact's title, given the file's own extension once. */
 export function binaryFileName(title: string, extension: string | null): string {
-  const base = title.trim() || "artifact";
+  const base = title.trim() || "document";
   if (!extension) return base;
   return base.toLowerCase().endsWith(`.${extension}`) ? base : `${base}.${extension}`;
 }
