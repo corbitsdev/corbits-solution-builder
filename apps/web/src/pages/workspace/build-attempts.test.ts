@@ -34,7 +34,7 @@ describe("buildEvidenceState", () => {
   test("not ready with no archive at all", () => {
     const state = buildEvidenceState([], [{ attempt: 1, state: "ended" }]);
     expect(state.ready).toBe(false);
-    expect(state.reason).toContain("No build archive");
+    expect(state.reason).toContain("No build has been saved yet");
   });
 
   test("not ready before the host's attempts have been read: an empty list is not yet an answer", () => {
@@ -47,7 +47,7 @@ describe("buildEvidenceState", () => {
     expect(buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }])).toEqual({ ready: true, reason: null, waitingOn: null });
     // #791: a running attempt is named, in a sentence and in a few words.
     const running = buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }, { attempt: 3, state: "running" }]);
-    expect(running).toEqual({ ready: false, reason: "Attempt 3 is still running. Its work can be recorded once the worker has ended, and the stage approved after that.", waitingOn: "attempt 3, still running" });
+    expect(running).toEqual({ ready: false, reason: "Attempt 3 is still running. Save its build once it ends; then the stage can be approved.", waitingOn: "attempt 3, still running" });
   });
 
   test("a text/markdown node is chat prose, not the archive", () => {
@@ -63,8 +63,8 @@ describe("buildEvidenceState", () => {
   test("not ready when a later attempt ended and was not packaged", () => {
     const state = buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }, { attempt: 3, state: "ended" }]);
     expect(state.ready).toBe(false);
-    expect(state.reason).toContain("Attempt 3 has not been recorded yet");
-    expect(state.waitingOn).toBe("attempt 3 being recorded");
+    expect(state.reason).toContain("Attempt 3's build is not saved yet");
+    expect(state.waitingOn).toBe("attempt 3's build to be saved");
   });
 
   test("an archive that names no attempt is taken as the current one", () => {
@@ -273,12 +273,12 @@ describe("statusFreshness", () => {
   test("names an interim status by the turn its brief was as of", () => {
     const brief = { id: "b", author: "me" as const, body: composeProgressBrief({ attempt: 1, startedAt, now: "2026-10-04T20:00:00.000Z", log: LOG }), at: "2026-10-04T20:00:00.000Z" };
     const status = { id: "s", author: "agent" as const, body: "## In short", at: "2026-10-04T20:00:30.000Z" };
-    expect(statusFreshness([brief, status], status, attempt)).toMatch(/^interim, as of turn 2 · /);
+    expect(statusFreshness([brief, status], status, attempt)).toMatch(/^in progress · /);
   });
   test("names a status written on a recorded attempt", () => {
     const record = { id: "r", author: "me" as const, body: "Build attempt 1 has ended and its work is recorded. Write the build status from this record.", at: "2026-10-04T23:00:00.000Z" };
     const status = { id: "s", author: "agent" as const, body: "## In short", at: "2026-10-04T23:00:30.000Z" };
-    expect(statusFreshness([record, status], status, { ...attempt, state: "ended" })).toMatch(/^on attempt 1's record · /);
+    expect(statusFreshness([record, status], status, { ...attempt, state: "ended" })).toMatch(/^for attempt 1's saved build · /);
   });
   test("says when the status predates the attempt in view", () => {
     const opening = { id: "o", author: "me" as const, body: "Here is the frozen plan.", at: "2026-10-04T19:00:00.000Z" };

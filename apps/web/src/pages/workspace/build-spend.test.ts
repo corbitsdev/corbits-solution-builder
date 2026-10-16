@@ -39,9 +39,9 @@ describe("spendLine", () => {
   test("says tokens out and in and the estimate, with the breakdown and rates in the title", () => {
     const line = spendLine(attempt);
     expect(line.text).toBe("2.15M tokens out, 218.69M in · ≈ $428.52");
-    expect(line.title).toContain("3,266 inference calls: 2,150,153 tokens out; 21,163 in, 209,784,234 read from cache, 8,881,334 written to cache.");
+    expect(line.title).toContain("3,266 model calls: 2,150,153 tokens out, 218,686,731 in (209,784,234 of them re-read from earlier calls).");
     expect(line.title).toContain("Counted from every Corbits Code inference call on this computer");
-    expect(line.title).toContain("≈ $428.52 at claude-fable-5's list price: $10 in, $50 out, $1 cache read, $12.5 cache write, per million tokens.");
+    expect(line.title).toContain("≈ $428.52 at claude-fable-5's list price, whichever model made each call.");
   });
 
   test("without a price it says so instead of a figure", () => {
@@ -52,7 +52,7 @@ describe("spendLine", () => {
   });
 
   test("a single call is singular", () => {
-    expect(spendLine({ calls: 1, input: 5, output: 7, cacheRead: 0, cacheWrite: 0, source: "the log", models: [] }).title).toContain("1 inference call: 7 tokens out; 5 in");
+    expect(spendLine({ calls: 1, input: 5, output: 7, cacheRead: 0, cacheWrite: 0, source: "the log", models: [] }).title).toContain("1 model call: 7 tokens out, 5 in");
   });
 });
 

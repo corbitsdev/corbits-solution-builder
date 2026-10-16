@@ -615,8 +615,8 @@ The top of the document summarizes the estimate as a table of labels,
 amounts, and the basis for each, followed by a checklist of what was priced
 and the "How it will actually run" table.
 
-Approving authorizes the spend against this exact plan and **freezes the
-build packet**: the approved version of every earlier stage, the chosen
+Approving authorizes the spend against this exact plan and **freezes what
+the build is given**: the approved version of every earlier stage, the chosen
 target, and the plan's stack. The document then carries an "Approved ·
 frozen" badge and a line per frozen stage. Nothing frozen can change. To
 change it, send the project back to Cost approval or earlier, which clears
@@ -644,7 +644,8 @@ The toolbar shows only the buttons that can act right now:
 - **Restart the build from the beginning** starts a new attempt in a fresh
   directory. Earlier attempts' directories are kept.
 - **Start another attempt (N)** starts attempt N from a copy of the last
-  ended attempt's directory, commits included, with your note in its packet.
+  ended attempt's directory, commits included, with your note as its
+  instructions.
   The note goes in the box labeled "For the worker, on the next attempt".
   The conversation on the left goes to the Build supervisor, not the worker.
 - **Save attempt N's build and get its status report** packages the
@@ -664,14 +665,15 @@ lifecycle hook (Corbits Code) also reports each turn and the tools it
 called. The **Progress of this attempt** section shows a headline, the attempt's
 directory on disk, a meter of the plan's tasks, and whether the worker left
 a `README.md`, a `docs/USER-MANUAL.md`, a `STATUS.md`, and a `QUESTIONS.md`
-of decisions it left to you. Once the attempt is recorded, the Build
+of decisions it left to you. Once the build is saved, the Build
 supervisor puts those decisions to you in the conversation as questions
 with likely answers, as every other stage does; a tapped or typed answer
 goes to the supervisor. What the worker itself reads on the next attempt
 is the note under the toolbar.
 
-When the worker ends, its exit status is shown but is not a verdict. Read
-what it left, and record the attempt, try again, or continue from it. The
+When the worker ends, the page says whether it finished or stopped with an
+error, which is not a verdict. Read what it left, and save its build, try
+again, or continue from it. The
 same four panel reviews are available here against the build evidence.
 
 Optional **Start command** and **Port** fields tell the save step how to
@@ -1018,8 +1020,9 @@ your message was not delivered." A fresh specialist starts with the
 conversation so far, and your message is back in the box. Send it again
 once the specialist is ready.
 
-**"<Specialist> was started without the project's record."** Click **Brief
-the specialist now**. The stage cannot be approved until it has the record.
+**"<Specialist> started without the approved documents."** Click **Send the
+specialist the approved documents**. The stage cannot be approved until it
+has them.
 
 **"This project's workflow was updated, and one earlier decision no longer
 holds under the new rules."** The app's rules changed since that decision

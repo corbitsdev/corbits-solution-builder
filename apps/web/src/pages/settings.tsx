@@ -209,7 +209,7 @@ function BuildWorker() {
 
   const chosen = status?.workers.find((entry) => entry.id === status.settings.worker);
   return (
-    <Section title="Build worker" lead="The coding agent Build and test hands the frozen plan to. It runs on this computer, with your own configuration of that tool, and the build shows its final output and exit status and nothing more.">
+    <Section title="Build worker" lead="The coding agent Build and test hands the frozen plan to. It runs on this computer, with your own configuration of that tool, and you watch what it writes as it works.">
       <div className="section-body">
         {error ? <Banner tone="error" title={error} /> : null}
         <Row label="Tool" hint="Corbits Code is the default">

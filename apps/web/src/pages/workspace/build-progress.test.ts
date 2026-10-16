@@ -94,28 +94,28 @@ describe("taskProgress and progressHeadline", () => {
 
   test("says not finished while running, finished on a clean exit, and how far either way", () => {
     const progress = taskProgress(tasks, report, log);
-    expect(progressHeadline({ state: "running", outcome: null }, progress)).toBe("Not finished. The worker is still working, with commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5.");
+    expect(progressHeadline({ state: "running", outcome: null }, progress)).toBe("Not finished. The worker is still working, with 3 of 5 tasks committed, 1 in progress, and nothing yet for task 5.");
     expect(progressHeadline({ state: "ended", outcome: outcome({}) }, progress)).toBe(
-      "The worker finished: it exited 0 after 135 turns, with commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5. Whether the work is right is for the supervisor's status and your review.",
+      "The worker finished on its own after 135 steps, with 3 of 5 tasks committed, 1 in progress, and nothing yet for task 5. Whether the work is right is for the supervisor's status and your review.",
     );
     const all = taskProgress(tasks, { ...report, commits: [{ hash: "c", at: "", subject: "feat: all (Tasks 1-5)" }] }, "");
-    expect(progressHeadline({ state: "ended", outcome: outcome({}) }, all)).toMatch(/^Finished: it exited 0 after 135 turns, with commits for 5 of 5 tasks\./);
-    expect(progressHeadline({ state: "ended", outcome: outcome({ signal: "SIGTERM", exitStatus: null }) }, progress)).toMatch(/^Not finished\. The attempt was ended by SIGTERM, leaving commits for 3 of 5 tasks/);
-    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 1 }) }, progress)).toMatch(/^Not finished\. The worker stopped with exit status 1/);
-    expect(progressHeadline({ state: "lost", outcome: null }, progress)).toMatch(/^Not finished\. The host was stopped/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({}) }, all)).toMatch(/^Finished on its own after 135 steps, with 5 of 5 tasks committed\./);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ signal: "SIGTERM", exitStatus: null }) }, progress)).toMatch(/^Not finished\. The attempt was stopped, leaving 3 of 5 tasks committed/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 1 }) }, progress)).toMatch(/^Not finished\. The worker stopped with an error \(code 1\)/);
+    expect(progressHeadline({ state: "lost", outcome: null }, progress)).toMatch(/^Not finished\. The app was closed while the worker ran/);
   });
 
   // #781: who stopped the worker, when the host knows, and what 143 means when it does not.
   test("says the host's stop or a cancel ended the worker, and reads 143 as told to stop", () => {
     const progress = taskProgress(tasks, report, log);
     expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: "host_stop" }, progress)).toBe(
-      "Not finished. The host was stopped while the worker was running, which ended it, leaving commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5. Nothing went wrong with the work; a new attempt can continue from its directory, below.",
+      "Not finished. The app was closed while the worker was running, which stopped it, leaving 3 of 5 tasks committed, 1 in progress, and nothing yet for task 5. Nothing went wrong with the work; a new attempt can continue from its directory, below.",
     );
-    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: "cancel" }, progress)).toMatch(/^Not finished\. The attempt was cancelled, leaving commits for 3 of 5 tasks/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: "cancel" }, progress)).toMatch(/^Not finished\. The attempt was cancelled, leaving 3 of 5 tasks committed/);
     expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }) }, progress)).toMatch(
-      /^Not finished\. The worker was told to stop \(exit status 143, which is what a host stop or a cancel sends\), leaving commits for 3 of 5 tasks/,
+      /^Not finished\. The worker was stopped \(cancelled, or the app closed\), leaving 3 of 5 tasks committed/,
     );
-    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: null }, progress)).toMatch(/told to stop/);
+    expect(progressHeadline({ state: "ended", outcome: outcome({ exitStatus: 143 }), endedBy: null }, progress)).toMatch(/was stopped \(cancelled/);
   });
 
   // #791: a continuation inherits the earlier attempt's commits.
@@ -123,13 +123,13 @@ describe("taskProgress and progressHeadline", () => {
     const inherited = taskProgress(tasks, report, log, "2026-10-06T12:00:00Z");
     expect(inherited.newCommits).toBe(0);
     expect(progressHeadline({ state: "running", outcome: null, continuedFrom: 2, note: "fix the 404" }, inherited)).toBe(
-      "Not finished. Attempt continues from attempt 2, which left commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5; so far it has made 0 commits of its own, working on what you asked for, below.",
+      "Not finished. Attempt continues from attempt 2, which left 3 of 5 tasks committed, 1 in progress, and nothing yet for task 5; so far it has made 0 commits of its own, working on what you asked for, below.",
     );
     const added = taskProgress(tasks, { ...report, commits: [...report.commits, { hash: "d", at: "2026-10-06T13:00:00Z", subject: "fix: build the web bundle in dev (Task 2)" }] }, log, "2026-10-06T12:00:00Z");
     expect(added.newCommits).toBe(1);
     expect(progressHeadline({ state: "running", outcome: null, continuedFrom: 2, note: null }, added)).toMatch(/so far it has made 1 commit of its own\.$/);
     expect(progressHeadline({ state: "ended", outcome: outcome({}), continuedFrom: 2, note: "fix the 404" }, added)).toBe(
-      "The worker finished: it exited 0 after 135 turns, with commits for 3 of 5 tasks, 1 more named as under way, and none yet for task 5 and 1 commit of its own on top of attempt 2's. Whether the work is right is for the supervisor's status and your review, against what you asked for, below.",
+      "The worker finished on its own after 135 steps, with 3 of 5 tasks committed, 1 in progress, and nothing yet for task 5 and 1 commit of its own on top of attempt 2's. Whether the work is right is for the supervisor's status and your review, against what you asked for, below.",
     );
     // Without a start to count from, every commit is this attempt's.
     expect(taskProgress(tasks, report, log).newCommits).toBe(2);

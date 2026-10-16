@@ -53,17 +53,17 @@ export function buildEvidenceState(
   loaded = true,
 ): { ready: boolean; reason: string | null; waitingOn: string | null } {
   // `waitingOn` is the reason in a few words, for a footer (#791).
-  if (!loaded) return { ready: false, reason: "Reading the host's build attempts…", waitingOn: "the host's attempts" };
+  if (!loaded) return { ready: false, reason: "Loading the build attempts…", waitingOn: "the build attempts to load" };
   const archive = buildArchives(nodes)[0];
-  if (!archive) return { ready: false, reason: "No build archive has been recorded yet — package an ended attempt first.", waitingOn: "build evidence" };
+  if (!archive) return { ready: false, reason: "No build has been saved yet. When an attempt ends, save its build.", waitingOn: "a saved build" };
   const running = attempts.find((entry) => entry.state === "running" || entry.state === "detached");
   if (running) {
-    return { ready: false, reason: `Attempt ${String(running.attempt)} is still running. Its work can be recorded once the worker has ended, and the stage approved after that.`, waitingOn: `attempt ${String(running.attempt)}, still running` };
+    return { ready: false, reason: `Attempt ${String(running.attempt)} is still running. Save its build once it ends; then the stage can be approved.`, waitingOn: `attempt ${String(running.attempt)}, still running` };
   }
   const recordedFor = attemptOfNode(archive);
   const newest = attempts.reduce((max, entry) => Math.max(max, entry.attempt), 0);
   if (recordedFor !== null && newest > recordedFor) {
-    return { ready: false, reason: `Attempt ${String(newest)} has not been recorded yet; the recorded archive is attempt ${String(recordedFor)}'s.`, waitingOn: `attempt ${String(newest)} being recorded` };
+    return { ready: false, reason: `Attempt ${String(newest)}'s build is not saved yet; the saved build is attempt ${String(recordedFor)}'s.`, waitingOn: `attempt ${String(newest)}'s build to be saved` };
   }
   return { ready: true, reason: null, waitingOn: null };
 }
@@ -378,9 +378,9 @@ export function statusFreshness(
   const asked = index > 0 ? [...messages.slice(0, index)].reverse().find((message) => message.author === "me") : undefined;
   if (asked) {
     const brief = attempt ? progressBriefOf(asked, attempt.attempt) : null;
-    if (brief) return `interim, as of turn ${brief.turn === null ? "none" : String(brief.turn)} · ${zonedTime(status.at)}`;
+    if (brief) return `in progress · ${zonedTime(status.at)}`;
     const recorded = /^Build attempt (\d+) has ended/.exec(asked.body);
-    if (recorded) return `on attempt ${recorded[1]}'s record · ${zonedTime(status.at)}`;
+    if (recorded) return `for attempt ${recorded[1]}'s saved build · ${zonedTime(status.at)}`;
   }
   if (attempt?.startedAt && Date.parse(status.at) < Date.parse(attempt.startedAt)) {
     return `written before attempt ${String(attempt.attempt)} started · ${zonedTime(status.at)}`;

@@ -113,7 +113,7 @@ export function taskProgress(tasks: readonly PlanTask[], report: BuildWorkspaceR
     const commit = byCommit.get(task.number);
     if (commit) return { ...task, state: "committed", evidence: commit };
     if (inStatus.has(task.number)) return { ...task, state: "committed", evidence: "a section of the worker's STATUS.md" };
-    if (inLog.has(task.number)) return { ...task, state: "started", evidence: "named in the worker's turn lines" };
+    if (inLog.has(task.number)) return { ...task, state: "started", evidence: "mentioned in the worker's output" };
     return { ...task, state: "unnamed", evidence: null };
   });
   return {
@@ -142,7 +142,7 @@ export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome"
   const unnamed = progress.tasks.filter((task) => task.state === "unnamed").map((task) => task.number);
   const tally =
     total > 0
-      ? `commits for ${String(progress.committed)} of ${String(total)} tasks${progress.started > 0 ? `, ${String(progress.started)} more named as under way` : ""}${unnamed.length > 0 && unnamed.length <= 8 ? `, and none yet for ${unnamed.length === 1 ? "task" : "tasks"} ${list(unnamed)}` : ""}`
+      ? `${String(progress.committed)} of ${String(total)} tasks committed${progress.started > 0 ? `, ${String(progress.started)} in progress` : ""}${unnamed.length > 0 && unnamed.length <= 8 ? `, and nothing yet for ${unnamed.length === 1 ? "task" : "tasks"} ${list(unnamed)}` : ""}`
       : `${String(progress.commits)} commit${progress.commits === 1 ? "" : "s"} (the plan has no numbered task list to count against)`;
   // A continuation (#791) inherits the earlier attempt's commits, so the
   // tally is mostly not this attempt's doing: say what was inherited,
@@ -154,24 +154,24 @@ export function progressHeadline(attempt: Pick<BuildAttempt, "state" | "outcome"
     return `Not finished. Attempt continues from attempt ${String(attempt.continuedFrom)}, which left ${tally}; so far it has made ${added}${asked}.`;
   }
   if (attempt.state === "running") return `Not finished. The worker is still working, with ${tally}.`;
-  if (attempt.state === "detached") return `Not finished. The worker is still running from before the host restarted, with ${tally}.`;
-  if (attempt.state === "lost") return `Not finished. The host was stopped and the worker is gone, leaving ${tally}. A new attempt can continue from its directory, below.`;
+  if (attempt.state === "detached") return `Not finished. The worker is still running from before the app restarted, with ${tally}.`;
+  if (attempt.state === "lost") return `Not finished. The app was closed while the worker ran, so it stopped, leaving ${tally}. A new attempt can continue from its directory, below.`;
   if (attempt.state === "unavailable") return `Not started: the coding agent could not run.`;
   const outcome = attempt.outcome;
   if (!outcome) return `Ended, with ${tally}.`;
   // Who stopped it, when the host knows: the exit alone reads as a crash.
-  if (attempt.endedBy === "host_stop") return `Not finished. The host was stopped while the worker was running, which ended it, leaving ${tally}. Nothing went wrong with the work; a new attempt can continue from its directory, below.`;
+  if (attempt.endedBy === "host_stop") return `Not finished. The app was closed while the worker was running, which stopped it, leaving ${tally}. Nothing went wrong with the work; a new attempt can continue from its directory, below.`;
   if (attempt.endedBy === "cancel") return `Not finished. The attempt was cancelled, leaving ${tally}. A new attempt can continue from its directory, below.`;
-  if (outcome.signal) return `Not finished. The attempt was ended by ${outcome.signal}, leaving ${tally}. A new attempt can continue from its directory, below.`;
+  if (outcome.signal) return `Not finished. The attempt was stopped, leaving ${tally}. A new attempt can continue from its directory, below.`;
   if (outcome.exitStatus === 0) {
     const all = total > 0 && progress.committed === total;
     const own = continued ? ` and ${added} on top of attempt ${String(attempt.continuedFrom)}'s` : "";
-    return `${all ? "Finished" : "The worker finished"}: it exited 0 after ${String(outcome.turns ?? "?")} turns, with ${tally}${own}. Whether the work is right is for the supervisor's status and your review${attempt.note ? ", against what you asked for, below" : ""}.`;
+    return `${all ? "Finished" : "The worker finished"} on its own after ${String(outcome.turns ?? "?")} steps, with ${tally}${own}. Whether the work is right is for the supervisor's status and your review${attempt.note ? ", against what you asked for, below" : ""}.`;
   }
   // 143 is 128 + SIGTERM: the worker was told to stop and said so in its
   // exit, which a host that stopped before #781 recorded without the why.
-  if (outcome.exitStatus === SIGTERM_EXIT) return `Not finished. The worker was told to stop (exit status 143, which is what a host stop or a cancel sends), leaving ${tally}. A new attempt can continue from its directory, below.`;
-  return `Not finished. The worker stopped with exit status ${String(outcome.exitStatus ?? "?")}, leaving ${tally}. A new attempt can continue from its directory, below.`;
+  if (outcome.exitStatus === SIGTERM_EXIT) return `Not finished. The worker was stopped (cancelled, or the app closed), leaving ${tally}. A new attempt can continue from its directory, below.`;
+  return `Not finished. The worker stopped with an error (code ${String(outcome.exitStatus ?? "?")}), leaving ${tally}. A new attempt can continue from its directory, below.`;
 }
 
 /** How many open items QUESTIONS.md lists: its top-level bullets. */
