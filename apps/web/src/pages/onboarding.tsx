@@ -291,7 +291,7 @@ function WelcomeStep({ onSkip, onNext }: { onSkip: () => void; onNext: () => voi
       <ul className="ob-points">
         <li>
           <span>
-            <b>Stages, not chat.</b> Discovery to delivery — each stage produces an artifact, not a transcript.
+            <b>Stages, not chat.</b> Discovery to delivery — each stage produces a document you approve, not a chat transcript.
           </span>
         </li>
         <li>
@@ -301,7 +301,7 @@ function WelcomeStep({ onSkip, onNext }: { onSkip: () => void; onNext: () => voi
         </li>
         <li>
           <span>
-            <b>Runs on this machine.</b> Keys in your keychain, work in your workspace. No cloud account needed.
+            <b>Runs on this machine.</b> Keys in your keychain, your work on this computer. No cloud account needed.
           </span>
         </li>
       </ul>

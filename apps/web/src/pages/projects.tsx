@@ -45,19 +45,19 @@ function startedLabel(createdAt: string): string {
   return `Started ${new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
-/** What the import did and where the project landed; the version count only when an artifact had more than one. */
+/** What the import did and where the project landed; the version count only when a document had more than one. */
 export function importNotice(fileName: string, brought: ImportOutcome): string {
   const written =
     brought.versions === undefined || brought.versions === brought.artifacts
-      ? `${plural(brought.artifacts, "artifact")} and ${plural(brought.conversations, "conversation")}`
-      : `${plural(brought.artifacts, "artifact")} (${plural(brought.versions, "version")}) and ${plural(brought.conversations, "conversation")}`;
+      ? `${plural(brought.artifacts, "document")} and ${plural(brought.conversations, "conversation")}`
+      : `${plural(brought.artifacts, "document")} (${plural(brought.versions, "version")}) and ${plural(brought.conversations, "conversation")}`;
   const parts = [`Imported ${fileName}: ${written}.`];
   const landing = brought.landing;
   if (landing) {
     if (landing.stopped) {
-      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at ${stageName(landing.landed)}`}: ${landing.stopped}.`);
+      parts.push(`Not every recorded decision could be applied${landing.landed === null ? "" : `; the project stands at ${stageName(landing.landed)}`}: ${landing.stopped}.`);
     } else if (landing.landed !== null) {
-      parts.push(`Its history was replayed; it is at ${stageName(landing.landed)}.`);
+      parts.push(`It stands at ${stageName(landing.landed)}, where it was when exported.`);
     }
     parts.push(...landing.notes);
   }

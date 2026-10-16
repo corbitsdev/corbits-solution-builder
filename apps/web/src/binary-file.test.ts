@@ -23,7 +23,7 @@ describe("binary artifacts", () => {
   test("the download is named for the artifact with its extension given once", () => {
     expect(binaryFileName("Slides · You", "pptx")).toBe("Slides · You.pptx");
     expect(binaryFileName("Workbook.xlsx", "xlsx")).toBe("Workbook.xlsx");
-    expect(binaryFileName("  ", null)).toBe("artifact");
+    expect(binaryFileName("  ", null)).toBe("document");
   });
 
   test("the card says what the file is and offers the download, never the URL", () => {

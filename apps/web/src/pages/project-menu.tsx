@@ -58,7 +58,7 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
   });
   downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
   const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
-  return `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`;
+  return `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} document${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`;
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */
@@ -411,21 +411,21 @@ export function ProjectInfoDialog({
               <div>
                 <dt>Where it stands</dt>
                 <dd>
-                  {info.stage ? `${stageName(info.stage)} · ${info.stage} of 9` : "No run"}
+                  {info.stage ? `${stageName(info.stage)} · ${info.stage} of 9` : "Not started"}
                   {info.project.archivedAt ? " · archived" : ""}
                 </dd>
               </div>
               <div>
-                <dt>Artifacts</dt>
+                <dt>Documents</dt>
                 <dd>
-                  {info.artifacts.versions} version{info.artifacts.versions === 1 ? "" : "s"} across {info.artifacts.live} live artifact
+                  {info.artifacts.versions} version{info.artifacts.versions === 1 ? "" : "s"} of {info.artifacts.live} document
                   {info.artifacts.live === 1 ? "" : "s"}, {formatBytes(info.artifacts.bytes)} stored
                 </dd>
               </div>
               <div>
-                <dt>Runs</dt>
+                <dt>Builds</dt>
                 <dd>
-                  {info.runs.total} run{info.runs.total === 1 ? "" : "s"}, {info.runs.builds} build attempt{info.runs.builds === 1 ? "" : "s"}
+                  {info.runs.builds} build attempt{info.runs.builds === 1 ? "" : "s"}
                 </dd>
               </div>
               <div>
@@ -434,7 +434,7 @@ export function ProjectInfoDialog({
                   {formatUsage(info.usage, activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null)}
                   <br />
                   <span className="inline-note">
-                    Inference cost is tracked for the workspace as a whole, above the project list; there is no per-project breakdown yet.
+                    Spending is not broken down per project yet.
                   </span>
                 </dd>
               </div>

@@ -50,7 +50,7 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Pick<Proj
       <DialogContent className="project-settings">
         <DialogHeader>
           <DialogTitle>{project.title}</DialogTitle>
-          <DialogDescription>Settings for this project alone. Everything else is set for the workspace, in Settings.</DialogDescription>
+          <DialogDescription>Settings for this project alone. Everything else is in Settings and applies to all projects.</DialogDescription>
         </DialogHeader>
         <DialogBody>
           {error ? <Banner tone="error" title={error} /> : null}
@@ -64,14 +64,14 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Pick<Proj
               onChange={(event) => void setUseWorkspace(event.target.checked)}
             />
             <span>
-              Use the workspace's design documents for this project's decks
+              Also use the design documents from Settings, shared by all projects
               <br />
               <span className="inline-note">Turned off, only the documents below are consulted.</span>
             </span>
           </label>
           <h3>This project's own design documents</h3>
-          <p className="inline-note">Always consulted for this project's decks, before the workspace's.</p>
-          <DesignDocumentsList projectId={project.id} emptyNote="None yet. This project's decks follow the workspace's design documents, if any." />
+          <p className="inline-note">Always consulted for this project's decks, before the ones in Settings.</p>
+          <DesignDocumentsList projectId={project.id} emptyNote="None yet. This project's decks follow the design documents in Settings, if any." />
         </DialogBody>
         <DialogFooter>
           <Button variant="primary" onClick={onClose}>

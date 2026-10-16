@@ -23,10 +23,10 @@ describe("ArtifactStrip", () => {
     const html = renderToStaticMarkup(
       createElement(ArtifactStrip, { tabs: [tab("a", "Problem brief"), tab("b", "Design")], selectedKey: "b", onSelect: () => undefined }),
     );
-    expect(html).toContain('aria-label="Show earlier artifacts"');
-    expect(html).toContain('aria-label="Show more artifacts"');
+    expect(html).toContain('aria-label="Show earlier documents"');
+    expect(html).toContain('aria-label="Show more documents"');
     expect(html.match(/class="artifact-strip-scroll[^"]*" hidden=""/g)?.length).toBe(2);
-    expect(html).toContain('aria-label="Project artifacts"');
+    expect(html).toContain('aria-label="Project documents"');
   });
 });
 

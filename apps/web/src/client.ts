@@ -886,7 +886,7 @@ async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: s
   }
   const artifact = (parsed as { artifacts?: { id: string; source?: { upload?: { size?: unknown } } }[] } | undefined)?.artifacts?.[0];
   if (!artifact) {
-    throw new ApiFailure({ code: "internal_error", message: "Upload returned no artifact.", correlationId: "-", retryable: false });
+    throw new ApiFailure({ code: "internal_error", message: "The file did not upload. Try again.", correlationId: "-", retryable: false });
   }
   const size = artifact.source?.upload?.size;
   return { id: artifact.id, ...(typeof size === "number" ? { size } : {}) };
