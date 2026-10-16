@@ -690,7 +690,8 @@ the archive. Unpack it with `tar -xzf <file>` and follow its README.
 
 **Delivery verification** is a checklist with three states: passed, failed,
 and unverified. Only checks the tool actually ran count as passed. Anything
-the model merely claimed is marked "reported by the agent, not checked". A
+the model merely claimed is marked "reported by the Delivery verifier, not
+checked by a tool". A
 website or service target is started and probed. A terminal command or an
 installable app is reported as not exercised.
 

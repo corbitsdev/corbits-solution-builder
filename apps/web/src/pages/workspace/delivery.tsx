@@ -260,7 +260,7 @@ function DeliveryDecision({
         try {
           parsed = JSON.parse(result.content);
         } catch {
-          throw new Error("The record is not valid JSON.");
+          throw new Error("The delivery checks are unreadable.");
         }
         setVerification(parseDeliveryVerification(parsed));
       })
@@ -346,7 +346,7 @@ function DeliveryDecision({
         </>
       ) : null}
       {error ? <Banner tone="error" title={error} /> : null}
-      {!pending && !delivered && !error ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
+      {!pending && !delivered && !error ? <p className="inline-note">Waiting for {VERIFIER} to finish checking the build.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
         artifacts.map((artifact, index) => (
@@ -365,7 +365,7 @@ function DeliveryDecision({
         <>
           <h2>{documentName("delivery_verification")}</h2>
           <FailedRead
-            what="The verification record could not be read"
+            what="The delivery checks could not be loaded"
             detail={verificationError}
             onRetry={() => setVerificationAttempt((count) => count + 1)}
           />

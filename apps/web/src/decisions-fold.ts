@@ -50,10 +50,10 @@ function toDecision(approval: PendingApproval, projectId: string, stage: number)
     projectId,
     runId: approval.runId,
     stage,
-    title: isDelivery ? "Delivery awaits a decision" : `The ${stageName(stage)} specialist asks to run a tool`,
+    title: isDelivery ? "Delivery awaits a decision" : `The ${stageName(stage)} specialist asks permission to run a command`,
     consequence: isDelivery
       ? (CONSEQUENCE[stage] ?? "A human decision is required to continue.")
-      : `Runs \`${approval.toolDefinition?.name ?? "a tool"}\`: ${toolCommand(approval)}`,
+      : `Wants to run a command on your computer: ${toolCommand(approval)}`,
     blockers: null,
     requiredAuthority: requiredAuthorityFor(stage),
     approvalId: approval.id,

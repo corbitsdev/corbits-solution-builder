@@ -144,7 +144,7 @@ export function SendBackDock({
               id="workspace-send-back-reason"
               value={reason}
               onChange={(event) => onReasonChange(event.target.value)}
-              placeholder="Recorded with the send-back, and put in the box at the stage you return to, for the specialist."
+              placeholder="The specialist at that stage gets this as the reason."
             />
           </Dictated>
         </div>
@@ -218,7 +218,7 @@ export function SendBackConfirm({
     <div className="sbconfirm" role="dialog" aria-label={`Send back to ${stageName(target)}`}>
       <p className="sbconfirm-head">
         Send the project back to stage {target} · {stageName(target)}
-        {RETURN_TO[target] ? `, to ${RETURN_TO[target]}` : ""}. Every review from there on is marked stale; nothing is deleted.
+        {RETURN_TO[target] ? `, to ${RETURN_TO[target]}` : ""}. Everything approved from there on is marked out of date; nothing is deleted.
       </p>
       <textarea
         className="sbconfirm-reason"

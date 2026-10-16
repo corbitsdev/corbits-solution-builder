@@ -26,7 +26,7 @@ describe("a workspace read that fails is shown", () => {
     const delivery = read("delivery.tsx");
     expect(delivery).not.toContain("parseDeliveryVerification(undefined)");
     expect(delivery).not.toContain(".catch(() => null)");
-    expect(delivery).toContain('what="The verification record could not be read"');
+    expect(delivery).toContain('what="The delivery checks could not be loaded"');
   });
 
   test("the project workflow's first read and its poll keep their reason", () => {

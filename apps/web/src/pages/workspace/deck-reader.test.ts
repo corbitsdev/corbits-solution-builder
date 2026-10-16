@@ -54,7 +54,7 @@ describe("recordedDeckFileName", () => {
 describe("redrawSummary", () => {
   test("names the stakeholder, says the exports now hand out this file, and carries the notices", () => {
     expect(redrawSummary("Joe Filerman", false, null)).toBe(
-      "Slides for Joe Filerman were redrawn with the current design and recorded as the newest version; Save as PPTX and Open in Google Slides now hand out this file.",
+      "Slides for Joe Filerman were redrawn with the current design and saved as the newest version; Save as PPTX and Open in Google Slides now use this file.",
     );
     expect(redrawSummary("Joe Filerman", true, "no connected provider has an image model, so slides were built without pictures")).toContain("could not be read");
     expect(redrawSummary("Joe Filerman", true, "no connected provider has an image model, so slides were built without pictures")).toContain("No connected provider has an image model, so slides were built without pictures.");

@@ -85,7 +85,7 @@ export function useRecordedDeck(args: {
     setNotice(null);
     if (!nodeId) return;
     if (!packageId) {
-      setBuilt({ forId: nodeId, deck: null, note: "No slides to show: the package these slides were built from is not in the record. The saved file is still what it was." });
+      setBuilt({ forId: nodeId, deck: null, note: "No slides to show: the package these slides were built from cannot be found. The saved file is still what it was." });
       return;
     }
     let cancelled = false;
@@ -124,7 +124,7 @@ export function useRecordedDeck(args: {
       if (cancelled) return;
       const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;
       const notes = [
-        "Drawn again from the package's deck outline with the current design; the saved file is what Save as PPTX gives until Redraw with the current design records it.",
+        "Drawn again from the package's deck outline with the current design; the saved file is what Save as PPTX gives until you choose Redraw with the current design.",
         brief.failed ? "Its design documents could not be read, so this is the default look." : null,
         designHtml && shots.length === 0 ? "The design's screens could not be captured for the slides." : null,
       ].filter((line): line is string => line !== null);
@@ -227,8 +227,8 @@ export function useRecordedDeck(args: {
 
 /** What the redraw says when it has recorded the slides (#760). */
 export function redrawSummary(audience: string, themeFailed: boolean, imagesNotice: string | null): string {
-  const parts = [`Slides for ${audience} were redrawn with the current design and recorded as the newest version; Save as PPTX and Open in Google Slides now hand out this file.`];
-  if (themeFailed) parts.push("The design documents could not be read, so this is the role's saved look without their theme.");
+  const parts = [`Slides for ${audience} were redrawn with the current design and saved as the newest version; Save as PPTX and Open in Google Slides now use this file.`];
+  if (themeFailed) parts.push("The design documents could not be read, so this is the default look without their theme.");
   if (imagesNotice) parts.push(`${imagesNotice[0]!.toUpperCase()}${imagesNotice.slice(1)}.`);
   return parts.join(" ");
 }

@@ -19,7 +19,7 @@
 export type VerificationRowStatus = "passed" | "failed" | "unverified";
 
 /** The reason a row not checked by a tool is shown unverified, whatever its status claims. */
-export const AGENT_REPORTED_NOTE = "reported by the agent, not checked";
+export const AGENT_REPORTED_NOTE = "reported by the Delivery verifier, not checked by a tool";
 
 export type VerificationRow = {
   path: string;
