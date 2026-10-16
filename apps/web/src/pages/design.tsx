@@ -28,7 +28,7 @@ import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
-import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
+import { anchorResolves, withFallbackIds, type Disposition } from "../design-disposition.js";
 import { Markdown } from "../markdown.jsx";
 
 /**
@@ -72,10 +72,26 @@ function anchorFor(element: Element): Anchor {
   };
 }
 
+/**
+ * Which part of the design a comment is about, in words: the element's own
+ * text when it has some, else its name, else just that it is an element on
+ * this screen. The test id and DOM path stay in the anchor for the designer.
+ */
 export function anchorLabel(anchor: Anchor): string {
-  if (anchor.testId) return `#${anchor.testId}`;
-  return anchor.domPath ?? "(whole design)";
+  const what = anchor.role ?? "element";
+  if (anchor.textFingerprint) return `the “${anchor.textFingerprint}” ${what}`;
+  if (anchor.testId) return `the ${anchor.testId.replace(/[-_]+/g, " ")} ${what}`;
+  if (anchor.domPath) return `${/^[aeiou]/i.test(what) ? "an" : "a"} ${what} on this screen`;
+  return "the whole design";
 }
+
+/** The overall direction's label, as the select shows it. */
+const DIRECTION_LABEL: Record<Direction, string> = {
+  revise: "Revise this design",
+  choose: "Choose this design as it stands",
+  combine: "Combine with another version",
+  reject: "Reject this direction",
+};
 
 /**
  * One anchored comment as the submitted-state table renders it, with its
@@ -339,11 +355,11 @@ export function DesignFeedbackView({
             <>
               <dl className="version-list">
                 <div>
-                  <dt>Anchor</dt>
+                  <dt>Element</dt>
                   <dd>
-                    <span className="hash">{anchorLabel(draftAnchor)}</span>
+                    <span>{anchorLabel(draftAnchor)}</span>
                     {draftAnchor.testId ? null : (
-                      <StateLabel tone="warning">No stable id, so this anchor may go stale</StateLabel>
+                      <StateLabel tone="warning">This element has no fixed name, so the comment may lose its place if the design changes</StateLabel>
                     )}
                   </dd>
                 </div>
@@ -368,14 +384,14 @@ export function DesignFeedbackView({
               </div>
             </>
           ) : (
-            <p className="inline-note">Click an element in the preview to anchor a comment.</p>
+            <p className="inline-note">Click part of the design to comment on it.</p>
           )}
 
           {pending.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Anchor</TableHead>
+                  <TableHead>Element</TableHead>
                   <TableHead>Comment</TableHead>
                   <TableHead />
                 </TableRow>
@@ -383,7 +399,7 @@ export function DesignFeedbackView({
               <TableBody>
                 {pending.map((comment, index) => (
                   <TableRow key={`${anchorLabel(comment.anchor)}-${index}`}>
-                    <TableCell className="hash">{anchorLabel(comment.anchor)}</TableCell>
+                    <TableCell>{anchorLabel(comment.anchor)}</TableCell>
                     <TableCell>{comment.body}</TableCell>
                     <TableCell>
                       <Button
@@ -405,10 +421,11 @@ export function DesignFeedbackView({
               value={direction}
               onChange={(event) => setDirection(event.target.value as typeof direction)}
             >
-              <option value="revise">Revise this design</option>
-              <option value="choose">Choose this design as it stands</option>
-              <option value="combine">Combine with another version</option>
-              <option value="reject">Reject this direction</option>
+              {(Object.keys(DIRECTION_LABEL) as Direction[]).map((value) => (
+                <option key={value} value={value}>
+                  {DIRECTION_LABEL[value]}
+                </option>
+              ))}
             </select>
           </Field>
 
@@ -495,30 +512,29 @@ export function DesignFeedbackView({
         <div className="doc">
           <div className="docmeta">
             <span>
-              {submitted.direction}
+              {DIRECTION_LABEL[submitted.direction]}
               {submitted.overallNote ? ` · ${submitted.overallNote}` : ""}
             </span>
-            <span className="hash">prompt {shortPromptHash(submitted.prompt)}</span>
           </div>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Anchor</TableHead>
+                <TableHead>Element</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead>Disposition</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {submitted.comments.map((comment, index) => (
                 <TableRow key={`${comment.id}-${index}`}>
-                  <TableCell className="hash">{anchorLabel(comment.anchor)}</TableCell>
+                  <TableCell>{anchorLabel(comment.anchor)}</TableCell>
                   <TableCell>{comment.body}</TableCell>
                   <TableCell>
                     <div className="feedback-disposition">
                       <select
                         value={comment.disposition}
                         disabled={busy !== null || !comment.addressable}
-                        title={comment.addressable ? undefined : "Recorded before dispositions existed"}
+                        title={comment.addressable ? undefined : "This comment is older than status tracking, so its status cannot be set"}
                         onChange={(event) =>
                           run(`disposition-${comment.id}`, () =>
                             api.setDesignFeedbackDisposition(
@@ -535,7 +551,7 @@ export function DesignFeedbackView({
                         <option value="declined">Declined</option>
                       </select>
                       {!anchorResolves(comment.anchor, content) ? (
-                        <StateLabel tone="warning">anchor no longer resolves</StateLabel>
+                        <StateLabel tone="warning">This element is no longer in the design</StateLabel>
                       ) : null}
                     </div>
                   </TableCell>
@@ -543,9 +559,12 @@ export function DesignFeedbackView({
               ))}
             </TableBody>
           </Table>
-          <div className="artifact">
-            <pre>{submitted.prompt}</pre>
-          </div>
+          <details>
+            <summary>Exactly what the designer was sent</summary>
+            <div className="artifact">
+              <pre>{submitted.prompt}</pre>
+            </div>
+          </details>
         </div>
       ) : null}
     </div>
