@@ -272,7 +272,7 @@ describe("project chrome paint", () => {
     expect(build).toContain('className="doc"');
     expect(build).toContain('className="docmeta"');
     expect(build).toContain('className="ev"');
-    expect(build).toContain("Build Evidence");
+    expect(build).toContain("Build Progress");
     expect(build).toContain("Start the build attempt");
     expect(build).toContain("Record attempt");
     expect(build).not.toContain("Build supervision");

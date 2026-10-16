@@ -1032,7 +1032,7 @@
   border-radius: var(--radius-lg);
 }
 
-/* ---- document pane: mock .doc paper, build evidence stream ---- */
+/* ---- document pane: mock .doc paper, build progress stream ---- */
 
 .doc h1 {
   font-size: 22px;
@@ -1150,7 +1150,7 @@
   color: var(--wb-destructive);
 }
 
-/* Build progress (#697): one line, a meter of the plan's tasks, the list. */
+/* Progress of this attempt (#697): one line, a meter of the plan's tasks, the list. */
 .build-headline {
   font-weight: 600;
   margin: 0 0 0.5rem;

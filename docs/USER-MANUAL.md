@@ -630,8 +630,10 @@ Settings. **Document:** the build status and the build evidence.
 The build runs on your computer, using a coding agent you have installed
 and signed in to: Corbits Code by default, or Claude Code or Codex. Choose
 it under **Build worker** in Settings. The panel heading reads "Build
-Evidence", with a state badge, the tool name, the attempt number, an
-elapsed clock, and the spend so far.
+Progress", with a state badge, the tool name, the attempt number, an
+elapsed clock, and the spend so far. The page shows the attempt's
+progress while the worker runs and the build evidence once an attempt is
+recorded.
 
 The toolbar shows only the buttons that can act right now:
 
@@ -657,7 +659,7 @@ The toolbar shows only the buttons that can act right now:
 While the worker runs, its output streams into the pane "Attempt N — what
 the worker wrote", exactly as the process writes it. A worker with a
 lifecycle hook (Corbits Code) also reports each turn and the tools it
-called. The **Build progress** section shows a headline, the attempt's
+called. The **Progress of this attempt** section shows a headline, the attempt's
 directory on disk, a meter of the plan's tasks, and whether the worker left
 a `README.md`, a `docs/USER-MANUAL.md`, a `STATUS.md`, and a `QUESTIONS.md`
 of decisions it left to you. Once the attempt is recorded, the Build
