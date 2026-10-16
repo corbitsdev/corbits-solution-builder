@@ -877,7 +877,7 @@ connection.
 ### Designer
 
 What the GUI design specialist draws to. **Surface** is Light, Dark, or
-whatever the brief calls for. **Design language** is free text in your own
+**Project decides**, which follows the project's own design direction. **Design language** is free text in your own
 words, such as a palette, a typeface, or a tone. The designer follows it
 over its own defaults. Changes apply the next time the designer starts.
 
