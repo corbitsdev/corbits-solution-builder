@@ -492,9 +492,9 @@ export function BuildPanel({
   const recordable = ended ? current : null;
   // What the archive does not hold (#791), said beside it and on its button.
   const archiveCaveat = running
-    ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until it is recorded.`
+    ? `Attempt ${String(running.attempt)} is running now; its work is not in this archive until its build is saved.`
     : lastEnded && archivedAttempt !== null && lastEnded.attempt > archivedAttempt
-      ? `Attempt ${String(lastEnded.attempt)} has ended but is not recorded; this archive is attempt ${String(archivedAttempt)}'s.`
+      ? `Attempt ${String(lastEnded.attempt)} has ended but its build is not saved; this archive is attempt ${String(archivedAttempt)}'s.`
       : null;
 
   return (
@@ -618,12 +618,12 @@ export function BuildPanel({
                   disabled={busy !== null || !address}
                   title={
                     recorded
-                      ? "No build runs. The directory the worker left is packaged again as it is, a new archive and manifest are written beside the earlier ones, and the supervisor is briefed on the new record."
-                      : "Packages the directory the worker left into an archive, records it as the build evidence, and briefs the supervisor, who writes the build status."
+                      ? `Nothing is built again. Attempt ${String(recordable.attempt)}'s files are packaged again as they are, the new archive takes over from the earlier one, and the status report is written again from it.`
+                      : `Packages attempt ${String(recordable.attempt)}'s files into an archive, saves it as the project's build, and writes a status report on it. Anything the build left for you to decide shows in the chat as questions.`
                   }
                   onClick={() => void record(recordable)}
                 >
-                  {recorded ? `Re-archive attempt ${String(recordable.attempt)}'s files` : `Record attempt ${String(recordable.attempt)} and brief the supervisor`}
+                  {recorded ? `Save attempt ${String(recordable.attempt)}'s build again` : `Save attempt ${String(recordable.attempt)}'s build and get its status report`}
                 </Button>
               ) : null}
               {archive ? (
@@ -631,7 +631,7 @@ export function BuildPanel({
                   variant="secondary"
                   loading={busy === "download"}
                   disabled={busy !== null}
-                  title={`The recorded archive of attempt ${archivedAttempt === null ? "?" : String(archivedAttempt)}'s directory, as a tar.gz.${archiveCaveat ? ` ${archiveCaveat}` : ""}`}
+                  title={`The saved archive of attempt ${archivedAttempt === null ? "?" : String(archivedAttempt)}'s files, as a tar.gz.${archiveCaveat ? ` ${archiveCaveat}` : ""}`}
                   onClick={() => void run("download", () => downloadBuild(tenantId, archive))}
                 >
                   Download attempt {archivedAttempt === null ? "the" : String(archivedAttempt)}'s archive (.tar.gz)
@@ -665,7 +665,7 @@ export function BuildPanel({
               </div>
             ) : null}
             {attempts.length > 0 ? (
-              // What the record step probes, beside the button that uses it.
+              // What saving the build starts and probes, beside the button that uses it.
               <div className="document-tools build-probe">
                 <input
                   className="field"
@@ -676,7 +676,7 @@ export function BuildPanel({
                   onChange={(event) => setStartCommand(event.target.value)}
                 />
                 <input className="field" aria-label="Port" placeholder="Port" inputMode="numeric" value={port} disabled={!recordable} onChange={(event) => setPort(event.target.value)} style={{ maxWidth: "6rem" }} />
-                <p className="inline-note">Filled in, the record step starts the build with this command and probes the port; left blank, the brief says the target was not probed.</p>
+                <p className="inline-note">Filled in, saving the build also starts it with this command and checks that the port answers; left blank, the status report says the built app was not started.</p>
               </div>
             ) : null}
             {attempts.length > 0 ? (
