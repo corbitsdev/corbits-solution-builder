@@ -1272,11 +1272,11 @@ export function StageWorkspace({
       {specialistUnbriefed ? (
         <Banner
           tone="warning"
-          title={`${agentFor(stage as Stage).title} was started without the project's record`}
-          action={{ label: briefing.sending ? "Briefing…" : "Brief the specialist now", onClick: () => void briefing.brief() }}
+          title={`${agentFor(stage as Stage).title} started without the approved documents`}
+          action={{ label: briefing.sending ? "Sending…" : "Send the specialist the approved documents", onClick: () => void briefing.brief() }}
         >
           Its replies so far were written without the approved documents or the earlier conversation, so this stage cannot be approved until it has them.
-          The briefing sends everything approved before this stage and the current draft, the same content a hand-off carries.
+          This sends everything approved before this stage, plus the current draft.
           {briefing.error ? ` It could not be sent: ${briefing.error}` : ""}
         </Banner>
       ) : null}

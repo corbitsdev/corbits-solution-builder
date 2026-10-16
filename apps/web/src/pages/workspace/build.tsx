@@ -167,17 +167,17 @@ function evMark(tone: keyof typeof EV_TONE): string {
 
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
-  if (attempt.state === "detached") return { label: "still running from before the host restarted; being taken up", tone: "warning" };
-  if (attempt.state === "lost") return { label: "lost: the host was stopped without ending it, and the worker is gone", tone: "error" };
+  if (attempt.state === "detached") return { label: "still running from before the app restarted; reconnecting", tone: "warning" };
+  if (attempt.state === "lost") return { label: "stopped unexpectedly: the app was closed while it ran", tone: "error" };
   if (attempt.state === "unavailable") return { label: "could not run", tone: "error" };
   const outcome = attempt.outcome;
   if (!outcome) return { label: "ended", tone: "info" };
-  if (attempt.endedBy === "host_stop") return { label: "ended by the host stopping", tone: "warning" };
+  if (attempt.endedBy === "host_stop") return { label: "stopped when the app closed", tone: "warning" };
   if (attempt.endedBy === "cancel") return { label: "cancelled", tone: "warning" };
-  if (outcome.signal) return { label: `ended by ${outcome.signal}`, tone: "warning" };
-  // An exit status is reported, never coloured: zero is not evidence the
-  // build is right, and a person reads the record, not a tick.
-  return { label: `exited ${String(outcome.exitStatus ?? "?")}`, tone: outcome.exitStatus === 0 ? "info" : "warning" };
+  if (outcome.signal) return { label: "stopped", tone: "warning" };
+  // A clean exit is "finished", never coloured as success: zero is not
+  // evidence the build is right, and a person reads the record, not a tick.
+  return outcome.exitStatus === 0 ? { label: "finished", tone: "info" } : { label: `ended with an error (code ${String(outcome.exitStatus ?? "?")})`, tone: "warning" };
 }
 
 export function BuildPanel({
@@ -600,7 +600,7 @@ export function BuildPanel({
                   variant="primary"
                   loading={busy === "continue"}
                   disabled={busy !== null}
-                  title={`A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below in its packet.`}
+                  title={`A new attempt that starts from a copy of attempt ${String(lastEnded.attempt)}'s directory, commits included, with your note below as its instructions.`}
                   onClick={() => void start(lastEnded.attempt)}
                 >
                   Start another attempt ({String(nextAttempt)})
@@ -660,7 +660,7 @@ export function BuildPanel({
                   onChange={(event) => setContinueNote(event.target.value)}
                 />
                 <p className="inline-note">
-                  Goes to the worker in the packet of the attempt "Start another attempt ({String(nextAttempt)})" starts, ahead of the plan. The chat on the left goes to {agentFor(8).title.toLowerCase()}, who writes the build status; the worker never reads it.
+                  The worker reads this first when you click "Start another attempt ({String(nextAttempt)})", before the plan. The chat on the left goes to {agentFor(8).title.toLowerCase()}, who writes the build status; the worker never reads it.
                 </p>
               </div>
             ) : null}
@@ -670,7 +670,7 @@ export function BuildPanel({
                 <input
                   className="field"
                   aria-label="Start command"
-                  placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
+                  placeholder={`Command that starts ${freeze?.target?.trim() ? describeTarget(freeze.target.trim()) : "the website"}, e.g. npm start (optional)`}
                   value={startCommand}
                   disabled={!recordable}
                   onChange={(event) => setStartCommand(event.target.value)}
@@ -706,25 +706,25 @@ export function BuildPanel({
                 {current.note ? (
                   // What this attempt was asked for (#791): the note sent with the continue, as the packet carries it.
                   <details className="bubble-fold build-asked" open>
-                    <summary>What attempt {String(current.attempt)} was asked for, in its packet</summary>
+                    <summary>Your note to attempt {String(current.attempt)}</summary>
                     <Markdown source={current.note} />
                   </details>
                 ) : null}
                 {progress.tasks.length > 0 ? (
                   <>
-                    <div className="build-meter" role="img" aria-label={`${String(progress.committed)} of ${String(progress.tasks.length)} tasks committed, ${String(progress.started)} under way`}>
+                    <div className="build-meter" role="img" aria-label={`${String(progress.committed)} of ${String(progress.tasks.length)} tasks done, ${String(progress.started)} in progress`}>
                       <span className="build-meter-done" style={{ flexGrow: progress.committed }} />
                       <span className="build-meter-started" style={{ flexGrow: progress.started }} />
                       <span className="build-meter-rest" style={{ flexGrow: progress.unnamed }} />
                     </div>
                     <details className="bubble-fold" open={current.state !== "running"}>
                       <summary>
-                        The plan's {String(progress.tasks.length)} tasks: {String(progress.committed)} committed, {String(progress.started)} under way, {String(progress.unnamed)} not yet named
+                        The plan's {String(progress.tasks.length)} tasks: {String(progress.committed)} done, {String(progress.started)} in progress, {String(progress.unnamed)} not started
                         {current.continuedFrom !== null && progress.newCommits === 0 ? ` — all by attempt ${String(current.continuedFrom)} or earlier; nothing committed by this attempt yet` : ""}
                       </summary>
                       <div className="ev build-tasks">
                         {progress.tasks.map((task) => (
-                          <span key={task.number} className={task.state === "committed" ? "p" : task.state === "started" ? "w" : "r"} title={task.evidence ?? "Not named in any commit, status section or turn line"}>
+                          <span key={task.number} className={task.state === "committed" ? "p" : task.state === "started" ? "w" : "r"} title={task.evidence ?? "The worker has not mentioned this task yet"}>
                             {task.state === "committed" ? "✓ " : task.state === "started" ? "… " : ""}
                             <b>Task {String(task.number)}</b> {task.title}
                             {task.evidence ? <i className="build-task-evidence"> — {task.evidence}</i> : null}
@@ -777,9 +777,9 @@ export function BuildPanel({
                 {current.outcome ? (
                   <p className="inline-note">
                     {current.outcome.available
-                      ? `${current.outcome.worker} ${current.outcome.signal ? `ended by ${current.outcome.signal}` : `exited ${String(current.outcome.exitStatus)}`}` +
-                        (current.outcome.turns !== null ? ` after ${String(current.outcome.turns)} turns and ${String(current.outcome.toolCalls ?? 0)} tool calls.` : ".")
-                      : current.outcome.stderrTail}
+                      ? `${current.outcome.worker} ${current.outcome.signal ? "was stopped" : current.outcome.exitStatus === 0 ? "finished" : `ended with an error (code ${String(current.outcome.exitStatus)})`}` +
+                        (current.outcome.turns !== null ? ` after ${String(current.outcome.turns)} steps.` : ".")
+                      : `The coding agent could not start. Its last output: ${current.outcome.stderrTail}`}
                   </p>
                 ) : null}
                 {current.state === "ended" && current.outcome?.available && current.outcome.finalText.trim().length === 0 ? (

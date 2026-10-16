@@ -88,14 +88,11 @@ export function spendLine(usage: BuildUsage): { text: string; title: string } {
   const tokens = `${formatTokens(usage.output)} tokens out, ${formatTokens(read)} in`;
   const text = estimate ? `${tokens} · ≈ ${formatMoney(estimate.amount, "USD")}` : usage.models.length > 0 ? `${tokens} (${usage.models[0]}, no list price on file)` : tokens;
   const lines = [
-    `${count(usage.calls)} inference call${usage.calls === 1 ? "" : "s"}: ${count(usage.output)} tokens out; ${count(usage.input)} in, ${count(usage.cacheRead)} read from cache, ${count(usage.cacheWrite)} written to cache.`,
+    `${count(usage.calls)} model call${usage.calls === 1 ? "" : "s"}: ${count(usage.output)} tokens out, ${count(read)} in (${count(usage.cacheRead)} of them re-read from earlier calls).`,
     `Counted from ${usage.source}.`,
   ];
   if (estimate) {
-    const rate = estimate.price;
-    lines.push(
-      `≈ ${formatMoney(estimate.amount, "USD")} at ${estimate.model}'s list price: $${String(rate.input)} in, $${String(rate.output)} out, $${String(rate.cacheRead)} cache read, $${String(rate.cacheWrite)} cache write, per million tokens. Every call is priced at that rate, whichever model made it.`,
-    );
+    lines.push(`≈ ${formatMoney(estimate.amount, "USD")} at ${estimate.model}'s list price, whichever model made each call.`);
   } else if (usage.models.length > 0) {
     lines.push(`No list price on file for ${usage.models.join(", ")}, so no cost is estimated.`);
   }

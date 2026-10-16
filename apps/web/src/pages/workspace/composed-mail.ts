@@ -108,7 +108,7 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   // worker's turn lines and the record stay behind the fold.
   const brief = /^(Build attempt \d+ (?:is still running|has ended)[^\n]*)\n/.exec(message.body);
   if (brief) {
-    return { summary: "What the supervisor was briefed with", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
+    return { summary: "What the app sent the Build supervisor", body: message.body.slice(brief[0].length).trim(), lead: brief[1]! };
   }
   const isCue = SEND_BACK_REF.test(message.body);
   const hasIds = message.body.startsWith(REQUIREMENTS_BLOCK_HEADING);
@@ -116,5 +116,5 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   const stripped = withoutSendBackRef(message.body);
   if (!hasIds) return { summary: null, body: "", lead: stripped };
   const { ids, rest } = splitIdsBlock(stripped);
-  return { summary: "The requirement ids, as minted", body: ids, lead: rest || null };
+  return { summary: "The requirement ids", body: ids, lead: rest || null };
 }

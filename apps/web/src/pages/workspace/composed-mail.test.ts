@@ -32,7 +32,7 @@ describe("composedMailFold", () => {
   test("a requirement-ids block folds and the ask beside it stays visible", () => {
     const body = "## Requirements (authoritative ids)\n\n- FR-1: Does a thing.\n- AC-1: It is checked.\n\nReview the plan's application concerns.";
     const fold = composedMailFold({ author: "me", body });
-    expect(fold?.summary).toBe("The requirement ids, as minted");
+    expect(fold?.summary).toBe("The requirement ids");
     expect(fold?.body).toBe("## Requirements (authoritative ids)\n\n- FR-1: Does a thing.\n- AC-1: It is checked.");
     expect(fold?.lead).toBe("Review the plan's application concerns.");
   });
@@ -67,7 +67,7 @@ describe("composedMailFold", () => {
 describe("composedMailFold on the supervisor's briefs", () => {
   test("folds a progress brief and a record brief alike, lead line outside", () => {
     const progress = composedMailFold({ author: "me", body: "Build attempt 1 is still running; write an interim build status from this record, as of turn 91 at 8:42 PM.\n\n## What the worker has reported so far\n- lines" });
-    expect(progress).toEqual({ summary: "What the supervisor was briefed with", body: "## What the worker has reported so far\n- lines", lead: "Build attempt 1 is still running; write an interim build status from this record, as of turn 91 at 8:42 PM." });
+    expect(progress).toEqual({ summary: "What the app sent the Build supervisor", body: "## What the worker has reported so far\n- lines", lead: "Build attempt 1 is still running; write an interim build status from this record, as of turn 91 at 8:42 PM." });
     const record = composedMailFold({ author: "me", body: "Build attempt 2 has ended and its work is recorded. Write the build status from this record.\n\n## What the worker reported\n- Worker: x" });
     expect(record?.lead).toBe("Build attempt 2 has ended and its work is recorded. Write the build status from this record.");
     expect(record?.body).toBe("## What the worker reported\n- Worker: x");

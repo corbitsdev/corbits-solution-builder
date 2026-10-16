@@ -82,7 +82,7 @@ describe("stageEvents", () => {
     ];
     expect(stageEvents(1, [], [], marks).map((e) => e.text)).toEqual([
       "Problem discovery",
-      "Turn aborted",
+      "Stopped",
     ]);
   });
 });

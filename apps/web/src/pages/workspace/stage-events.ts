@@ -92,7 +92,7 @@ export function stageEvents(
 
   for (const mark of marks) {
     if (mark.stage !== stage) continue;
-    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "Turn aborted", tone: "line" });
+    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "Stopped", tone: "line" });
   }
 
   return out;
