@@ -13,8 +13,8 @@ describe("describeOpeningFailure", () => {
   });
 
   test("anything else is the send", () => {
-    expect(describeOpeningFailure(down)).toEqual({ what: "The opening message could not be sent", detail: "the hub is down" });
-    expect(describeOpeningFailure(new Error("socket closed"))).toEqual({ what: "The opening message could not be sent", detail: "socket closed" });
+    expect(describeOpeningFailure(down)).toEqual({ what: "The specialist could not be given its starting instructions", detail: "the hub is down" });
+    expect(describeOpeningFailure(new Error("socket closed"))).toEqual({ what: "The specialist could not be given its starting instructions", detail: "socket closed" });
   });
 });
 
@@ -34,14 +34,14 @@ describe("no read on the opening's way is dropped", () => {
 
   test("the send-back cue's failure is shown and retried, not only cleared", () => {
     const cue = source.slice(source.indexOf("const cueInFlightRef"), source.indexOf("return {", source.indexOf("const cueInFlightRef")));
-    expect(cue).toContain('setFailure({ what: "The send-back cue could not be sent"');
-    expect(cue).toContain('setFailure({ what: "The record for the send-back cue could not be read"');
+    expect(cue).toContain('setFailure({ what: "The send-back reason could not be passed to the specialist"');
+    expect(cue).toContain('setFailure({ what: "The send-back reason could not be read back"');
     expect(cue).toContain("retryAttempt]);");
   });
 
   test("the banner says what failed, not always that a send did", () => {
     const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
     expect(index).toContain("title={openingDispatch.failure.what}");
-    expect(index).not.toContain('title="The opening message could not be sent"');
+    expect(index).not.toContain('title="The specialist could not be given its starting instructions"');
   });
 });

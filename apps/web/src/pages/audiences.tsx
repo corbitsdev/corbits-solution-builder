@@ -805,7 +805,7 @@ export function AudiencePackages({
       if (!result.ok) {
         throw new ApiFailure({
           code: "conflict",
-          message: `That decision was refused: ${stageRefusalMessage(result.reason)}`,
+          message: stageRefusalMessage(result.reason),
           correlationId: "-",
           retryable: true,
         });
@@ -852,7 +852,7 @@ export function AudiencePackages({
 
   return (
     <div data-tour="audience-packages">
-      {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
+      {error ? <Banner tone="error" title="That decision was not saved">{error}</Banner> : null}
       {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
       {audiences.length === 0 ? <Banner title="No stakeholders are named for this project" /> : null}
 

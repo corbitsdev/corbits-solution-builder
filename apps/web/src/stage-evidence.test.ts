@@ -93,12 +93,12 @@ describe("openReviewFailureMessage", () => {
   });
 
   test("names an unreadable workflow and a review accepted but never applied", () => {
-    expect(openReviewFailureMessage("workflow_unavailable")).toBe("The project workflow could not be read.");
-    expect(openReviewFailureMessage("timed_out")).toContain("has not shown it open");
+    expect(openReviewFailureMessage("workflow_unavailable")).toBe("The project could not be loaded.");
+    expect(openReviewFailureMessage("timed_out")).toContain("has not opened yet");
   });
 
   test("reads a refused open_review in the workflow's own words", () => {
-    expect(openReviewFailureMessage("evidence_missing")).toBe("The recorded decisions don't match what this approval expects.");
+    expect(openReviewFailureMessage("evidence_missing")).toBe("Something changed since this page loaded. Reload and approve again.");
     expect(openReviewFailureMessage("stale_review")).toBe(stageRefusalMessage("stale_review"));
   });
 });
@@ -180,7 +180,7 @@ describe("stage6CitationRemediation", () => {
     );
     const remediation = stage6CitationRemediation("## Requirements (authoritative ids)\n\n- IR-1: One.", "ui cites unknown requirement id(s) IR-13");
     expect(remediation.kind).toBe("ask_specialist");
-    expect(remediation.label).toBe("Send the architect the current ids");
+    expect(remediation.label).toBe("Send the architect the current requirement list");
     expect(remediation.message).toContain("cites ids that do not exist (ui cites unknown requirement id(s) IR-13)");
     expect(remediation.message).toContain("- IR-1: One.");
     expect(remediation.message).toContain("citing only these ids");

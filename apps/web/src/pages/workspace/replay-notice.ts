@@ -12,11 +12,11 @@ import type { ProjectWorkflowReplay } from "@solutions-builder/installer";
 import { stageName } from "../../components.jsx";
 
 const DECISION_NAMES: Readonly<Record<string, string>> = {
-  open_review: "review opening",
+  open_review: "request for your approval",
   approve: "approval",
   send_back: "send-back",
   audience: "stakeholder decision",
-  mint_requirements: "requirement ids",
+  mint_requirements: "requirement numbering",
 };
 
 function decisionName(kind: string | null): string {

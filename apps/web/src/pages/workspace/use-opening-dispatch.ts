@@ -65,7 +65,7 @@ export class OpeningReadFailure extends Error {
 /** What the failure line says for whatever the opening's dispatch threw. */
 export function describeOpeningFailure(cause: unknown): OpeningFailure {
   if (cause instanceof OpeningReadFailure) return { what: cause.what, detail: cause.message };
-  return { what: "The opening message could not be sent", detail: failureReason(cause) };
+  return { what: "The specialist could not be given its starting instructions", detail: failureReason(cause) };
 }
 
 export type OpeningDispatch = {
@@ -226,7 +226,7 @@ export function useOpeningDispatch({
           const chain = await queryClient
             .fetchQuery(approvedChainQuery({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage }))
             .catch((cause: unknown) => {
-              throw new OpeningReadFailure("The record before this stage could not be read", cause);
+              throw new OpeningReadFailure("The approved documents from earlier stages could not be loaded", cause);
             });
           // The workspace's language is in the specialist's own instructions
           // (`localizedGuidance`, client.ts), where a changed setting redeploys
@@ -268,7 +268,7 @@ export function useOpeningDispatch({
       const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
       void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef })
         .then(dispatchOpening)
-        .catch((cause: unknown) => failed(new OpeningReadFailure(`${stageName(9)}'s opening could not be composed`, cause)));
+        .catch((cause: unknown) => failed(new OpeningReadFailure("The Delivery verifier's starting instructions could not be put together", cause)));
     } else if (previousApproved) {
       void api
         .artifactContent(tenantId, previousApproved.artifactId)
@@ -356,7 +356,7 @@ export function useOpeningDispatch({
         // The record is what the cue is for (#799): one without it is not
         // sent, and the failed read is shown instead of read as "" (#570).
         cueInFlightRef.current = null;
-        setFailure({ what: "The record for the send-back cue could not be read", detail: failureReason(cause) });
+        setFailure({ what: "The send-back reason could not be read back", detail: failureReason(cause) });
         return;
       }
       const cue = sendBackResumeCue({ stage, decisions: workflowView?.decisions ?? [], messages, requirements: workflowView?.requirements ?? [], record, draft });
@@ -368,13 +368,13 @@ export function useOpeningDispatch({
       } catch (cause) {
         // Not marked as sent: the next thread or view change, or Try again, retries.
         cueInFlightRef.current = null;
-        setFailure({ what: "The send-back cue could not be sent", detail: failureReason(cause) });
+        setFailure({ what: "The send-back reason could not be passed to the specialist", detail: failureReason(cause) });
       }
     })();
   }, [stage, agentAddress, addresses, handoffSettled, loadedFor, messages, workflowView, tenantId, reloadThread, retryAttempt]);
 
   return {
-    failure: opening.error ? { what: "The opening could not be read", detail: failureReason(opening.error) } : failure,
+    failure: opening.error ? { what: "The specialist's starting instructions could not be read", detail: failureReason(opening.error) } : failure,
     retry: () => {
       setFailure(null);
       if (opening.error) void opening.refetch();

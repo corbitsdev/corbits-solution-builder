@@ -8,11 +8,11 @@
 export const CONSEQUENCE: Record<number, string> = {
   1: "Approving accepts the problem brief and opens solution shape. Revisions stay possible.",
   2: "Approving fixes the solution bounds every later stage is held to.",
-  3: "Approving selects this exact proposal and its branch as the execution path.",
+  3: "Approving picks this proposal as the one to build.",
   4: "Approving fixes the design every build check is measured against.",
-  5: "Approving records that the named audiences agree this is worth pursuing.",
+  5: "Approving confirms that the named stakeholders agree this is worth pursuing.",
   6: "Approving accepts the plan as complete and buildable, and sends it to costing.",
-  7: "Approving the cost authorizes spend against this exact plan, then freezes the build packet.",
+  7: "Approving the cost authorizes spend against this exact plan, then freezes what the build is given.",
   8: "Accepting this evidence ends the build and opens delivery review.",
   9: "Accepting this manifest completes delivery of the exact versions listed.",
 };

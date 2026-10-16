@@ -236,7 +236,7 @@ export function useStageDecisions({
     if (stage === 7 && !chosenTarget) return { ok: false as const, reason: "No delivery target has been chosen yet." };
     if (!reviewMessage || draftKind === null) return { ok: false as const, reason: "There is nothing to review yet." };
     if (stage === 8 && !stage8Evidence?.ready) {
-      return { ok: false as const, reason: stage8Evidence?.reason ?? "The build has not published an archive yet." };
+      return { ok: false as const, reason: stage8Evidence?.reason ?? "No build has been saved yet." };
     }
     // Stage 5's policy is read fresh, before anything else -- a review must
     // never auto-open on whatever default policy happened to exist when the
@@ -244,7 +244,7 @@ export function useStageDecisions({
     // with a quorum they can actually reach.
     const policy = await stage5Policy();
     if (stage === 5 && (!policy || policy.quorum > policy.stakeholders.length)) {
-      return { ok: false as const, reason: "Stakeholders need to be named, with a reachable quorum, before a review can open." };
+      return { ok: false as const, reason: "Stakeholders need to be named, with a reachable quorum, before this stage can be approved." };
     }
     const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor() });
@@ -342,7 +342,7 @@ export function useStageDecisions({
       // why the approve button is missing meanwhile.
       if (result.failed) {
         reviewFailureShownRef.current = true;
-        onError(`The review could not be opened: ${result.reason}`);
+        onError(`This stage could not be made ready for approval: ${result.reason}`);
       }
     });
   }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow, onError]);
@@ -484,7 +484,7 @@ export function useStageDecisions({
       };
       const result = await approveStage(stageApprovalDeps, { projectId: detail.project.id, stage: 9, ref });
       if (!result.ok) {
-        onError(`Delivery was recorded, but the project workflow refused the final approval: ${stageRefusalMessage(result.reason)}`);
+        onError(`Delivery was saved, but the final approval was refused: ${stageRefusalMessage(result.reason)}`);
         await refreshWorkflow();
         return;
       }
@@ -541,7 +541,7 @@ export function useStageDecisions({
           await api.persistProductRequirements(detail.project.id, markdown);
           onDetailChanged?.();
         } catch (cause) {
-          onError(`The product requirements could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+          onError(`The product requirements could not be saved: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
         }
       }
       const items = extractRequirementItems(markdown);
@@ -557,8 +557,8 @@ export function useStageDecisions({
       if (!result.ok) {
         onError(
           result.reason === "requirements_already_minted"
-            ? "The requirements changed, but this project's workflow predates re-minting and kept the earlier ids. Choose Repair this project from the project menu, then reload."
-            : `Minting the requirement ids was refused: ${stageRefusalMessage(result.reason)}`,
+            ? "The requirements changed, but this project was set up before requirements could be renumbered, so it kept the earlier ids. Choose Repair this project from the project menu, then reload."
+            : `Renumbering the requirements was refused: ${stageRefusalMessage(result.reason)}`,
         );
         return;
       }

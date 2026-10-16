@@ -33,15 +33,15 @@ const STACK_MISSING_MESSAGE =
   "The approved build plan has no Stack section, so there is nothing to freeze. Send the project back to Build plan and ask the architect to re-issue the plan with one.";
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
-  evidence_missing: "The recorded decisions don't match what this approval expects.",
+  evidence_missing: "Something changed since this page loaded. Reload and approve again.",
   quorum_not_met: "The stakeholder quorum has not been met yet.",
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
-  requirements_already_minted: "The requirement ids are already set for this project.",
+  requirements_already_minted: "The requirements are already numbered for this project.",
   stack_missing: STACK_MISSING_MESSAGE,
   stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
-  not_audience_stage: "Stakeholder decisions are recorded at Concept approval only.",
+  not_audience_stage: "Stakeholder decisions are taken at Concept approval only.",
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
@@ -54,8 +54,8 @@ export function stageRefusalMessage(reason: string): string {
 }
 
 const OPEN_REVIEW_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
-  workflow_unavailable: "The project workflow could not be read.",
-  timed_out: "The project workflow accepted the review but has not shown it open yet.",
+  workflow_unavailable: "The project could not be loaded.",
+  timed_out: "The approval was requested but has not opened yet. Wait a moment and try again.",
 };
 
 /**
@@ -140,11 +140,11 @@ export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Pro
 export function stage6RefusalMessage(reason: string): string {
   switch (reason) {
     case "stack_missing":
-      return "The workflow refused this plan: its Stack section is missing or not in the required shape (a fenced JSON block). Ask the architect to resend it before approving.";
+      return "This plan was refused: its Stack section is missing or not in a form Solution Builder can check. Ask the architect to resend it before approving.";
     case "stack_uncited":
-      return "The workflow refused this plan: every part of its Stack section must cite the requirement that forces it. Ask the architect to fix the citations before approving.";
+      return "This plan was refused: every part of its Stack section must cite the requirement that forces it. Ask the architect to fix the citations before approving.";
     case "stack_unknown_requirement":
-      return "The workflow refused this plan: its Stack section cites a requirement id that does not exist. Ask the architect to fix the citations before approving.";
+      return "This plan was refused: its Stack section cites a requirement id that does not exist. Ask the architect to fix the citations before approving.";
     default:
       return stageRefusalMessage(reason);
   }
@@ -187,7 +187,7 @@ export function stage6StackRemediation(): Remediation {
 export function stage6CitationRemediation(requirementsBlock: string, detail: string): Remediation {
   return {
     kind: "ask_specialist",
-    label: "Send the architect the current ids",
+    label: "Send the architect the current requirement list",
     message: `The requirement ids were re-issued since you last cited them, and the plan now cites ids that do not exist (${detail}). Below is the authoritative list. Re-issue the whole plan, the "## Stack" block included, citing only these ids; where an old citation no longer has an id, cite the requirement that now covers it or say so under "Risks, unknowns and non-goals".\n\n${requirementsBlock}`,
   };
 }
@@ -205,7 +205,7 @@ export function citationProblemDetail(problem: string): string {
 export function stage6StackProblem(planText: string, requirementIds: ReadonlySet<string>): string | null {
   const stack = parseStackRecord(planText);
   if (!stack) {
-    return "The build plan's Stack section is missing or not in the required shape (a fenced JSON block). Ask the architect to resend it before approving.";
+    return "The build plan's Stack section is missing or not in a form Solution Builder can check. Ask the architect to resend it before approving.";
   }
   const problems = checkStackCitations(stack, requirementIds);
   if (problems.length === 0) return null;
@@ -251,7 +251,7 @@ export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage
   if (plan.status === "unread") {
     return {
       message:
-        "The approved build plan could not be read from this project's artifacts, so its Stack section could not be checked. Reload and try again.",
+        "The approved build plan could not be read, so its Stack section could not be checked. Reload and try again.",
     };
   }
   const stack = parseStackRecord(plan.text);
