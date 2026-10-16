@@ -132,7 +132,7 @@ async function workflowStage(transport: Transport, projectId: string): Promise<{
 
 export async function loadProjectView(projectId: string, transport: Transport = createHubTransport()): Promise<ProjectDetail> {
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   const [project, graph] = await Promise.all([
     installerRequireProject(transport, projectId),
     artifactGraphFor(transport, projectId),

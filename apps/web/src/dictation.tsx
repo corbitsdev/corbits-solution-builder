@@ -153,7 +153,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
           else end(payload.reason, payload.help ?? null);
         });
       } catch (cause) {
-        end(`The page could not reach the shell: ${String(cause)}`);
+        end(`Dictation could not start: ${String(cause)}`);
         return;
       }
       session.current = {
@@ -245,7 +245,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
     };
     recognition.onerror = (event) => {
       if (event.error === "aborted" || event.error === "no-speech") return;
-      ended = REFUSALS[event.error] ?? `Dictation stopped: ${event.error}${event.message ? ` (${event.message})` : ""}.`;
+      ended = REFUSALS[event.error] ?? `Dictation stopped unexpectedly (${event.error}${event.message ? `: ${event.message}` : ""}). Try again.`;
     };
     recognition.onend = () => {
       closeMeter();

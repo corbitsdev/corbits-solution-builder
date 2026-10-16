@@ -24,6 +24,6 @@ export async function saveDesignerSettings(
   patch: Partial<DesignerSettings>,
 ): Promise<DesignerSettings> {
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   return installerSaveDesignerSettings(transport, workspace.tenantId, patch);
 }

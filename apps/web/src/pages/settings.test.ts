@@ -37,9 +37,9 @@ describe("settings page copy", () => {
   });
 
   test("host connection names local vs. remote Interchange from hub mode", () => {
-    expect(hostConnectionCopy(fixtureStatus())).toBe("Local Interchange Connection");
+    expect(hostConnectionCopy(fixtureStatus())).toBe("This computer");
     expect(hostConnectionCopy(fixtureStatus({ hub: { mode: "remote", url: "https://hub.example", ready: true, detail: "" } }))).toBe(
-      "Remote Interchange Connection",
+      "A remote server",
     );
   });
 
@@ -48,7 +48,7 @@ describe("settings page copy", () => {
     expect(hostCredentialsCopy(fixtureStatus({ credentialBackend: "file" }))).toBe("private file on disk");
     expect(
       hostCredentialsCopy(fixtureStatus({ credentialBackend: "file", hub: { mode: "remote", url: "https://hub.example", ready: true, detail: "" } })),
-    ).toBe("Interchange Credential Storage");
+    ).toBe("Kept on the remote server");
   });
 
   test("the Data row is the host-reported workspace directory, not a guessed Library folder", () => {

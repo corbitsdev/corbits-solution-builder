@@ -76,8 +76,8 @@ time.
 On launch the app starts its background host, waits for it to be ready, and
 opens a window. The first start takes longer than later ones because the host
 unpacks its database. The window reads "Starting…" while it waits. After a
-while it may read "Still starting. The host is taking longer than usual to
-bring up the hub." That is normal on a first run.
+while it may read "Still starting. This takes longer the first time." That
+is normal on a first run.
 
 A tray icon appears in the menu bar while the app runs. Its menu has two
 items:

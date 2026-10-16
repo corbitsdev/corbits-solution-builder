@@ -377,7 +377,7 @@ describe("jsonFromZip", () => {
     const zip = new JSZip();
     zip.file("notes.txt", "hello");
     const bytes = await zip.generateAsync({ type: "uint8array" });
-    await expect(jsonFromZip(bytes, "empty.zip")).rejects.toThrow(/no JSON bundle inside/);
+    await expect(jsonFromZip(bytes, "empty.zip")).rejects.toThrow(/does not contain a Solution Builder project/);
   });
 
   test("rejects a zip with more than one json", async () => {

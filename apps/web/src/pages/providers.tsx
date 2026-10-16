@@ -251,7 +251,7 @@ export function ProviderList({
         const hint = connected
           ? ready
             ? describeConnected(connected)
-            : (connected.statusDetail ?? connected.status)
+            : (connected.statusDetail ?? connected.status.replace(/[_-]+/g, " "))
           : waiting
             ? "Waiting for the browser"
             : row.how;
@@ -320,7 +320,7 @@ export function ProviderList({
               <b>
                 {row.name}
                 {rank ? <em className={rank.startsWith("Default") ? "default-mark" : "fallback-mark"}>{rank}</em> : null}
-                {sortable && !rank ? <em className="fallback-mark">No model enabled · skipped</em> : null}
+                {sortable && !rank ? <em className="fallback-mark">No usable model · skipped</em> : null}
               </b>
               <span>{hint}</span>
             </div>
@@ -415,7 +415,7 @@ export function ProviderList({
                 {manage && row.kind !== "oauth" ? (
                   <ChromeBtn
                     kind="refresh"
-                    title="Re-pull the model list"
+                    title="Ask the provider for its model list again"
                     disabled={busy !== null}
                     loading={busy === row.id}
                     onClick={() =>

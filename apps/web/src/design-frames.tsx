@@ -43,7 +43,7 @@ export function FrameSelect({ value, onChange }: { value: FrameMode; onChange: (
       <option value="auto">Frame: as designed</option>
       <option value="desktop">{DESKTOP_WINDOW.name}</option>
       <option value="phone">{IPHONE_17_PRO.name}</option>
-      <option value="pane">Pane</option>
+      <option value="pane">No frame</option>
     </select>
   );
 }

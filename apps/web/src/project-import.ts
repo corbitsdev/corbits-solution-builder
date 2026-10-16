@@ -287,7 +287,7 @@ export async function jsonFromZip(bytes: Uint8Array, sourceName: string): Promis
   const zip = await JSZip.loadAsync(bytes);
   const jsonFiles = Object.values(zip.files).filter((entry) => !entry.dir && isJsonEntry(entry.name));
   if (jsonFiles.length === 0) {
-    throw new Error(`${sourceName} has no JSON bundle inside.`);
+    throw new Error(`${sourceName} does not contain a Solution Builder project.`);
   }
   if (jsonFiles.length > 1) {
     throw new Error(`${sourceName} has more than one JSON file; import needs exactly one.`);
