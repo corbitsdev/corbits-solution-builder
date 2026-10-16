@@ -553,7 +553,11 @@ enables once the quorum is met with no reject or revise outstanding.
 
 When "You" is the only stakeholder, the gate reads "You're the only
 stakeholder. Happy with it?" and one click records your Proceed and the
-approval together.
+approval together. The same one click serves when you are listed among
+other stakeholders and your own Proceed is all the quorum still lacks:
+the gate reads "Your proceed is the one still needed. Approving records
+it." and **Approve and continue** is enabled. It never overrides a Needs
+revision or Reject; those are changed on the stakeholder's chip.
 
 ### Build plan
 
