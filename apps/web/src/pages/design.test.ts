@@ -58,8 +58,12 @@ describe("stage 4 design pane", () => {
 });
 
 describe("anchorLabel", () => {
-  test("prefers a stable test id over a DOM path", () => {
-    expect(anchorLabel({ testId: "hero", domPath: "div:nth-child(1)" })).toBe("#hero");
+  test("says which part of the design in words, never an id or a DOM path", () => {
+    expect(anchorLabel({ testId: "save-button", domPath: "div:nth-child(1)", role: "button", textFingerprint: "Save" })).toBe("the “Save” button");
+    expect(anchorLabel({ testId: "hero-banner", domPath: "div:nth-child(1)" })).toBe("the hero banner element");
+    expect(anchorLabel({ domPath: "div:nth-child(2) > button:nth-child(1)", role: "button" })).toBe("a button on this screen");
+    expect(anchorLabel({ domPath: "div:nth-child(2)" })).toBe("an element on this screen");
+    expect(anchorLabel({})).toBe("the whole design");
   });
 });
 
