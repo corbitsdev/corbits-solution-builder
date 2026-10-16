@@ -125,7 +125,7 @@ export function onboardingRows(
       kind: "oauth" as const,
       needsBaseUrl: false,
       group: "signin" as const,
-      sub: "OAuth",
+      sub: "Use a subscription you already pay for",
       action: "Sign in",
     })),
     ...apiKeyProviders.map((entry) => ({
@@ -143,7 +143,7 @@ export function onboardingRows(
       kind: "local_endpoint" as const,
       needsBaseUrl: true,
       group: "local" as const,
-      sub: "models load dynamically",
+      sub: "Runs on this computer. No account, no key.",
       action: "Detect",
     },
   ];
@@ -296,7 +296,7 @@ function WelcomeStep({ onSkip, onNext }: { onSkip: () => void; onNext: () => voi
         </li>
         <li>
           <span>
-            <b>You hold the gates.</b> Nothing advances until you approve it. Replying sends it back.
+            <b>You hold the gates.</b> Nothing advances until you approve it. Reply and the specialist revises it.
           </span>
         </li>
         <li>
@@ -471,7 +471,7 @@ function ProviderStep({
               const working = busy === row.id;
               const sub =
                 connected && ready
-                  ? `${connected.models.length} model${connected.models.length === 1 ? "" : "s"} on this machine`
+                  ? `${connected.models.length} model${connected.models.length === 1 ? "" : "s"} ${row.kind === "local_endpoint" ? "on this machine" : "available"}`
                   : waiting
                     ? "Waiting for the browser"
                     : connected
@@ -561,7 +561,7 @@ function ProviderStep({
                       ) : null}
                       {row.group === "custom" ? (
                         <p className="byo-note">
-                          <b>Heads up</b> — we can't verify a custom endpoint until it answers. If the shape doesn't match, the first run may fail.
+                          <b>Heads up</b> — we can't check a custom server until it answers. If it doesn't speak the OpenAI protocol, the first draft may fail.
                         </p>
                       ) : null}
                       <button type="submit" className="btn" disabled={!canSave(row)} style={{ alignSelf: "flex-end" }}>

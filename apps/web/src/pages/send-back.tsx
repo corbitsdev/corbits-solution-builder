@@ -55,7 +55,7 @@ export function SendBackPicker({
       <p className="inline-note">
         {target === stage
           ? "The work is redone at this stage. What was decided is kept as history."
-          : `Stages ${target} to ${stage} are walked again from there. Each specialist revises its current document against the change rather than starting over.`}
+          : `Every stage from ${stageName(target)} to ${stageName(stage)} is revisited from there. Each specialist revises its current document against the change rather than starting over.`}
       </p>
     </div>
   );

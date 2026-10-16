@@ -123,7 +123,7 @@ const STAGE_STEPS: Record<number, () => Step[]> = {
       target: '[data-tour="audience-decisions"]',
       title: "Where to submit",
       content:
-        "Each audience records its own decision here. The stage moves on once the configured quorum has proceeded.",
+        "Each stakeholder's decision goes here. The stage moves on once enough of them (the quorum you set) choose Proceed.",
     },
   ],
   6: () => draftingSteps(STAGE_GOAL[6]!),
@@ -139,7 +139,7 @@ const STAGE_STEPS: Record<number, () => Step[]> = {
       target: '[data-tour="build-panel"]',
       title: "Where to submit",
       content:
-        "Start the build attempt here. Permissions and material changes still wait on you; this is where the evidence lands.",
+        "Start a build attempt here. Anything the worker asks permission for still waits on you, and the build evidence appears here once an attempt's build is saved.",
     },
   ],
   9: () => [

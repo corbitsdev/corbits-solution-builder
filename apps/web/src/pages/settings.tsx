@@ -571,10 +571,10 @@ function Designer() {
   };
 
   return (
-    <Section title="Designer" lead="What the stage-4 designer draws to.">
+    <Section title="Designer" lead="What the GUI design specialist draws to.">
       <div className="section-body">
         {error ? <Banner tone="error" title={error} /> : null}
-        <Row label="Surface" hint="Light, dark, or what the brief calls for">
+        <Row label="Surface" hint="Light, dark, or whatever suits the project">
           <SegCtl<DesignerSettings["surface"]>
             label="Surface"
             value={settings?.surface ?? "light"}
@@ -583,7 +583,7 @@ function Designer() {
             options={[
               { id: "light", label: "Light" },
               { id: "dark", label: "Dark" },
-              { id: "brief", label: "Brief" },
+              { id: "brief", label: "Project decides" },
             ]}
           />
         </Row>

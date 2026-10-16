@@ -11,7 +11,7 @@
  * before.
  */
 import { useMemo } from "react";
-import { StateLabel } from "../../components.jsx";
+import { StateLabel, stageName } from "../../components.jsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { parseStackRecord } from "@solutions-builder/app/stack";
@@ -204,7 +204,7 @@ export function EstimateView({
         <ul className="scope-checklist">
           {freeze.frozen.map((ref) => (
             <li key={ref.stage}>
-              Stage {ref.stage} frozen at version {ref.version}
+              {stageName(ref.stage)} frozen at version {ref.version}
             </li>
           ))}
         </ul>

@@ -391,7 +391,7 @@ export function Stage6Panel({
           : page === "requirements"
             ? requirementsMinted || requirementsNode
               ? "looking for the requirements document"
-              : "waiting on opening material"
+              : "waiting for the approved documents from earlier stages"
             : page === "people"
               ? "waiting on the product requirements"
               : reviewInput
@@ -482,7 +482,7 @@ export function Stage6Panel({
             </div>
             {reviewInput ? <HowItRuns planText={reviewInput} /> : null}
             {current.status === "idle" && page === "requirements" ? (
-              <p className="inline-note">Waiting on this stage's opening material.</p>
+              <p className="inline-note">Waiting for the approved documents from earlier stages.</p>
             ) : null}
             {current.status === "idle" && page === "people" ? (
               <p className="inline-note">Written once the product requirements are, from them and the design's screens.</p>

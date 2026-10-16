@@ -53,10 +53,10 @@ const PURPOSE: Record<number, string> = {
   2: "Record the constraints, risks, and non-goals that shape the work.",
   3: "Compare approaches and make the selection explicit.",
   4: "Review the proposed experience and give contextual feedback.",
-  5: "Collect the audience decisions needed to align the work.",
+  5: "Collect the stakeholders' decisions needed to align the work.",
   6: "Check that the plan covers the approved work and its verification.",
   7: "Choose the target and review the estimate and its uncertainty.",
-  8: "Review execution evidence and address real tool-permission requests.",
+  8: "Check what the build produced, allow what the worker asks to run, and answer its questions.",
   9: "Verify the delivery evidence and decide whether it is acceptable.",
 };
 
@@ -185,7 +185,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   if (latest) {
     return {
       title: "A reply needs clarification",
-      detail: [purpose, "A specialist reply is recorded, but it does not read as a complete draft yet. Ask for the complete stage draft, or add the missing detail."].join(" "),
+      detail: [purpose, "A specialist reply has arrived, but it does not read as a complete draft yet. Ask for the complete stage draft, or add the missing detail."].join(" "),
       question: null,
       draft: null,
       readyNote: null,
@@ -194,7 +194,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   if (messages.length > 0) {
     return {
       title: "Waiting for a reply",
-      detail: [purpose, "Your message is recorded; no specialist reply is visible yet."].join(" "),
+      detail: [purpose, "Your message was sent; no specialist reply is visible yet."].join(" "),
       question: null,
       draft: null,
       readyNote: null,
@@ -202,7 +202,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   }
   return {
     title: "Start the conversation",
-    detail: [purpose, "No message is recorded for this stage yet."].join(" "),
+    detail: [purpose, "No messages for this stage yet."].join(" "),
     question: null,
     draft: null,
     readyNote: null,
