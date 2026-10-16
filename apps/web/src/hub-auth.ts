@@ -85,7 +85,7 @@ export async function signUpHub(input: { email: string; password: string; name: 
     throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not create the account."));
   }
   const user = userOf(parsed);
-  if (!user) throw new ApiError(response.status, "unknown", "The hub accepted the account but did not return a user.");
+  if (!user) throw new ApiError(response.status, "unknown", "Your account was created, but the sign-in did not complete. Try again.");
   return user;
 }
 
@@ -99,7 +99,7 @@ export async function signInHub(input: { email: string; password: string }): Pro
     throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not sign in."));
   }
   const user = userOf(parsed);
-  if (!user) throw new ApiError(response.status, "unknown", "The hub accepted the sign-in but did not return a user.");
+  if (!user) throw new ApiError(response.status, "unknown", "The sign-in did not complete. Try again.");
   return user;
 }
 
@@ -130,6 +130,6 @@ export async function renameHubUser(name: string): Promise<HubUser> {
   });
   if (!response.ok) throw new ApiError(response.status, "unknown", messageOf(parsed, "Could not save the name."));
   const session = await getHubSession();
-  if (!session) throw new ApiError(401, "unauthenticated", "The session ended while saving the name.");
+  if (!session) throw new ApiError(401, "unauthenticated", "You were signed out while saving the name. Sign in and try again.");
   return session.user;
 }

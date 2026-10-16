@@ -369,7 +369,7 @@ function Account({ user, embedded, onUserChanged, onSignOut }: { user: HubUser; 
   };
 
   return (
-    <Section title="Account" lead={embedded ? "This computer's workspace owner. The host signs you in; a password lets you sign in by hand too." : "Who you are on this hub."}>
+    <Section title="Account" lead={embedded ? "This computer's workspace owner. The host signs you in; a password lets you sign in by hand too." : "Who you are on this server."}>
       <div className="section-body">
         {error ? <Banner tone="error" title={error} /> : null}
         {done ? <Banner tone="okay" title={done} /> : null}
@@ -745,7 +745,7 @@ function DesignDocuments() {
 /** Local runs the hub in this process on the embedded database; remote points
     at a separately hosted Interchange (`status.hub.mode`, from hub-client.ts). */
 export function hostConnectionCopy(status: HostStatus): string {
-  return status.hub.mode === "embedded" ? "Local Interchange Connection" : "Remote Interchange Connection";
+  return status.hub.mode === "embedded" ? "This computer" : "A remote server";
 }
 
 /**
@@ -755,7 +755,7 @@ export function hostConnectionCopy(status: HostStatus): string {
  * backend: the OS keychain where available, else a private file.
  */
 export function hostCredentialsCopy(status: HostStatus): string {
-  if (status.hub.mode === "remote") return "Interchange Credential Storage";
+  if (status.hub.mode === "remote") return "Kept on the remote server";
   return status.credentialBackend === "keychain" ? "macOS Keychain" : "private file on disk";
 }
 

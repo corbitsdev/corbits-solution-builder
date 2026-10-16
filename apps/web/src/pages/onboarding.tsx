@@ -475,7 +475,7 @@ function ProviderStep({
                   : waiting
                     ? "Waiting for the browser"
                     : connected
-                      ? (connected.statusDetail ?? connected.status)
+                      ? (connected.statusDetail ?? connected.status.replace(/[_-]+/g, " "))
                       : failed === row.id && row.kind === "local_endpoint"
                         ? "Not detected — start Ollama, then retry"
                         : row.sub;

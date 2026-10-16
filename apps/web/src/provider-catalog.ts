@@ -417,7 +417,7 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
 // OpenAI and Anthropic both put a readable reason in `error.message`; the
 // raw body is a fallback for providers that do not.
 export function rejectionMessage(status: number, detail: string): string {
-  const prefix = `The provider rejected this key (HTTP ${status})`;
+  const prefix = `The provider rejected this key (error ${status})`;
   if (!detail) return `${prefix}.`;
   let message = detail.slice(0, 200);
   try {
@@ -455,7 +455,7 @@ export async function connectApiKeyProvider(
   input: { providerId: string; label: string; baseUrl?: string; apiKey: string },
 ): Promise<ListedProvider> {
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   const endpoint = await resolveConnectEndpoint(transport, workspace.tenantId, input.providerId, input.baseUrl);
   if (!endpoint.baseURL) {
     throw new Error(`${input.label} needs a base URL.`);
@@ -476,7 +476,7 @@ export async function connectApiKeyProvider(
 
   const connected = await listConnectedProviders(transport);
   const row = connected.find((entry) => entry.id === modelProviderId);
-  if (!row) throw new Error("The provider connected, but did not come back in the catalog listing.");
+  if (!row) throw new Error("The provider connected, but did not show up in the list. Try again.");
   return row;
 }
 
@@ -493,7 +493,7 @@ export async function connectLocalProvider(transport: Transport, input: { baseUr
   const canonicalNames = await discoverModels("openai-compatible", baseURL, "");
 
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
     providerId: LOCAL_PROVIDER_ID,
     label: "Ollama",
@@ -506,7 +506,7 @@ export async function connectLocalProvider(transport: Transport, input: { baseUr
 
   const connected = await listConnectedProviders(transport);
   const row = connected.find((entry) => entry.id === modelProviderId);
-  if (!row) throw new Error("The provider connected, but did not come back in the catalog listing.");
+  if (!row) throw new Error("The provider connected, but did not show up in the list. Try again.");
   return row;
 }
 
@@ -564,7 +564,7 @@ export async function connectOAuthProvider(
   const adapter = OAUTH_ADAPTER_OF[input.providerId];
   if (!adapter) throw new Error(`${input.label} has no registered inference adapter.`);
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   const { authorizeUrl } = await transport.fetch<{ authorizeUrl: string }>("POST", `/api/oauth/${input.providerId}/start`);
   onAuthorizeUrl?.(authorizeUrl);
   const tokens = await waitForOAuthTokens(transport, input.providerId);
@@ -904,7 +904,7 @@ export async function refreshProviderModels(
   modelProviderId: string,
 ): Promise<{ clearedModel: string | null }> {
   const workspace = await resolveWorkspace(transport);
-  if (!workspace) throw new Error("The workspace is not installed yet.");
+  if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
   const catalog = catalogFor(transport, workspace.tenantId);
   // A stale base would send the refresh itself to a 404; mend it first.
   await repairProviderBases(transport);
@@ -920,7 +920,7 @@ export async function refreshProviderModels(
     canonicalNames = await discoverModels(row.plugin, row.baseURL, "");
   } catch (cause) {
     if (isSealedCredentialFailure(cause)) {
-      throw new Error("This provider's key is sealed in the hub, so its model list can only be refreshed by reconnecting it.");
+      throw new Error("To refresh this provider's models, reconnect it.");
     }
     throw cause;
   }

@@ -45,6 +45,21 @@ function startedLabel(createdAt: string): string {
   return `Started ${new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
+/**
+ * Why an import failed, for the toast. The bundle validators say exactly
+ * which field is wrong, in the bundle's own terms; the person is told the
+ * file is not a Solution Builder export, with that detail in parentheses.
+ */
+export function importFailureText(fileName: string, cause: unknown): string {
+  if (cause instanceof ApiFailure) return cause.detail.message;
+  if (cause instanceof SyntaxError) return `${fileName} is not a JSON file.`;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (/^(not a project bundle|unsupported project bundle|project bundle)/.test(message)) {
+    return `${fileName} is not a Solution Builder project export, or it is damaged (${message}).`;
+  }
+  return message;
+}
+
 /** What the import did and where the project landed; the version count only when a document had more than one. */
 export function importNotice(fileName: string, brought: ImportOutcome): string {
   const written =
@@ -100,14 +115,7 @@ export function Projects({
       onChanged();
       onOpen(brought.projectId);
     } catch (cause) {
-      toast.error(
-        cause instanceof ApiFailure
-          ? cause.detail.message
-          : cause instanceof SyntaxError
-            ? `${file.name} is not a JSON file.`
-            : String(cause),
-        { id: importing },
-      );
+      toast.error(importFailureText(file.name, cause), { id: importing });
       // A write the host refused partway leaves the project with what was
       // written before it (#879); shown now, it is not mistaken later for
       // one that imported whole.

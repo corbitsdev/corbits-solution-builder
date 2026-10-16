@@ -139,7 +139,7 @@ function Booting({ offline }: { offline: boolean }) {
         offline
           ? "The host is not answering yet."
           : slow
-            ? "Still starting. The host is taking longer than usual to bring up the hub."
+            ? "Still starting. This takes longer the first time."
             : "Starting…"
       }
       brand={<Mark size={26} />}
@@ -722,7 +722,7 @@ export function App() {
           setAuth("signed-in");
           return;
         }
-        setMintError("The hub accepted the workspace owner but did not sign them in.");
+        setMintError("Your account was set up, but you were not signed in. Try again.");
         return;
       } catch (cause) {
         if (attempt === 0) {
@@ -1024,13 +1024,13 @@ export function App() {
           // Said rather than left to be wondered about (#777): every
           // request on this page waits on the host, and the host's own log
           // names which requests are slow.
-          <Banner tone="warning" title={`The host is answering slowly: about ${(slowHost / 1000).toFixed(1)} s per request`}>
-            Everything on this page waits on it. Its log says which requests are slow and whether its event loop is stalling.
+          <Banner tone="warning" title={`Solution Builder is responding slowly: about ${(slowHost / 1000).toFixed(1)} seconds per action`}>
+            Everything on this page waits on it. If it stays slow, restart the app; the host's log says which requests were slow.
           </Banner>
         ) : null}
 
         {error ? (
-          <Banner tone="error" title="That was refused">
+          <Banner tone="error" title="Setup did not finish">
             {error}
           </Banner>
         ) : null}

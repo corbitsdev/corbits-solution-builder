@@ -42,7 +42,7 @@ export function workspaceUsage(usages: readonly ProjectUsage[]): ProjectUsage {
  * model that wrote it, so this is offered as context, not attribution.
  */
 export function formatUsage(usage: ProjectUsage, currentModel: string | null): string {
-  const turnLabel = `${usage.turns} agent turn${usage.turns === 1 ? "" : "s"}`;
+  const turnLabel = `${usage.turns} specialist repl${usage.turns === 1 ? "y" : "ies"}`;
   return currentModel ? `${turnLabel} · not priced here · currently drafting with ${currentModel}` : `${turnLabel} · not priced here`;
 }
 

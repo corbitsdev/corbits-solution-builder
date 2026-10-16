@@ -186,7 +186,7 @@ export function ZenGarden() {
             className="zen-garden-grip"
             role="separator"
             aria-orientation="horizontal"
-            aria-label="Busy strip height"
+            aria-label="Zen garden height"
             aria-valuenow={size.height ?? undefined}
             aria-valuemin={STRIP_MIN_HEIGHT}
             tabIndex={0}

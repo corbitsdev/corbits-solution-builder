@@ -354,7 +354,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiFailure(
       detail ?? {
         code: "internal_error",
-        message: `The host answered ${response.status}.`,
+        message: `Solution Builder could not do that (error ${String(response.status)}). Try again.`,
         correlationId: "-",
         retryable: false,
       },
@@ -599,7 +599,7 @@ export type InstallState = PackageInstallState;
 const HOSTED_INSTALL: InstallState = {
   installed: true,
   appVersion: APP_VERSION,
-  detail: "Hosted hub: managed there.",
+  detail: "Managed by your hosted server.",
 };
 
 const TITLE_MAX = 60;
@@ -685,12 +685,13 @@ async function hostSidecar(): Promise<SidecarCapability> {
  * placed nothing for the stall bound. Each is a different thing to fix.
  */
 function placementFailure(what: string, result: Exclude<PlacementResult, { outcome: "placed" }>): ApiFailure {
+  const named = what.charAt(0).toUpperCase() + what.slice(1);
   const message =
     result.outcome === "stalled"
-      ? `The hub stopped placing ${what} before it was ready.`
+      ? `${named} did not start in time. Try again.`
       : result.status === "missing"
-        ? `The hub no longer lists ${what}.`
-        : `The hub ended ${what} before it was placed (${result.status}).`;
+        ? `${named} is no longer available. Try again.`
+        : `${named} stopped before it was ready (${result.status}). Try again.`;
   return new ApiFailure({ code: "unavailable", message, correlationId: "-", retryable: true });
 }
 
@@ -705,13 +706,13 @@ export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars" 
  *  fails loudly instead of silently deploying an empty tree. */
 async function fetchClosureManifestOrThrow(): Promise<ClosureManifest> {
   const response = await fetch("/closure/manifest.json", { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`closure manifest unavailable (HTTP ${String(response.status)})`);
+  if (!response.ok) throw new Error(`Part of Solution Builder is missing from this install (closure manifest, error ${String(response.status)}). Reinstall the app.`);
   return (await response.json()) as ClosureManifest;
 }
 
 async function fetchClosureTarball(filename: string): Promise<Uint8Array> {
   const tarball = await fetch(`/closure/${filename}`, { credentials: "same-origin" });
-  if (!tarball.ok) throw new Error(`could not fetch closure tarball ${filename}`);
+  if (!tarball.ok) throw new Error(`Part of Solution Builder is missing from this install (${filename}). Reinstall the app.`);
   return new Uint8Array(await tarball.arrayBuffer());
 }
 
@@ -732,7 +733,7 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
   const files: Record<string, string> = {};
   for (const name of ["workflow.js", "actions.js", "loops.js"]) {
     const response = await fetch(`/project-workflow/${name}`, { credentials: "same-origin" });
-    if (!response.ok) throw new Error(`project workflow entry ${name} unavailable (HTTP ${String(response.status)})`);
+    if (!response.ok) throw new Error(`Part of Solution Builder is missing from this install (project workflow ${name}, error ${String(response.status)}). Reinstall the app.`);
     files[name] = await response.text();
   }
   return { files };
@@ -746,7 +747,7 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
 async function packedSpecialist(roleId: string): Promise<PackedSpecialist> {
   const read = async (path: string) => {
     const response = await fetch(`/specialists/${roleId}/${path}`, { credentials: "same-origin" });
-    if (!response.ok) throw new Error(`specialist ${roleId} ${path} unavailable (HTTP ${String(response.status)})`);
+    if (!response.ok) throw new Error(`Part of Solution Builder is missing from this install (specialist ${roleId}, ${path}, error ${String(response.status)}). Reinstall the app.`);
     return response.text();
   };
   const [workflow, dependencies] = await Promise.all([read(SPECIALIST_ENTRY_PATH), read(SPECIALIST_DEPENDENCIES_PATH)]);
@@ -878,7 +879,7 @@ async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: s
     parsed = undefined;
   }
   if (!response.ok) {
-    const message = (parsed as { error?: string } | undefined)?.error ?? `The host answered ${response.status}.`;
+    const message = (parsed as { error?: string } | undefined)?.error ?? `Solution Builder could not do that (error ${String(response.status)}). Try again.`;
     throw new ApiFailure(
       { code: response.status === 415 ? "unsupported_type" : response.status === 413 ? "too_large" : "internal_error", message, correlationId: "-", retryable: false },
       response.status,
@@ -906,7 +907,7 @@ async function downloadArtifactBytes(tenantId: string, artifactId: string): Prom
   }
   if (!response.ok) {
     throw new ApiFailure(
-      { code: "internal_error", message: `The host answered ${response.status}.`, correlationId: "-", retryable: false },
+      { code: "internal_error", message: `Solution Builder could not do that (error ${String(response.status)}). Try again.`, correlationId: "-", retryable: false },
       response.status,
     );
   }
@@ -984,7 +985,7 @@ async function asWorkspaceOwner<T>(
     if (!workspace) {
       throw new ApiFailure({
         code: "conflict",
-        message: "The workspace is not installed yet.",
+        message: "Solution Builder is still setting up. Try again in a moment.",
         correlationId: "-",
         retryable: false,
         install: true,
@@ -1147,7 +1148,7 @@ function activeModelCacheClear(): void {
 function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean; reopen?: boolean }): Promise<EnsuredProjectWorkflow> {
   return asWorkspaceOwner(async (transport, workspaceTenantId) => {
     const workspace = await resolveWorkspace(transport);
-    if (!workspace) throw new Error("The workspace is not installed yet.");
+    if (!workspace) throw new Error("Solution Builder is still setting up. Try again in a moment.");
     // The same person is a different principal in each tenant, and the
     // hub stamps a decision with the caller's principal in the tenant it
     // is signalled in: the project's own since #29. So the owner's
@@ -1188,7 +1189,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean;
     // A delivered project's last run is not placed and need not be (#647).
     if (!ref.delivered) {
       const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
+      if (placement.outcome !== "placed") throw placementFailure("this project", placement);
     }
     cacheProjectWorkflowRef(projectId, ref);
     return ref;
@@ -1590,7 +1591,7 @@ export const api = {
       if (!workspace) {
         throw new ApiFailure({
           code: "conflict",
-          message: "The workspace is not installed yet.",
+          message: "Solution Builder is still setting up. Try again in a moment.",
           correlationId: "-",
           retryable: false,
           install: true,
@@ -2658,7 +2659,7 @@ export const api = {
         roleKey,
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
-      if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey.replace(/-+/g, " ")} specialist`, placement);
       return deployment;
     });
     call.catch(() => ensureStage6RoleAgentCalls.delete(key));
@@ -2798,12 +2799,12 @@ export const api = {
       const ref =
         (await ensureProjectWorkflowCalls.get(projectId)) ??
         (await resolveProjectWorkflowRef(transport, projectId));
-      if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
+      if (!ref) throw new Error("This project has not finished setting up. Wait a moment and try again.");
       // A delivered project's run has ended. A send-back revives it first
       // (#859) and lands on the fresh run; nothing else is taken.
       let target: ProjectWorkflowDeployment = ref;
       if ("delivered" in ref && ref.delivered) {
-        if (decision["kind"] !== "send_back") throw new Error("This project is delivered and takes no decision other than a send-back.");
+        if (decision["kind"] !== "send_back") throw new Error("This project is delivered. The only thing left to do is send it back to an earlier stage.");
         target = await api.reopenProjectWorkflow(projectId);
       }
       // A `signal_id_conflict` (409, a different payload under a reused
