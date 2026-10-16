@@ -24,7 +24,13 @@ describe("stage 5 audience packages", () => {
     // `AudienceGate`, and one click proceeds and approves for a sole "You".
     expect(source).not.toContain("audience-gate");
     expect(source.indexOf("\n          Approve and continue\n")).toBeGreaterThan(source.indexOf("export function AudienceGate("));
-    expect(source).toContain('const solo = audiences.length === 1 && isYou(audiences[0]!) && requiredQuorum <= 1;');
+    expect(source).toContain("const solo = audiences.length === 1 && you !== null && requiredQuorum <= 1;");
+    // #896: so does one click when the person's own proceed is all the
+    // quorum still lacks among other stakeholders (`own-proceed.ts`).
+    expect(source).toContain("const ownDecides = own !== null && ownProceedDecides(workflowView?.stage5Quorum ?? null, you?.name ?? null);");
+    expect(source).toContain("const oneClick = solo || ownDecides;");
+    expect(source).toContain("disabled={!canApprove || (!oneClick && !quorumMet)}");
+    expect(source).toContain("onClick={oneClick ? () => void proceedAndApprove() : onApprove}");
     expect(source).toContain('decision: "proceed",');
     expect(index).toContain("{stage === 5 ? (\n            <AudienceGate");
     // #232: one export menu with three ways out replaces the one save button.

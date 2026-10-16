@@ -35,6 +35,7 @@ import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { unrecordedPackageRevisions } from "../package-revisions.ts";
+import { ownProceedDecides } from "../own-proceed.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
@@ -1047,10 +1048,11 @@ export function AudiencePackages({
  * Stage 5's gate (#725), above the chat box like every other stage's: the
  * quorum tally and Approve and continue. The workflow's verdict is the only
  * gate, and `approveReasonText` the one translation of it. When the person
- * is the only stakeholder, the one click records their proceed and then
- * approves -- the two decisions the chip popover and this button would
- * otherwise take one at a time, in that order; the reducer still judges
- * each. With more stakeholders the button is held until the quorum is met.
+ * is the only stakeholder, or their own proceed is all the quorum still
+ * lacks (#896), the one click records their proceed and then approves --
+ * the two decisions the chip popover and this button would otherwise take
+ * one at a time, in that order; the reducer still judges each. Otherwise
+ * the button is held until the quorum is met.
  */
 export function AudienceGate({
   detail,
@@ -1088,21 +1090,33 @@ export function AudienceGate({
   const blockedBy = workflowView?.stage5Quorum?.blocked ?? [];
   const staleBy = workflowView?.stage5Quorum?.stale ?? [];
   const quorumMet = workflowView?.stage5Quorum?.met === true;
-  const solo = audiences.length === 1 && isYou(audiences[0]!) && requiredQuorum <= 1;
+  const you = audiences.find(isYou) ?? null;
+  const own = you ? (packages.find((node) => node.variant === you.name) ?? null) : null;
+  const solo = audiences.length === 1 && you !== null && requiredQuorum <= 1;
+  // The person's own proceed is the one still owed: their click records it
+  // on the way to approving, as a sole stakeholder's does (#896).
+  const ownDecides = own !== null && ownProceedDecides(workflowView?.stage5Quorum ?? null, you?.name ?? null);
+  const oneClick = solo || ownDecides;
   const waiting = Math.max(requiredQuorum - proceeded, 0);
+  // A quorum_not_met refusal is what the person's own proceed cures, so it
+  // is not repeated as the reason while that proceed is theirs to give.
   const reason =
-    (approveReason ? approveReasonText(approveReason, lastRefusal) : null) ??
+    (approveReason && !(ownDecides && approveReason === "quorum_not_met") ? approveReasonText(approveReason, lastRefusal) : null) ??
     (quorumMet
       ? null
-      : blockedBy.length > 0
+      : ownDecides
+        ? "Your proceed is the one still needed. Approving records it."
+        : blockedBy.length > 0
         ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
         : staleBy.length > 0
           ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
           : `Waiting for ${waiting} stakeholder${waiting === 1 ? "" : "s"} to proceed.`);
 
   const proceedAndApprove = async () => {
-    const own = packages[0]!;
-    if (!own.variant) return;
+    if (!own?.variant) {
+      setError("Your package has not been written yet.");
+      return;
+    }
     setProceeding(true);
     setError(null);
     try {
@@ -1139,8 +1153,8 @@ export function AudienceGate({
         <Button
           variant="ghost"
           loading={approving || proceeding}
-          disabled={!canApprove || (!solo && !quorumMet)}
-          onClick={solo ? () => void proceedAndApprove() : onApprove}
+          disabled={!canApprove || (!oneClick && !quorumMet)}
+          onClick={oneClick ? () => void proceedAndApprove() : onApprove}
         >
           <Check aria-hidden="true" />
           Approve and continue
