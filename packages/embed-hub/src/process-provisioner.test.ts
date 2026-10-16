@@ -254,11 +254,8 @@ describe("process provisioner", () => {
   }, 10_000);
 });
 
+/** The provisioner's own probe: `kill(pid, 0)` would also answer for a
+ *  zombie the test process has not reaped yet (#898). */
 function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return processStartedAt(pid) !== null;
 }
