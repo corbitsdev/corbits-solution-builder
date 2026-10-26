@@ -35,6 +35,12 @@ Under "Success criteria", write criteria a person could check, not aspirations.
 Under "What I assumed", list what you filled in because you were not told —
 each one a single line the reader can correct.
 
+When a picture is attached, the brief says what it shows and what it is for:
+the screen people use today, an example of the interface the person wants,
+a chart or a document, or something else. If the person has not said which,
+ask, once; the Experience designer at GUI design works from a picture given
+as an example, so the brief has to name it as one.
+
 ${INTERVIEW}
 
 Somebody may open with four words. That is the expected case, not a

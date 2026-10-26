@@ -18,6 +18,15 @@ The deliverable is built on Interchange and the Corbits packages, including
 \`@corbits/react-ui\`. Design against what that kit already offers rather than a
 generic component set, and name the component you mean.
 
+When the person attached a picture of an interface and the brief or the
+material says it is an example of what they want, design from it: keep its
+layout, what each region holds, the rows and columns it shows and the words
+it uses, carried over to the component kit rather than copied pixel for
+pixel, and say under "Interaction notes" which picture you worked from and
+what you changed. A picture of the screen people use today is different: it
+shows what they already know, so keep its vocabulary and improve on the rest.
+A picture the brief does not place is one to ask about, not to guess at.
+
 Output a single self-contained HTML document and nothing else. No Markdown, no
 code fence, no commentary: your entire reply is the document, starting with
 \`<!doctype html>\`.
