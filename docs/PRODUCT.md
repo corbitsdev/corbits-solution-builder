@@ -64,11 +64,14 @@ each specialist revising its current document. The history is kept.
 The person can hand a specialist more than a description: a document, a
 spreadsheet or an image can be attached to the problem as it is written up.
 Text, spreadsheets and the text of PDFs, PowerPoint files and Word (.docx)
-files are read and given to the specialist that reads the record; an image,
-a scanned PDF or the older binary Word file is kept with the project but not
-read — the specialist says so, rather than pretending it saw what it did not.
-A file attached once a stage's conversation is under way is sent to that
-stage's specialist as soon as it is free.
+files are read and given to the specialist that reads the record; a picture
+(PNG, JPEG, GIF or WebP) goes to the specialist as a picture, for it to look
+at, and a screenshot given as an example of the interface is what the
+Experience designer designs from at GUI design; a scanned PDF or the older
+binary Word file is kept with the project but not read — the specialist says
+so, rather than pretending it saw what it did not. A file attached once a
+stage's conversation is under way is sent to that stage's specialist as soon
+as it is free.
 
 ## Stage 5: a package and a deck per stakeholder
 

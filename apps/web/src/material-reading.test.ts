@@ -77,10 +77,20 @@ describe("readMaterial", () => {
   });
 
   test("an unreadable type yields a short note with name, type and size", async () => {
+    const { text } = await readMaterial({ name: "old.doc", mediaType: "application/msword", bytes: new Uint8Array(10) });
+    expect(text).toContain("old.doc");
+    expect(text).toContain("application/msword");
+    expect(text).toContain("Nothing here reads this kind of file yet");
+    expect(readingHasText(text)).toBe(false);
+  });
+
+  test("an image's note says the picture itself rides with the mail, not that it cannot be read (#915)", async () => {
     const { text } = await readMaterial({ name: "photo.png", mediaType: "image/png", bytes: new Uint8Array(10) });
     expect(text).toContain("photo.png");
     expect(text).toContain("image/png");
-    expect(text).toContain("Nothing here reads this kind of file yet");
+    expect(text).toContain("The picture itself goes to the specialist");
+    expect(text).not.toContain("Nothing here reads");
+    expect(readingHasText(text)).toBe(false);
   });
 
   test("a row-cap overflow announces truncation rather than dropping rows silently", async () => {
