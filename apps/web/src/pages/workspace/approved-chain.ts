@@ -24,7 +24,10 @@ import { isHtmlDocument } from "./guidance.ts";
 import { OPENING_VARIANT } from "../../project-list.ts";
 import { importedHistory, importedHistoryNodes } from "./imported-history.ts";
 
-export type ChainNode = Pick<ArtifactNode, "id" | "kind" | "stage" | "title" | "artifactId" | "version" | "variant" | "supersededByNodeId" | "createdAt" | "mediaType">;
+export type ChainNode = Pick<
+  ArtifactNode,
+  "id" | "kind" | "stage" | "title" | "artifactId" | "version" | "variant" | "supersededByNodeId" | "createdAt" | "mediaType" | "sizeBytes"
+>;
 
 /** The lines the chain opens and closes with; the transcript folds between them. */
 export const CHAIN_LEAD = "What was approved before this stage, and what the person provided:";
@@ -42,13 +45,49 @@ function isTextMaterial(node: ChainNode): boolean {
   return mediaType.startsWith("text/") || mediaType === "application/json";
 }
 
+/** The picture types a specialist can be shown: what the material picker accepts. */
+const IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/**
+ * A picture the person attached (#915). It is handed over as itself too,
+ * but as bytes riding with the mail rather than as text in it: the mail
+ * names it with `imageMarker`, and the hub attaches the file where the
+ * marker stands. Its reading beside it only ever said it could not be
+ * read, so that stays out of the record.
+ */
+export function isImageMaterial(node: ChainNode): boolean {
+  return node.kind === MATERIAL_KIND && node.variant !== OPENING_VARIANT && IMAGE_MEDIA_TYPES.has(node.mediaType ?? "");
+}
+
+/**
+ * How a mail names a picture that is to ride with it. The hub's mailbox
+ * bridge (`packages/embed-hub/src/mailbox-send.ts`, `ATTACH_MARKER`) reads
+ * the same form, attaches the file, and takes the marker out of the text
+ * the specialist reads.
+ */
+export function imageMarker(nodeId: string): string {
+  return `[attach:${nodeId}]`;
+}
+
+/** What stands in the record for a picture: a note of what rides with the mail, and where. */
+export function imageHandNote(node: ChainNode): string {
+  const size = node.sizeBytes === undefined ? "" : `, ${Math.max(1, Math.ceil(node.sizeBytes / 1024))} KB`;
+  return `(A picture, ${node.mediaType ?? "image"}${size}, attached to this message for you to look at.) ${imageMarker(node.id)}`;
+}
+
 /**
  * What a specialist is handed of the files a person attached, oldest
- * first: each text file as itself, and the reading of each other file.
+ * first: each text file as itself, each picture as itself, and the
+ * reading of each other file.
  */
 export function attachedMaterialNodes(nodes: readonly ChainNode[]): ChainNode[] {
-  return nodes
-    .filter((node) => node.supersededByNodeId === null && (node.kind === MATERIAL_READING_KIND || isTextMaterial(node)))
+  const live = nodes.filter((node) => node.supersededByNodeId === null);
+  const pictures = new Set(live.filter(isImageMaterial).map((node) => node.variant));
+  return live
+    .filter(
+      (node) =>
+        (node.kind === MATERIAL_READING_KIND && !pictures.has(node.variant)) || isTextMaterial(node) || isImageMaterial(node),
+    )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -119,11 +158,16 @@ export function splitChain(text: string): { readonly before: string; readonly ch
 
 /**
  * Reads each node's content as it is handed over. A node whose content
- * cannot be read is left out rather than invented.
+ * cannot be read is left out rather than invented. A picture is not read
+ * here at all: the hub attaches its bytes where its note stands.
  */
 export async function readHandedItems(tenantId: string, nodes: readonly ChainNode[]): Promise<Inputs> {
   const items: Inputs = [];
   for (const node of nodes) {
+    if (isImageMaterial(node)) {
+      items.push({ node: { id: node.id, title: node.title, kind: node.kind, stage: node.stage }, content: imageHandNote(node) });
+      continue;
+    }
     try {
       const { content } = await api.artifactContent(tenantId, node.id);
       if (!content.trim()) continue;

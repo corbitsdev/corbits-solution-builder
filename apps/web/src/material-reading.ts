@@ -365,9 +365,11 @@ async function wordText(bytes: Uint8Array): Promise<string> {
  * What can be read of one attached file: text of any kind as it is; a
  * spreadsheet, modern or the older binary kind, as one block per sheet; a
  * PDF as its text, page by page; a PowerPoint file as its slides' text; a
- * Word (.docx) file as its text; an image, the older binary Word file, or
- * anything else nothing here reads yet, by name, type and size only — a prompt that claims to have read something it has
- * not is worse than one that says so.
+ * Word (.docx) file as its text; an image by name, type and size, with a
+ * note that the picture itself rides with the mail that hands it over
+ * (#915, `approved-chain.ts`); the older binary Word file, or anything else
+ * nothing here reads yet, by name, type and size only — a prompt that
+ * claims to have read something it has not is worse than one that says so.
  */
 export async function readMaterial(input: MaterialInput): Promise<{ text: string }> {
   const { name, mediaType, bytes } = input;
@@ -389,6 +391,10 @@ export async function readMaterial(input: MaterialInput): Promise<{ text: string
   if (isDocx(name, mediaType)) {
     return { text: capMaterialText(await wordText(bytes)) };
   }
-  const what = mediaType.startsWith("image/") ? "An image" : "A file";
-  return { text: describe(name, mediaType, bytes.byteLength, what) };
+  if (mediaType.startsWith("image/")) {
+    return {
+      text: `(An image attached: ${name}, ${mediaType}, ${Math.ceil(bytes.byteLength / 1024)} KB. The picture itself goes to the specialist with the message that hands it over, for it to look at.)`,
+    };
+  }
+  return { text: describe(name, mediaType, bytes.byteLength, "A file") };
 }

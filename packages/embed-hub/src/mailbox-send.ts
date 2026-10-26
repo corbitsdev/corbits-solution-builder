@@ -33,6 +33,72 @@ function frameBody(raw: Uint8Array): string {
   return split < 0 ? "" : text.slice(split + 4).trimEnd();
 }
 
+/**
+ * How a person's mail names a picture that is to ride with it (#915). The
+ * mailbox send route carries text only, so the client writes
+ * `[attach:<artifact id>]` into the body for each attached image, and this
+ * bridge turns each into a real attachment on the run trigger. The web
+ * client's `imageMarker` (`approved-chain.ts`) writes the same form.
+ */
+export const ATTACH_MARKER = /\s*\[attach:([^\]\s]+)\]/g;
+
+/** Image types a model can be shown; what the material picker accepts. */
+const ATTACHABLE_IMAGE_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+type TriggerAttachment = { mimeType: string; data: string; name: string };
+
+/** The markers taken out of the text the run reads, and the artifacts they name, each once. */
+export function takeAttachMarkers(content: string): { text: string; artifactIds: string[] } {
+  const artifactIds: string[] = [];
+  const text = content.replace(ATTACH_MARKER, (_whole, id: string) => {
+    if (!artifactIds.includes(id)) artifactIds.push(id);
+    return "";
+  });
+  return { text, artifactIds };
+}
+
+/** The filename a `Content-Disposition` header names, or null. */
+function dispositionFilename(header: string | null): string | null {
+  if (header === null) return null;
+  const encoded = /filename\*=(?:UTF-8|utf-8)''([^;]+)/.exec(header)?.[1];
+  if (encoded !== undefined) {
+    try {
+      return decodeURIComponent(encoded.trim());
+    } catch {
+      return null;
+    }
+  }
+  const quoted = /filename="([^"]*)"/.exec(header)?.[1] ?? /filename=([^;]+)/.exec(header)?.[1];
+  return quoted === undefined ? null : quoted.trim();
+}
+
+/**
+ * One marked artifact's bytes, read the way the person's own browser reads
+ * them: the artifacts download route, under the caller's own session, so a
+ * picture another tenant owns is a 404 here as it is there. Anything that is
+ * not an image a model can be shown is refused, never silently left out: a
+ * mail that says a picture is attached must carry it.
+ */
+async function readImageAttachment(
+  app: MailboxDeliverOpts["app"],
+  tenantId: string,
+  headers: Headers,
+  artifactId: string,
+): Promise<TriggerAttachment> {
+  const path = `/api/tenants/${encodeURIComponent(tenantId)}/artifacts/${encodeURIComponent(artifactId)}/download`;
+  const response = await app.request(path, { method: "GET", headers });
+  if (!response.ok) {
+    throw new Error(`the picture ${artifactId} could not be read to attach it (${String(response.status)})`);
+  }
+  const mimeType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (!ATTACHABLE_IMAGE_TYPES.has(mimeType)) {
+    throw new Error(`the attachment ${artifactId} is ${mimeType || "of unknown type"}, not a picture a specialist can be shown`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const name = (dispositionFilename(response.headers.get("content-disposition")) ?? artifactId).replace(/["\r\n]/g, "");
+  return { mimeType, data: Buffer.from(bytes).toString("base64"), name };
+}
+
 export type MailboxDeliverOpts = {
   /** The hub app itself — the trigger runs through its real route stack,
    * middleware and grants included. */
@@ -131,27 +197,41 @@ export function createMailboxDeliver(
         throw new Error("mailbox deliver ran outside a mailbox request");
       }
       const tenantId = c.req.param("tenantId") ?? "";
-      const headers = new Headers({ "content-type": "application/json" });
+      const session = new Headers();
       for (const name of ["cookie", "authorization"]) {
         const value = c.req.header(name);
-        if (value !== undefined) headers.set(name, value);
+        if (value !== undefined) session.set(name, value);
       }
-      const content = frameBody(message.raw);
+      const headers = new Headers(session);
+      headers.set("content-type", "application/json");
+      // A send the run never receives must not leave its Sent copy looking
+      // sent (#61), whether the trigger refused it or a picture it names
+      // could not be attached.
+      const withdraw = async () => {
+        const scope = mailboxScope(c);
+        if (!scope) return;
+        await withdrawSentCopy(opts.db, scope, message.messageId, opts.bus).catch((cause: unknown) => {
+          console.error(`mailbox send: could not withdraw the Sent copy of ${message.messageId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        });
+      };
+      const { text: content, artifactIds } = takeAttachMarkers(frameBody(message.raw));
+      let attachments: TriggerAttachment[];
+      try {
+        attachments = await Promise.all(artifactIds.map((artifactId) => readImageAttachment(opts.app, tenantId, session, artifactId)));
+      } catch (cause) {
+        await withdraw();
+        throw cause;
+      }
       for (const runId of runs) {
         const path = `/api/tenants/${encodeURIComponent(tenantId)}/workflows/${encodeURIComponent(runId)}/mail`;
         const response = await opts.app.request(path, {
           method: "POST",
           headers,
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, ...(attachments.length > 0 ? { attachments } : {}) }),
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => "");
-          const scope = mailboxScope(c);
-          if (scope) {
-            await withdrawSentCopy(opts.db, scope, message.messageId, opts.bus).catch((cause: unknown) => {
-              console.error(`mailbox send: could not withdraw the Sent copy of ${message.messageId}: ${cause instanceof Error ? cause.message : String(cause)}`);
-            });
-          }
+          await withdraw();
           throw new Error(`trigger for ${runId} answered ${String(response.status)}: ${detail}`);
         }
         // The hub mints its own Message-ID for the mail it delivers to the

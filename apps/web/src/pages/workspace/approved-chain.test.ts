@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { approvedChainNodes, chainContent, chainNodeIds, handedContent, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
+import { approvedChainNodes, attachedMaterialNodes, chainContent, chainNodeIds, handedContent, imageHandNote, imageMarker, isImageMaterial, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../../project-import.ts";
 
 const node = (over: Partial<ChainNode> & Pick<ChainNode, "id" | "kind" | "stage">): ChainNode => ({
@@ -69,7 +69,7 @@ describe("approvedChainNodes, attached text files (#605)", () => {
 
   test("a binary upload is never handed as itself, and neither is a file of unknown type", () => {
     const nodes = [
-      node({ id: "upload", kind: "source_material", stage: 1, variant: "scan.png", mediaType: "image/png" }),
+      node({ id: "upload", kind: "source_material", stage: 1, variant: "scan.pdf", mediaType: "application/pdf" }),
       node({ id: "untyped", kind: "source_material", stage: 1, variant: "old.bin" }),
     ];
     expect(approvedChainNodes(nodes, {}, 2)).toEqual([]);
@@ -154,5 +154,45 @@ describe("chainContent", () => {
   test("a design goes as its text, a document as it is", () => {
     expect(chainContent("<!doctype html><html><body><h1>Home</h1><p>Hello</p></body></html>")).toContain("# Home");
     expect(chainContent("## In short\n- fine")).toBe("## In short\n- fine");
+  });
+});
+
+// #915: a picture is handed over as itself, riding with the mail as bytes
+// the hub attaches where its note stands; the reading beside it only ever
+// said the picture could not be read, so it stays out of the record.
+describe("attached pictures (#915)", () => {
+  const shot = node({ id: "shot", kind: "source_material", stage: 1, variant: "shot.png", mediaType: "image/png", sizeBytes: 120_000, createdAt: "2026-01-01T00:00:01.000Z" });
+  const shotReading = node({ id: "shot-reading", kind: "material_reading", stage: 1, variant: "shot.png", mediaType: "text/plain", createdAt: "2026-01-01T00:00:02.000Z" });
+  const deck = node({ id: "deck", kind: "source_material", stage: 1, variant: "deck.pdf", mediaType: "application/pdf", createdAt: "2026-01-01T00:00:03.000Z" });
+  const deckReading = node({ id: "deck-reading", kind: "material_reading", stage: 1, variant: "deck.pdf", mediaType: "text/plain", createdAt: "2026-01-01T00:00:04.000Z" });
+
+  test("a PNG, JPEG, GIF or WebP upload is a picture; the opening statement and other uploads are not", () => {
+    for (const mediaType of ["image/png", "image/jpeg", "image/gif", "image/webp"]) {
+      expect(isImageMaterial(node({ id: "p", kind: "source_material", stage: 1, variant: "p", mediaType }))).toBe(true);
+    }
+    expect(isImageMaterial(node({ id: "o", kind: "source_material", stage: 1, variant: "__opening__", mediaType: "image/png" }))).toBe(false);
+    expect(isImageMaterial(deck)).toBe(false);
+    expect(isImageMaterial(node({ id: "heic", kind: "source_material", stage: 1, variant: "p.heic", mediaType: "image/heic" }))).toBe(false);
+  });
+
+  test("the picture goes in the record itself and its reading stays out; a PDF still goes as its reading", () => {
+    expect(attachedMaterialNodes([shot, shotReading, deck, deckReading]).map((entry) => entry.id)).toEqual(["shot", "deck-reading"]);
+    expect(approvedChainNodes([shot, shotReading, deck, deckReading], {}, 1).map((entry) => entry.id)).toEqual(["shot", "deck-reading"]);
+  });
+
+  test("a replaced picture is not handed, and neither is the reading that was beside it", () => {
+    const old = node({ ...shot, id: "shot-v1", supersededByNodeId: "shot" });
+    expect(attachedMaterialNodes([old, shot, shotReading]).map((entry) => entry.id)).toEqual(["shot"]);
+  });
+
+  test("a picture's note says what rides with the mail and names the file for the hub to attach", () => {
+    expect(imageHandNote(shot)).toBe("(A picture, image/png, 118 KB, attached to this message for you to look at.) [attach:shot]");
+    expect(imageHandNote(node({ id: "shot", kind: "source_material", stage: 1, variant: "shot.png", mediaType: "image/png" }))).toBe("(A picture, image/png, attached to this message for you to look at.) [attach:shot]");
+    expect(imageMarker("art_1")).toBe("[attach:art_1]");
+  });
+
+  test("the record labels the picture as material the person provided, under its file name", () => {
+    const text = renderApprovedChain([{ node: { id: shot.id, title: shot.title, kind: shot.kind, stage: shot.stage }, content: imageHandNote(shot) }], 1);
+    expect(text).toContain(`--- MATERIAL THE PERSON PROVIDED: shot ---\n(A picture, image/png, 118 KB, attached to this message for you to look at.) ${imageMarker("shot")}`);
   });
 });
